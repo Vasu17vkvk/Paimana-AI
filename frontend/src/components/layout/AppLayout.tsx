@@ -8,6 +8,7 @@ export default function AppLayout() {
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
 
+    // Close mobile sidebar when switching to desktop
     useEffect(() => {
         const handleResize = () => {
             if (window.innerWidth >= 768) {
@@ -22,9 +23,18 @@ export default function AppLayout() {
         };
     }, []);
 
+    // Close mobile sidebar after navigation
+    const handleNavigate = () => {
+        if (window.innerWidth < 768) {
+            setMobileOpen(false);
+        }
+    };
+
     return (
         <div className="min-h-screen bg-slate-50">
-            {/* Mobile overlay */}
+            {/* =========================
+          MOBILE OVERLAY
+      ========================== */}
             {mobileOpen && (
                 <button
                     type="button"
@@ -34,7 +44,9 @@ export default function AppLayout() {
                 />
             )}
 
-            {/* Sidebar */}
+            {/* =========================
+          SIDEBAR
+      ========================== */}
             <div
                 className={[
                     "fixed inset-y-0 left-0 z-50",
@@ -49,10 +61,13 @@ export default function AppLayout() {
                     onToggle={() =>
                         setCollapsed((current) => !current)
                     }
+                    onNavigate={handleNavigate}
                 />
             </div>
 
-            {/* Main */}
+            {/* =========================
+          MAIN CONTENT
+      ========================== */}
             <div
                 className={[
                     "min-h-screen transition-[margin] duration-200",

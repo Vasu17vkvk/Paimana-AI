@@ -5,11 +5,13 @@ import { navigationSections } from "../../app/navigation";
 interface SidebarProps {
     collapsed: boolean;
     onToggle: () => void;
+    onNavigate?: () => void;
 }
 
 export default function Sidebar({
     collapsed,
     onToggle,
+    onNavigate,
 }: SidebarProps) {
     return (
         <aside
@@ -17,12 +19,12 @@ export default function Sidebar({
                 "flex h-screen flex-col",
                 "border-r border-slate-800",
                 "bg-slate-950 text-white",
-                collapsed
-                    ? "w-[76px]"
-                    : "w-[256px]",
+                collapsed ? "w-[76px]" : "w-[256px]",
             ].join(" ")}
         >
-            {/* Brand */}
+            {/* =========================
+          BRAND
+      ========================== */}
             <div className="flex h-[76px] shrink-0 items-center border-b border-white/10 px-5">
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-sm font-extrabold text-slate-900">
@@ -43,7 +45,9 @@ export default function Sidebar({
                 </div>
             </div>
 
-            {/* Navigation */}
+            {/* =========================
+          NAVIGATION
+      ========================== */}
             <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-5">
                 {navigationSections.map((section, index) => (
                     <div
@@ -63,11 +67,8 @@ export default function Sidebar({
                                 <NavLink
                                     key={item.path}
                                     to={item.path}
-                                    title={
-                                        collapsed
-                                            ? item.label
-                                            : undefined
-                                    }
+                                    title={collapsed ? item.label : undefined}
+                                    onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
                                             "mb-1 flex h-10 items-center gap-3 rounded-lg",
@@ -81,7 +82,10 @@ export default function Sidebar({
                                         ].join(" ")
                                     }
                                 >
-                                    <Icon size={18} strokeWidth={1.8} />
+                                    <Icon
+                                        size={18}
+                                        strokeWidth={1.8}
+                                    />
 
                                     {!collapsed && (
                                         <span className="truncate">
@@ -95,8 +99,10 @@ export default function Sidebar({
                 ))}
             </nav>
 
-            {/* Bottom */}
-            <div className="border-t border-white/10 p-3">
+            {/* =========================
+          FIXED BOTTOM CONTROL
+      ========================== */}
+            <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/10 bg-slate-950 p-3">
                 <button
                     type="button"
                     onClick={onToggle}
@@ -107,7 +113,7 @@ export default function Sidebar({
                         collapsed ? "" : "gap-2",
                     ].join(" ")}
                 >
-                    <span>
+                    <span className="text-sm">
                         {collapsed ? "→" : "←"}
                     </span>
 
