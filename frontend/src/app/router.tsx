@@ -5,6 +5,8 @@ import {
 import AppLayout from "../components/layout/AppLayout";
 import DashboardPage from "../features/dashboard/DashboardPage";
 
+import NotificationsPage from "../features/early-warnings/NotificationsPage";
+
 function ModulePlaceholder({
     title,
 }: {
@@ -35,6 +37,12 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
 
         children: [
+
+            {
+                path: "notifications",
+                element: <NotificationsPage />,
+            },
+
             {
                 index: true,
                 element: <DashboardPage />,

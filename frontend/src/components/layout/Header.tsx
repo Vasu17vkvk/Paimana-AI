@@ -4,6 +4,9 @@ import {
     Search,
 } from "lucide-react";
 
+import { useNavigate } from "react-router-dom";
+
+
 interface HeaderProps {
     onMobileMenu: () => void;
 }
@@ -11,6 +14,7 @@ interface HeaderProps {
 export default function Header({
     onMobileMenu,
 }: HeaderProps) {
+    const navigate = useNavigate();
     return (
         <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-3 backdrop-blur sm:h-[76px] sm:px-5 lg:px-7">
             {/* Left */}
@@ -47,6 +51,9 @@ export default function Header({
                 <button
                     type="button"
                     aria-label="Notifications"
+                    onClick={() =>
+                        navigate("/notifications")
+                    }
                     className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
                 >
                     <Bell size={18} />

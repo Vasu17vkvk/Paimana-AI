@@ -142,3 +142,92 @@ button {
         margin-left: 0;
     }
 }
+
+/* =========================================================
+   PAIMANA CUSTOM SCROLLBARS
+========================================================= */
+
+/* Sidebar navigation */
+.paimana-sidebar nav {
+    overflow-y: auto !important;
+
+    /* Firefox */
+    scrollbar-width: thin !important;
+    scrollbar-color: #3b82f6 #ffffff !important;
+}
+
+/* Chrome / Edge / Safari */
+.paimana-sidebar nav::-webkit-scrollbar {
+    width: 7px !important;
+    height: 7px !important;
+}
+
+.paimana-sidebar nav::-webkit-scrollbar-track {
+    background: #ffffff !important;
+    border-radius: 999px !important;
+}
+
+.paimana-sidebar nav::-webkit-scrollbar-thumb {
+    background: #3b82f6 !important;
+    border-radius: 999px !important;
+    border: 1px solid #ffffff !important;
+    min-height: 40px !important;
+}
+
+.paimana-sidebar nav::-webkit-scrollbar-thumb:hover {
+    background: #2563eb !important;
+}
+
+.paimana-sidebar nav::-webkit-scrollbar-button {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+.paimana-sidebar nav::-webkit-scrollbar-corner {
+    background: #ffffff !important;
+}
+
+
+/* =========================================================
+   MAIN PAGE SCROLLBAR
+========================================================= */
+
+html {
+    scrollbar-width: thin !important;
+    scrollbar-color: #010a35ee #ffffff !important;
+}
+
+body {
+    scrollbar-width: thin !important;
+    scrollbar-color: #010a35ee #ffffff !important;
+}
+
+body::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+}
+
+body::-webkit-scrollbar-track {
+    background: #ffffff !important;
+}
+
+body::-webkit-scrollbar-thumb {
+    background: #010a35ee !important;
+    border-radius: 999px !important;
+    border: 2px solid #ffffff !important;
+}
+
+body::-webkit-scrollbar-thumb:hover {
+    background: #010a35ee !important;
+}
+
+body::-webkit-scrollbar-button {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+body::-webkit-scrollbar-corner {
+    background: #ffffff !important;
+}

@@ -19,7 +19,7 @@ export default function Sidebar({
                 "flex h-screen flex-col",
                 "border-r border-slate-800",
                 "bg-slate-950 text-white",
-                collapsed ? "w-[76px]" : "w-[256px]",
+                collapsed ? "w-[68px]" : "w-[220px]",
             ].join(" ")}
         >
             {/* =========================
