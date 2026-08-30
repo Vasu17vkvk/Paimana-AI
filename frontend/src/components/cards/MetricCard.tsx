@@ -43,7 +43,7 @@ export default function MetricCard({
                     {label}
                 </div>
 
-                <div className="mt-1 text-3xl font-bold tracking-[-0.04em] text-slate-900">
+                <div className="mt-1 text-2xl font-bold tracking-[-0.04em] text-slate-900 sm:text-3xl">
                     {value}
                 </div>
 

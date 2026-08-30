@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 
 import Header from "./Header";
@@ -8,12 +8,40 @@ export default function AppLayout() {
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
 
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth >= 768) {
+                setMobileOpen(false);
+            }
+        };
+
+        window.addEventListener("resize", handleResize);
+
+        return () => {
+            window.removeEventListener("resize", handleResize);
+        };
+    }, []);
+
     return (
-        <div className="paimana-app">
+        <div className="min-h-screen bg-slate-50">
+            {/* Mobile overlay */}
+            {mobileOpen && (
+                <button
+                    type="button"
+                    aria-label="Close navigation"
+                    onClick={() => setMobileOpen(false)}
+                    className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[1px] md:hidden"
+                />
+            )}
+
+            {/* Sidebar */}
             <div
                 className={[
                     "fixed inset-y-0 left-0 z-50",
-                    mobileOpen ? "block" : "hidden md:block",
+                    "transition-transform duration-200 ease-out",
+                    mobileOpen
+                        ? "translate-x-0"
+                        : "-translate-x-full md:translate-x-0",
                 ].join(" ")}
             >
                 <Sidebar
@@ -24,28 +52,20 @@ export default function AppLayout() {
                 />
             </div>
 
-            {mobileOpen && (
-                <button
-                    type="button"
-                    aria-label="Close navigation"
-                    onClick={() => setMobileOpen(false)}
-                    className="fixed inset-0 z-40 bg-slate-950/30 md:hidden"
-                />
-            )}
-
+            {/* Main */}
             <div
                 className={[
-                    "paimana-main",
+                    "min-h-screen transition-[margin] duration-200",
                     collapsed
-                        ? "paimana-main-expanded"
-                        : "",
+                        ? "md:ml-[76px]"
+                        : "md:ml-[256px]",
                 ].join(" ")}
             >
                 <Header
                     onMobileMenu={() => setMobileOpen(true)}
                 />
 
-                <main className="px-4 py-6 sm:px-6 lg:px-8">
+                <main className="px-3 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-7">
                     <Outlet />
                 </main>
             </div>

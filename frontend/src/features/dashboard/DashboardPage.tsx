@@ -190,7 +190,7 @@ export default function DashboardPage() {
 
             {/* Projects */}
             <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                <div className="flex items-start justify-between px-5 py-5">
+                <div className="flex flex-col gap-3 px-4 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-5">
                     <div>
                         <h2 className="text-sm font-bold text-slate-900">
                             Highest Risk Projects
