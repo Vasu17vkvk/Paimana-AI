@@ -3,13 +3,10 @@ import {
     ArrowRight,
     Bell,
     CheckCheck,
-    Clock3,
-    DollarSign,
-    Filter,
     Info,
     Search,
     ShieldAlert,
-    TrendingDown,
+
     X,
 } from "lucide-react";
 
