@@ -1,0 +1,1 @@
+# Route package for PAIMANA AI API.

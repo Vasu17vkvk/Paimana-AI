@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+:root {
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    color: #0f172a;
+    background: #f8fafc;
+
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+}
+
+body {
+    min-height: 100vh;
+    background: #f8fafc;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+/* ==============================
+   PAIMANA DESIGN TOKENS
+================================= */
+
+:root {
+    --paimana-background: #f8fafc;
+    --paimana-surface: #ffffff;
+    --paimana-border: #e2e8f0;
+
+    --paimana-text: #0f172a;
+    --paimana-text-secondary: #475569;
+    --paimana-text-muted: #94a3b8;
+
+    --paimana-sidebar: #0f172a;
+    --paimana-sidebar-hover: #1e293b;
+
+    --paimana-success: #16a34a;
+    --paimana-warning: #f59e0b;
+    --paimana-danger: #dc2626;
+    --paimana-info: #2563eb;
+}
+
+/* ==============================
+   APPLICATION
+================================= */
+
+.paimana-app {
+    min-height: 100vh;
+    background: var(--paimana-background);
+}
+
+/* ==============================
+   SIDEBAR
+================================= */
+
+.paimana-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+
+    z-index: 50;
+
+    width: 256px;
+    height: 100vh;
+
+    display: flex;
+    flex-direction: column;
+
+    background: var(--paimana-sidebar);
+
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+
+    transition:
+        width 180ms ease,
+        transform 180ms ease;
+}
+
+.paimana-sidebar-collapsed {
+    width: 76px;
+}
+
+/* ==============================
+   CONTENT AREA
+================================= */
+
+.paimana-main {
+    min-height: 100vh;
+
+    margin-left: 256px;
+
+    transition: margin-left 180ms ease;
+}
+
+.paimana-main-expanded {
+    margin-left: 76px;
+}
+
+/* ==============================
+   MOBILE
+================================= */
+
+@media (max-width: 768px) {
+    .paimana-sidebar {
+        width: 256px;
+
+        transform: translateX(-100%);
+    }
+
+    .paimana-sidebar-mobile-open {
+        transform: translateX(0);
+    }
+
+    .paimana-main,
+    .paimana-main-expanded {
+        margin-left: 0;
+    }
+}
