@@ -11,6 +11,7 @@ def create_app() -> Flask:
     app.config.from_object(DevelopmentConfig)
 
     db.init_app(app)
+
     from app.models.project import Project
     from app.models.risk import RiskTrainingData
 
@@ -18,7 +19,10 @@ def create_app() -> Flask:
         app,
         resources={
             r"/api/*": {
-                "origins": ["http://localhost:5173"]
+                "origins": [
+                    "http://localhost:5173",
+                    "https://paimana-ai-two.vercel.app",
+                ]
             }
         }
     )
@@ -31,7 +35,6 @@ def create_app() -> Flask:
     from app.routes.early_warnings import early_warnings_bp
     from app.routes.analytics import analytics_bp
     from app.routes.ml_risk import ml_risk_bp
-  
 
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(projects_bp, url_prefix="/api")
@@ -41,5 +44,9 @@ def create_app() -> Flask:
     app.register_blueprint(early_warnings_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(ml_risk_bp, url_prefix="/api")
+
+    # Create database tables automatically on deployment/startup
+    with app.app_context():
+        db.create_all()
 
     return app
