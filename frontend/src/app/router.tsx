@@ -14,6 +14,11 @@ import EarlyWarningsPage from "../features/early-warnings/EarlyWarningsPage";
 import CostPredictionPage from "../features/cost-prediction/CostPredictionPage";
 import DelayPredictionPage from "../features/delay-prediction/DelayPredictionPage";
 
+import SectorMinistryAnalyticsPage
+  from "../features/ministry-analytics/SectorMinistryAnalyticsPage";
+
+import ProjectAnalyticsPage from "../features/project-analytics/ProjectAnalyticsPage";  
+
 function ModulePlaceholder({
     title,
 }: {
@@ -77,16 +82,12 @@ export const router = createBrowserRouter([
 
             {
                 path: "project-analytics",
-                element: (
-                    <ModulePlaceholder title="Project Analytics" />
-                ),
+                element: <ProjectAnalyticsPage />,
             },
 
             {
                 path: "ministry-analytics",
-                element: (
-                    <ModulePlaceholder title="Sector / Ministry Analytics" />
-                ),
+                element: <SectorMinistryAnalyticsPage />,
             },
 
             {
@@ -109,6 +110,7 @@ export const router = createBrowserRouter([
                     <ModulePlaceholder title="Reports" />
                 ),
             },
+            
         ],
     },
 ]);
