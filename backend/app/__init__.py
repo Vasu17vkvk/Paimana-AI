@@ -25,6 +25,7 @@ def create_app() -> Flask:
         resources={
             r"/api/*": {
                 "origins": [
+                    "https://paimana-ai-two.vercel.app/"
                     "http://localhost:5173",
                 ]
             }
