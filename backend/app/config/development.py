@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class DevelopmentConfig:
@@ -9,3 +12,6 @@ class DevelopmentConfig:
         "SECRET_KEY",
         "paimana-ai-development-secret"
     )
+
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
