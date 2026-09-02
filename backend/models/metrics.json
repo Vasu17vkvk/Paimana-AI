@@ -1,0 +1,20 @@
+{
+  "delay_best": {
+    "model": "HistGradientBoosting",
+    "ROC_AUC": 0.930555,
+    "PR_AUC": 0.783663,
+    "F1": 0.716792
+  },
+  "ews_best_by_f1": {
+    "model": "Gradient Boosting",
+    "ROC_AUC": 0.861743,
+    "PR_AUC": 0.83633,
+    "F1": 0.77533
+  },
+  "cost_best_by_MAE": {
+    "model": "HistGradientBoosting",
+    "MAE": 10.5815,
+    "RMSE": 56.1932,
+    "R2": 0.625854
+  }
+}

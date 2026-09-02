@@ -25,7 +25,7 @@ export default function Sidebar({
             {/* =========================
           BRAND
       ========================== */}
-            <div className="flex h-[76px] shrink-0 items-center border-b border-white/10 px-5">
+            <div className="flex h-[76px] shrink-0 items-center border-b border-white/10 px-4">
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-sm font-extrabold text-slate-900">
                         P

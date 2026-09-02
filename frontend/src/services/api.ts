@@ -9,6 +9,7 @@ export async function apiRequest<T>(
         `${API_BASE_URL}${endpoint}`,
         {
             ...options,
+
             headers: {
                 "Content-Type": "application/json",
                 ...options?.headers,
@@ -17,9 +18,23 @@ export async function apiRequest<T>(
     );
 
     if (!response.ok) {
-        throw new Error(
-            `API request failed: ${response.status}`,
-        );
+        let message = `API request failed: ${response.status}`;
+
+        try {
+            const errorBody =
+                await response.json();
+
+            if (
+                typeof errorBody?.error ===
+                "string"
+            ) {
+                message = errorBody.error;
+            }
+        } catch {
+            // Keep default message.
+        }
+
+        throw new Error(message);
     }
 
     return response.json() as Promise<T>;

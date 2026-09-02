@@ -7,6 +7,13 @@ import DashboardPage from "../features/dashboard/DashboardPage";
 
 import NotificationsPage from "../features/early-warnings/NotificationsPage";
 
+import RiskAnalysisPage from "../features/risk-analysis/RiskAnalysisPage";
+
+import EarlyWarningsPage from "../features/early-warnings/EarlyWarningsPage";
+
+import CostPredictionPage from "../features/cost-prediction/CostPredictionPage";
+import DelayPredictionPage from "../features/delay-prediction/DelayPredictionPage";
+
 function ModulePlaceholder({
     title,
 }: {
@@ -50,30 +57,22 @@ export const router = createBrowserRouter([
 
             {
                 path: "risk-analysis",
-                element: (
-                    <ModulePlaceholder title="Risk Analysis" />
-                ),
+                element: <RiskAnalysisPage />,
             },
 
             {
                 path: "cost-prediction",
-                element: (
-                    <ModulePlaceholder title="Cost Overrun Prediction" />
-                ),
+                element: <CostPredictionPage />,
             },
 
             {
                 path: "delay-prediction",
-                element: (
-                    <ModulePlaceholder title="Delay Prediction" />
-                ),
+                element: <DelayPredictionPage />,
             },
 
             {
                 path: "early-warnings",
-                element: (
-                    <ModulePlaceholder title="Early Warnings" />
-                ),
+                element: <EarlyWarningsPage />,
             },
 
             {
