@@ -16,16 +16,9 @@ def create_app() -> Flask:
     from app.models.risk import RiskTrainingData
 
     CORS(
-        app,
-        resources={
-            r"/api/*": {
-                "origins": [
-                    "http://localhost:5173",
-                    "https://paimana-ai-two.vercel.app",
-                ]
-            }
-        }
-    )
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+)
 
     from app.routes.dashboard import dashboard_bp
     from app.routes.projects import projects_bp
