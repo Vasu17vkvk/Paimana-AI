@@ -45,7 +45,6 @@ def create_app() -> Flask:
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(ml_risk_bp, url_prefix="/api")
 
-    # Create database tables automatically on deployment/startup
     with app.app_context():
         db.create_all()
 
