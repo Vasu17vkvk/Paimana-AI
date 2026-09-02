@@ -1,35 +1,12 @@
-import {
-    createBrowserRouter,
-} from "react-router-dom";
+import { createBrowserRouter } from "react-router-dom";
 
 import AppLayout from "../components/layout/AppLayout";
 import DashboardPage from "../features/dashboard/DashboardPage";
-
 import NotificationsPage from "../features/early-warnings/NotificationsPage";
 
-function ModulePlaceholder({
-    title,
-}: {
-    title: string;
-}) {
-    return (
-        <div className="mx-auto max-w-[1500px]">
-            <div className="rounded-2xl border border-slate-200 bg-white p-8">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    PAIMANA AI
-                </div>
-
-                <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-                    {title}
-                </h1>
-
-                <p className="mt-2 text-sm text-slate-500">
-                    This module will be connected to the Flask API in the next stage.
-                </p>
-            </div>
-        </div>
-    );
-}
+import RiskAnalysisPage from "../features/risk-analysis/RiskAnalysisPage";
+import CostPredictionPage from "../features/cost-prediction/CostPredictionPage";
+import DelayPredictionPage from "../features/delay-prediction/DelayPredictionPage";
 
 export const router = createBrowserRouter([
     {
@@ -37,78 +14,64 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
 
         children: [
-
-            {
-                path: "notifications",
-                element: <NotificationsPage />,
-            },
-
+            // Dashboard
             {
                 index: true,
                 element: <DashboardPage />,
             },
 
+            // Notifications
+            {
+                path: "notifications",
+                element: <NotificationsPage />,
+            },
+
+            // Risk Analysis
             {
                 path: "risk-analysis",
-                element: (
-                    <ModulePlaceholder title="Risk Analysis" />
-                ),
+                element: <RiskAnalysisPage />,
             },
 
+            // Cost Overrun Prediction
             {
                 path: "cost-prediction",
-                element: (
-                    <ModulePlaceholder title="Cost Overrun Prediction" />
-                ),
+                element: <CostPredictionPage />,
             },
 
+            // Delay Prediction
             {
                 path: "delay-prediction",
-                element: (
-                    <ModulePlaceholder title="Delay Prediction" />
-                ),
+                element: <DelayPredictionPage />,
             },
 
+            // Early Warnings
             {
                 path: "early-warnings",
-                element: (
-                    <ModulePlaceholder title="Early Warnings" />
-                ),
+                element: <NotificationsPage />,
             },
 
+            // Project Analytics
             {
                 path: "project-analytics",
-                element: (
-                    <ModulePlaceholder title="Project Analytics" />
-                ),
+                element: <div />,
             },
 
-            {
-                path: "ministry-analytics",
-                element: (
-                    <ModulePlaceholder title="Sector / Ministry Analytics" />
-                ),
-            },
-
+            // Geographic View
             {
                 path: "geographic-view",
-                element: (
-                    <ModulePlaceholder title="Geographic View" />
-                ),
+                element: <div />,
             },
 
+            // AI Assistant
             {
                 path: "ai-assistant",
-                element: (
-                    <ModulePlaceholder title="AI Project Assistant" />
-                ),
+                element: <div />,
             },
 
+            // Reports
             {
                 path: "reports",
-                element: (
-                    <ModulePlaceholder title="Reports" />
-                ),
+                element: <div />,
             },
         ],
     },

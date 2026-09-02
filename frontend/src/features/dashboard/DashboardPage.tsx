@@ -12,8 +12,7 @@ import {
     TrendingUp,
 } from "lucide-react";
 
-import { useMemo, useState } from "react";
-
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import Badge from "../../components/ui/Badge";
@@ -30,7 +29,6 @@ import FilterChips from "../../components/filters/FilterChips";
 import PageHeader from "../../components/layout/PageHeader";
 
 import {
-    dashboardProjects,
     defaultDashboardFilters,
     reportingPeriods,
 } from "./dashboard.data";
@@ -50,9 +48,69 @@ import {
     getRiskLevel,
 } from "../../utils/riskUtils";
 
+import { apiRequest } from "../../services/api";
+
+
+type MLProjectRisk = {
+    project_code: string;
+    overall_risk_score: number;
+    risk_level: string;
+    predicted_cost_overrun_pct: number;
+    future_delay_probability: number;
+    future_progress_stall_probability: number;
+    cost_risk_score: number;
+    early_warning_active: boolean;
+    early_warning_priority: string;
+};
+
+
+function mapMLRiskToUI(
+    prediction?: MLProjectRisk,
+) {
+    if (!prediction) {
+        return {
+            riskScore: 0,
+            costRisk: "Low" as const,
+            delayRisk: "Low" as const,
+        };
+    }
+
+    const riskScore = Number(
+        prediction.overall_risk_score ?? 0,
+    );
+
+    const costScore = Number(
+        prediction.cost_risk_score ?? 0,
+    );
+
+    const delayProbability =
+        Number(
+            prediction.future_delay_probability ?? 0,
+        ) * 100;
+
+    return {
+        riskScore,
+
+        costRisk:
+            getRiskLevel(costScore),
+
+        delayRisk:
+            getRiskLevel(delayProbability),
+    };
+}
+
 
 export default function DashboardPage() {
     const navigate = useNavigate();
+
+    const [projects, setProjects] =
+        useState<DashboardProject[]>([]);
+
+    const [loading, setLoading] =
+        useState(true);
+
+    const [error, setError] =
+        useState<string | null>(null);
 
     const [filters, setFilters] =
         useState<DashboardFilters>(
@@ -71,74 +129,294 @@ export default function DashboardPage() {
         );
 
 
-    const filteredProjects = useMemo(() => {
-        return dashboardProjects.filter(
-            (project) => {
-                const normalizedSearch =
-                    search.trim().toLowerCase();
+    /*
+     * Load PostgreSQL projects + ML predictions
+     * in parallel.
+     */
+    useEffect(() => {
+        async function loadDashboard() {
+            try {
+                setLoading(true);
+                setError(null);
 
-                const matchesSearch =
-                    !normalizedSearch ||
-                    project.name
-                        .toLowerCase()
-                        .includes(normalizedSearch) ||
-                    project.id
-                        .toLowerCase()
-                        .includes(normalizedSearch) ||
-                    project.ministry
-                        .toLowerCase()
-                        .includes(normalizedSearch) ||
-                    project.sector
-                        .toLowerCase()
-                        .includes(normalizedSearch);
+                const [
+                    projectResponse,
+                    mlResponse,
+                ] = await Promise.all([
+                    apiRequest<any>("/projects"),
+                    apiRequest<any>("/ml/risk"),
+                ]);
 
-                const matchesMinistry =
-                    appliedFilters.ministry ===
-                    "All Ministries" ||
-                    project.ministry ===
-                    appliedFilters.ministry;
 
-                const matchesSector =
-                    appliedFilters.sector ===
-                    "All Sectors" ||
-                    project.sector ===
-                    appliedFilters.sector;
+                const rawProjects =
+                    Array.isArray(projectResponse)
+                        ? projectResponse
+                        : projectResponse.projects ??
+                          projectResponse.data ??
+                          [];
 
-                const matchesState =
-                    appliedFilters.state ===
-                    "All States" ||
-                    project.state ===
-                    appliedFilters.state;
 
-                const matchesRisk =
-                    appliedFilters.risk ===
-                    "All Risk Levels" ||
-                    getRiskLevel(
-                        project.riskScore,
-                    ) === appliedFilters.risk;
+                const predictions: MLProjectRisk[] =
+                    Array.isArray(
+                        mlResponse,
+                    )
+                        ? mlResponse
+                        : mlResponse.predictions ??
+                          [];
 
-                const matchesStatus =
-                    appliedFilters.status ===
-                    "All Statuses" ||
-                    project.status ===
-                    appliedFilters.status;
 
-                return (
-                    matchesSearch &&
-                    matchesMinistry &&
-                    matchesSector &&
-                    matchesState &&
-                    matchesRisk &&
-                    matchesStatus
+                /*
+                 * Fast lookup:
+                 * project_code -> ML prediction
+                 */
+                const mlMap =
+                    new Map<
+                        string,
+                        MLProjectRisk
+                    >();
+
+                predictions.forEach(
+                    (prediction) => {
+                        mlMap.set(
+                            String(
+                                prediction.project_code,
+                            ),
+                            prediction,
+                        );
+                    },
                 );
-            },
-        );
-    }, [
-        search,
-        appliedFilters,
-    ]);
 
 
+                const mappedProjects =
+                    rawProjects.map(
+                        (project: any) => {
+                            const projectCode =
+                                String(
+                                    project.project_code ??
+                                    project.id ??
+                                    "",
+                                );
+
+
+                            const prediction =
+                                mlMap.get(
+                                    projectCode,
+                                );
+
+
+                            const mlRisk =
+                                mapMLRiskToUI(
+                                    prediction,
+                                );
+
+
+                            /*
+                             * Convert backend schedule
+                             * status into dashboard status.
+                             */
+                            let status:
+                                | "Ongoing"
+                                | "Delayed"
+                                | "Completed" =
+                                "Ongoing";
+
+                            if (
+                                project.schedule_status ===
+                                "Delayed"
+                            ) {
+                                status =
+                                    "Delayed";
+                            } else if (
+                                project.schedule_status ===
+                                "Completed"
+                            ) {
+                                status =
+                                    "Completed";
+                            }
+
+
+                            return {
+                                id: `PM-${projectCode}`,
+
+                                name:
+                                    project.project_name ??
+                                    "Unnamed Project",
+
+                                ministry:
+                                    project.ministry ??
+                                    "Unknown Ministry",
+
+                                sector:
+                                    project.sector ??
+                                    "Unknown Sector",
+
+                                state:
+                                    project.flash_state ??
+                                    project.state ??
+                                    "Unknown State",
+
+                                originalCost:
+                                    Number(
+                                        project.original_cost_cr ??
+                                        project.original_cost ??
+                                        0,
+                                    ),
+
+                                revisedCost:
+                                    Number(
+                                        project.revised_cost_cr ??
+                                        project.revised_cost ??
+                                        0,
+                                    ),
+
+                                riskScore:
+                                    mlRisk.riskScore,
+
+                                costRisk:
+                                    mlRisk.costRisk,
+
+                                delayRisk:
+                                    mlRisk.delayRisk,
+
+                                delayMonths:
+                                    Math.max(
+                                        0,
+                                        Number(
+                                            project.delay_days ??
+                                            0,
+                                        ) / 30,
+                                    ),
+
+                                physicalProgress:
+                                    Number(
+                                        project.flash_latest_physical_progress ??
+                                        project.physical_progress_pct ??
+                                        0,
+                                    ),
+
+                                status,
+
+                            } satisfies DashboardProject;
+                        },
+                    );
+
+
+                setProjects(
+                    mappedProjects,
+                );
+
+            } catch (err) {
+                console.error(
+                    "Dashboard loading failed:",
+                    err,
+                );
+
+                setError(
+                    "Failed to load dashboard data.",
+                );
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        loadDashboard();
+    }, []);
+
+
+    /*
+     * Apply dashboard filters.
+     */
+    const filteredProjects =
+        useMemo(() => {
+            return projects.filter(
+                (project) => {
+                    const normalizedSearch =
+                        search
+                            .trim()
+                            .toLowerCase();
+
+
+                    const matchesSearch =
+                        !normalizedSearch ||
+                        project.name
+                            .toLowerCase()
+                            .includes(
+                                normalizedSearch,
+                            ) ||
+                        project.id
+                            .toLowerCase()
+                            .includes(
+                                normalizedSearch,
+                            ) ||
+                        project.ministry
+                            .toLowerCase()
+                            .includes(
+                                normalizedSearch,
+                            ) ||
+                        project.sector
+                            .toLowerCase()
+                            .includes(
+                                normalizedSearch,
+                            );
+
+
+                    const matchesMinistry =
+                        appliedFilters.ministry ===
+                            "All Ministries" ||
+                        project.ministry ===
+                            appliedFilters.ministry;
+
+
+                    const matchesSector =
+                        appliedFilters.sector ===
+                            "All Sectors" ||
+                        project.sector ===
+                            appliedFilters.sector;
+
+
+                    const matchesState =
+                        appliedFilters.state ===
+                            "All States" ||
+                        project.state ===
+                            appliedFilters.state;
+
+
+                    const matchesRisk =
+                        appliedFilters.risk ===
+                            "All Risk Levels" ||
+                        getRiskLevel(
+                            project.riskScore,
+                        ) ===
+                            appliedFilters.risk;
+
+
+                    const matchesStatus =
+                        appliedFilters.status ===
+                            "All Statuses" ||
+                        project.status ===
+                            appliedFilters.status;
+
+
+                    return (
+                        matchesSearch &&
+                        matchesMinistry &&
+                        matchesSector &&
+                        matchesState &&
+                        matchesRisk &&
+                        matchesStatus
+                    );
+                },
+            );
+        }, [
+            projects,
+            search,
+            appliedFilters,
+        ]);
+
+
+    /*
+     * Dashboard metrics.
+     */
     const metrics = useMemo(() => {
         const totalProjects =
             filteredProjects.length;
@@ -152,8 +430,8 @@ export default function DashboardPage() {
         const costRiskProjects =
             filteredProjects.filter(
                 (project) =>
-                    project.revisedCost >
-                    project.originalCost,
+                    project.costRisk !==
+                    "Low",
             ).length;
 
         const delayedProjects =
@@ -172,51 +450,62 @@ export default function DashboardPage() {
     }, [filteredProjects]);
 
 
-    const riskDistribution = useMemo(() => {
-        return {
-            Critical:
-                filteredProjects.filter(
-                    (project) =>
-                        getRiskLevel(
-                            project.riskScore,
-                        ) === "Critical",
-                ).length,
+    /*
+     * ML risk distribution.
+     *
+     * Existing UI has 5 levels,
+     * so numerical ML score is used
+     * through getRiskLevel().
+     */
+    const riskDistribution =
+        useMemo(() => {
+            return {
+                Critical:
+                    filteredProjects.filter(
+                        (project) =>
+                            getRiskLevel(
+                                project.riskScore,
+                            ) === "Critical",
+                    ).length,
 
-            High:
-                filteredProjects.filter(
-                    (project) =>
-                        getRiskLevel(
-                            project.riskScore,
-                        ) === "High",
-                ).length,
+                High:
+                    filteredProjects.filter(
+                        (project) =>
+                            getRiskLevel(
+                                project.riskScore,
+                            ) === "High",
+                    ).length,
 
-            Elevated:
-                filteredProjects.filter(
-                    (project) =>
-                        getRiskLevel(
-                            project.riskScore,
-                        ) === "Elevated",
-                ).length,
+                Elevated:
+                    filteredProjects.filter(
+                        (project) =>
+                            getRiskLevel(
+                                project.riskScore,
+                            ) === "Elevated",
+                    ).length,
 
-            Moderate:
-                filteredProjects.filter(
-                    (project) =>
-                        getRiskLevel(
-                            project.riskScore,
-                        ) === "Moderate",
-                ).length,
+                Moderate:
+                    filteredProjects.filter(
+                        (project) =>
+                            getRiskLevel(
+                                project.riskScore,
+                            ) === "Moderate",
+                    ).length,
 
-            Low:
-                filteredProjects.filter(
-                    (project) =>
-                        getRiskLevel(
-                            project.riskScore,
-                        ) === "Low",
-                ).length,
-        };
-    }, [filteredProjects]);
+                Low:
+                    filteredProjects.filter(
+                        (project) =>
+                            getRiskLevel(
+                                project.riskScore,
+                            ) === "Low",
+                    ).length,
+            };
+        }, [filteredProjects]);
 
 
+    /*
+     * Highest risk projects.
+     */
     const highestRiskProjects =
         useMemo(() => {
             return [...filteredProjects]
@@ -251,6 +540,58 @@ export default function DashboardPage() {
 
         setSearch("");
     };
+
+
+    /*
+     * Loading state.
+     */
+    if (loading) {
+        return (
+            <div className="mx-auto w-full max-w-[1500px]">
+                <PageHeader
+                    eyebrow="NATIONAL PROJECT MONITORING"
+                    title="Dashboard"
+                    description="Monitor infrastructure projects, emerging risks, cost pressure and schedule performance."
+                />
+
+                <Card padding="lg">
+                    <div className="flex min-h-[250px] items-center justify-center">
+                        <div className="text-sm font-medium text-slate-500">
+                            Loading dashboard data...
+                        </div>
+                    </div>
+                </Card>
+            </div>
+        );
+    }
+
+
+    /*
+     * Error state.
+     */
+    if (error) {
+        return (
+            <div className="mx-auto w-full max-w-[1500px]">
+                <PageHeader
+                    eyebrow="NATIONAL PROJECT MONITORING"
+                    title="Dashboard"
+                    description="Monitor infrastructure projects, emerging risks, cost pressure and schedule performance."
+                />
+
+                <Card padding="lg">
+                    <div className="flex min-h-[250px] flex-col items-center justify-center">
+                        <div className="text-sm font-semibold text-red-600">
+                            {error}
+                        </div>
+
+                        <div className="mt-2 text-xs text-slate-400">
+                            Make sure the Flask backend is running on port 5000.
+                        </div>
+                    </div>
+                </Card>
+            </div>
+        );
+    }
 
 
     return (
@@ -382,9 +723,7 @@ export default function DashboardPage() {
                     )}
                     description="Projects in selected portfolio"
                     icon={
-                        <ShieldAlert
-                            size={18}
-                        />
+                        <ShieldAlert size={18} />
                     }
                     onClick={() =>
                         navigate(
@@ -400,9 +739,7 @@ export default function DashboardPage() {
                     )}
                     description="Projects requiring attention"
                     icon={
-                        <AlertTriangle
-                            size={18}
-                        />
+                        <AlertTriangle size={18} />
                     }
                     onClick={() =>
                         navigate(
@@ -418,9 +755,7 @@ export default function DashboardPage() {
                     )}
                     description="Projects showing cost pressure"
                     icon={
-                        <IndianRupee
-                            size={18}
-                        />
+                        <IndianRupee size={18} />
                     }
                     onClick={() =>
                         navigate(
@@ -436,9 +771,7 @@ export default function DashboardPage() {
                     )}
                     description="Projects with schedule pressure"
                     icon={
-                        <Clock3
-                            size={18}
-                        />
+                        <Clock3 size={18} />
                     }
                     onClick={() =>
                         navigate(
@@ -455,12 +788,14 @@ export default function DashboardPage() {
                 <PortfolioFinancials
                     originalCost={filteredProjects.reduce(
                         (total, project) =>
-                            total + project.originalCost,
+                            total +
+                            project.originalCost,
                         0,
                     )}
                     revisedCost={filteredProjects.reduce(
                         (total, project) =>
-                            total + project.revisedCost,
+                            total +
+                            project.revisedCost,
                         0,
                     )}
                 />
@@ -498,7 +833,6 @@ export default function DashboardPage() {
                         </Button>
 
                     </div>
-
 
                     <RiskDistribution
                         data={
@@ -799,7 +1133,10 @@ function PortfolioFinancials({
                             : "info"
                     }
                 >
-                    +{escalationPercent.toFixed(1)}%
+                    {escalationPercent >= 0
+                        ? "+"
+                        : ""}
+                    {escalationPercent.toFixed(1)}%
                 </Badge>
             </div>
 
@@ -823,6 +1160,7 @@ function PortfolioFinancials({
         </Card>
     );
 }
+
 
 function FinancialMetric({
     label,
@@ -924,8 +1262,7 @@ function RiskDistribution({
                                     total > 0
                                         ? `${(item.value /
                                             total) *
-                                        100
-                                        }%`
+                                        100}%`
                                         : "0%",
                             }}
                         />
@@ -1048,7 +1385,7 @@ function ProjectRow({
                 <div className="flex items-center gap-2">
 
                     <span className="text-xs font-bold text-slate-900">
-                        {project.riskScore}
+                        {project.riskScore.toFixed(1)}
                     </span>
 
                     <Badge
@@ -1085,7 +1422,7 @@ function ProjectRow({
             </td>
 
             <td className="px-5 py-4 text-xs font-semibold text-red-500">
-                +{project.delayMonths} mo
+                +{project.delayMonths.toFixed(1)} mo
             </td>
 
             <td className="px-5 py-4">
@@ -1097,14 +1434,20 @@ function ProjectRow({
                         <div
                             className="h-full rounded-full bg-slate-700"
                             style={{
-                                width: `${project.physicalProgress}%`,
+                                width: `${Math.min(
+                                    100,
+                                    Math.max(
+                                        0,
+                                        project.physicalProgress,
+                                    ),
+                                )}%`,
                             }}
                         />
 
                     </div>
 
                     <span className="text-xs font-semibold text-slate-600">
-                        {project.physicalProgress}%
+                        {project.physicalProgress.toFixed(1)}%
                     </span>
 
                 </div>

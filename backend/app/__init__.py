@@ -31,6 +31,7 @@ def create_app() -> Flask:
     from app.routes.early_warnings import early_warnings_bp
     from app.routes.analytics import analytics_bp
     from app.routes.ml_risk import ml_risk_bp
+  
 
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(projects_bp, url_prefix="/api")
