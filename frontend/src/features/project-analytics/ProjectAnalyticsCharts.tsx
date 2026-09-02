@@ -168,8 +168,8 @@ export default function ProjectAnalyticsCharts({
                   </Pie>
 
                   <Tooltip
-                    formatter={(value: number) =>
-                      value.toLocaleString("en-IN")
+                    formatter={(value) =>
+                      Number(value ?? 0).toLocaleString("en-IN")
                     }
                   />
 
@@ -348,8 +348,8 @@ export default function ProjectAnalyticsCharts({
               />
 
               <Tooltip
-                formatter={(value: number) => [
-                  `${value}%`,
+                formatter={(value) => [
+                  `${Number(value ?? 0)}%`,
                   "Delay Rate",
                 ]}
               />

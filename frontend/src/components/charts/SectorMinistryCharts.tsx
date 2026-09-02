@@ -118,8 +118,8 @@ export function ProjectsBySectorChart({
           </Pie>
 
           <Tooltip
-            formatter={(value: number) =>
-              `${Number(value).toLocaleString("en-IN")} projects`
+            formatter={(value) =>
+              `${Number(value ?? 0).toLocaleString("en-IN")} projects`
             }
           />
 
@@ -141,7 +141,7 @@ export function ProjectsBySectorChart({
                 ? ((row?.value ?? 0) / total) * 100
                 : 0;
 
-              return `${shortName(value, 22)} (${share.toFixed(1)}%)`;
+              return `${shortName(String(value), 22)} (${share.toFixed(1)}%)`;
             }}
           />
         </PieChart>
@@ -215,12 +215,14 @@ export function ProjectsRankingChart({
           dataKey="name"
           width={155}
           tick={{ fontSize: 10 }}
-          tickFormatter={(value) => shortName(value, 25)}
+          tickFormatter={(value) =>
+            shortName(String(value), 25)
+          }
         />
 
         <Tooltip
-          formatter={(value: number) =>
-            `${Number(value).toLocaleString("en-IN")} projects`
+          formatter={(value) =>
+            `${Number(value ?? 0).toLocaleString("en-IN")} projects`
           }
         />
 
@@ -278,16 +280,20 @@ export function CostVsExpenditureChart({
           interval={0}
           height={80}
           tick={{ fontSize: 9 }}
-          tickFormatter={(value) => shortName(value, 18)}
+          tickFormatter={(value) =>
+            shortName(String(value), 18)
+          }
         />
 
         <YAxis
           tick={{ fontSize: 10 }}
-          tickFormatter={(value) => Number(value).toLocaleString("en-IN")}
+          tickFormatter={(value) =>
+            Number(value ?? 0).toLocaleString("en-IN")
+          }
         />
 
         <Tooltip
-          formatter={(value: number) => crore(value)}
+          formatter={(value) => crore(Number(value ?? 0))}
         />
 
         <Legend />
@@ -345,7 +351,9 @@ export function HealthDistributionChart({
         <XAxis
           type="number"
           domain={[0, 100]}
-          tickFormatter={(value) => `${value}%`}
+          tickFormatter={(value) =>
+            `${Number(value ?? 0)}%`
+          }
           tick={{ fontSize: 10 }}
         />
 
@@ -354,11 +362,13 @@ export function HealthDistributionChart({
           dataKey="name"
           width={155}
           tick={{ fontSize: 9 }}
-          tickFormatter={(value) => shortName(value, 25)}
+          tickFormatter={(value) =>
+            shortName(String(value), 25)
+          }
         />
 
         <Tooltip
-          formatter={(value: number) => pct(value)}
+          formatter={(value) => pct(Number(value ?? 0))}
         />
 
         <Legend />
@@ -435,7 +445,9 @@ export function DelayAnalysisChart({
           interval={0}
           height={85}
           tick={{ fontSize: 9 }}
-          tickFormatter={(value) => shortName(value, 18)}
+          tickFormatter={(value) =>
+            shortName(String(value), 18)
+          }
         />
 
         <YAxis
@@ -447,17 +459,19 @@ export function DelayAnalysisChart({
           yAxisId="right"
           orientation="right"
           domain={[0, 100]}
-          tickFormatter={(value) => `${value}%`}
+          tickFormatter={(value) =>
+            `${Number(value ?? 0)}%`
+          }
           tick={{ fontSize: 10 }}
         />
 
         <Tooltip
-          formatter={(value: number, name: string) => {
-            if (name === "Delay %") {
-              return pct(value);
+          formatter={(value, name) => {
+            if (String(name) === "Delay %") {
+              return pct(Number(value ?? 0));
             }
 
-            return Number(value).toLocaleString("en-IN");
+            return Number(value ?? 0).toLocaleString("en-IN");
           }}
         />
 
@@ -531,7 +545,9 @@ export function TopCostOverrunChart({
 
         <XAxis
           type="number"
-          tickFormatter={(value) => `${value}%`}
+          tickFormatter={(value) =>
+            `${Number(value ?? 0)}%`
+          }
           tick={{ fontSize: 10 }}
         />
 
@@ -540,16 +556,18 @@ export function TopCostOverrunChart({
           dataKey="name"
           width={155}
           tick={{ fontSize: 9 }}
-          tickFormatter={(value) => shortName(value, 25)}
+          tickFormatter={(value) =>
+            shortName(String(value), 25)
+          }
         />
 
         <Tooltip
-          formatter={(value: number, name: string) => {
-            if (name === "Avg Overrun %") {
-              return pct(value);
+          formatter={(value, name) => {
+            if (String(name) === "Avg Overrun %") {
+              return pct(Number(value ?? 0));
             }
 
-            return Number(value).toLocaleString("en-IN");
+            return Number(value ?? 0).toLocaleString("en-IN");
           }}
         />
 
@@ -614,9 +632,11 @@ export function PerformanceSummaryChart({
               <span>
                 Progress {row.progress.toFixed(0)}%
               </span>
+
               <span>
                 Expense {row.expenditure.toFixed(0)}%
               </span>
+
               <span>
                 Quality {row.quality.toFixed(0)}%
               </span>
@@ -671,12 +691,18 @@ export function MonthlyTrendChart({
     )
     .slice(-12)
     .map((row) => ({
-      month: String(row.snapshot_month ?? "").slice(0, 7),
-      delay_rate: Number(row.delay_rate_pct ?? 0),
+      month: String(
+        row.snapshot_month ?? "",
+      ).slice(0, 7),
+      delay_rate: Number(
+        row.delay_rate_pct ?? 0,
+      ),
       cost_overrun_rate: Number(
         row.cost_overrun_rate_pct ?? 0,
       ),
-      projects: Number(row.project_count ?? 0),
+      projects: Number(
+        row.project_count ?? 0,
+      ),
     }));
 
   return (
@@ -699,17 +725,21 @@ export function MonthlyTrendChart({
 
         <YAxis
           domain={[0, 100]}
-          tickFormatter={(value) => `${value}%`}
+          tickFormatter={(value) =>
+            `${Number(value ?? 0)}%`
+          }
           tick={{ fontSize: 10 }}
         />
 
         <Tooltip
-          formatter={(value: number, name: string) => {
-            if (name === "Projects") {
-              return Number(value).toLocaleString("en-IN");
+          formatter={(value, name) => {
+            if (String(name) === "Projects") {
+              return Number(value ?? 0).toLocaleString(
+                "en-IN",
+              );
             }
 
-            return pct(value);
+            return pct(Number(value ?? 0));
           }}
         />
 
