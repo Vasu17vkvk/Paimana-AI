@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask
 from flask_cors import CORS
 
@@ -9,9 +11,7 @@ from app.routes.risk import risk_bp
 from app.routes.cost import cost_bp
 from app.routes.delay import delay_bp
 from app.routes.warnings import warnings_bp
-
 from app.routes.sector_ministry import sector_ministry_bp
-
 from app.routes.project_analytics import project_analytics_bp
 
 
@@ -20,20 +20,60 @@ def create_app() -> Flask:
 
     app.config.from_object(DevelopmentConfig)
 
+    # ============================================================
+    # PostgreSQL / SQLAlchemy driver
+    # ============================================================
+
+    database_url = app.config.get("SQLALCHEMY_DATABASE_URI")
+
+    if database_url:
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace(
+                "postgres://",
+                "postgresql+psycopg://",
+                1,
+            )
+        elif database_url.startswith("postgresql://"):
+            database_url = database_url.replace(
+                "postgresql://",
+                "postgresql+psycopg://",
+                1,
+            )
+
+        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+
+    # ============================================================
+    # CORS
+    # ============================================================
+
+    frontend_url = os.getenv(
+        "FRONTEND_URL",
+        "http://localhost:5173",
+    )
+
     CORS(
         app,
         resources={
             r"/api/*": {
                 "origins": [
-                    "https://paimana-ai-two.vercel.app/"
                     "http://localhost:5173",
+                    "https://paimana-ai-two.vercel.app",
+                    frontend_url,
                 ]
             }
         },
     )
 
+    # ============================================================
+    # Database
+    # ============================================================
+
     db.init_app(app)
     migrate.init_app(app, db)
+
+    # ============================================================
+    # Routes
+    # ============================================================
 
     from app.routes.health import health_bp
 
@@ -63,13 +103,13 @@ def create_app() -> Flask:
     )
 
     app.register_blueprint(
-    sector_ministry_bp,
-    url_prefix="/api",
+        sector_ministry_bp,
+        url_prefix="/api",
     )
 
     app.register_blueprint(
-    project_analytics_bp,
-    url_prefix="/api",
+        project_analytics_bp,
+        url_prefix="/api",
     )
 
     return app
