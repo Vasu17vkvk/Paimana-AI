@@ -10,6 +10,10 @@ from app.routes.cost import cost_bp
 from app.routes.delay import delay_bp
 from app.routes.warnings import warnings_bp
 
+from app.routes.sector_ministry import sector_ministry_bp
+
+from app.routes.project_analytics import project_analytics_bp
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -55,6 +59,16 @@ def create_app() -> Flask:
     app.register_blueprint(
         warnings_bp,
         url_prefix="/api",
+    )
+
+    app.register_blueprint(
+    sector_ministry_bp,
+    url_prefix="/api",
+    )
+
+    app.register_blueprint(
+    project_analytics_bp,
+    url_prefix="/api",
     )
 
     return app
