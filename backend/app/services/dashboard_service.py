@@ -14,6 +14,10 @@ from app.services.project_analytics_service import (
 )
 
 
+# ============================================================
+# BASIC HELPERS
+# ============================================================
+
 def _to_project_code(value: Any) -> str:
     if value is None or pd.isna(value):
         return ""
@@ -37,7 +41,10 @@ def _clean_string(value: Any) -> str:
     return str(value).strip()
 
 
-def _safe_number(value: Any, default: float = 0.0) -> float:
+def _safe_number(
+    value: Any,
+    default: float = 0.0,
+) -> float:
     if value is None or pd.isna(value):
         return default
 
@@ -53,7 +60,13 @@ def _safe_number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _risk_level_from_score(score: float | None) -> str:
+# ============================================================
+# RISK HELPERS
+# ============================================================
+
+def _risk_level_from_score(
+    score: float | None,
+) -> str:
     if score is None:
         return "Low"
 
@@ -72,23 +85,10 @@ def _risk_level_from_score(score: float | None) -> str:
     return "Low"
 
 
-def _risk_level_normalized(score: float | None) -> str | None:
-    if score is None:
-        return None
+def _load_table(
+    table_name: str,
+) -> pd.DataFrame:
 
-    if score >= 85:
-        return "CRITICAL"
-
-    if score >= 70:
-        return "HIGH"
-
-    if score >= 40:
-        return "MEDIUM"
-
-    return "LOW"
-
-
-def _load_table(table_name: str) -> pd.DataFrame:
     query = text(
         f'''
         SELECT *
@@ -113,10 +113,20 @@ def _load_table(table_name: str) -> pd.DataFrame:
     ].copy()
 
 
-def _load_dashboard_data() -> pd.DataFrame:
-    master = _load_table("project_master")
+# ============================================================
+# LOAD MASTER DATA
+# ============================================================
 
-    # These columns are already part of the real project-master dataset.
+def _load_dashboard_data() -> pd.DataFrame:
+    master = _load_table(
+        "project_master"
+    )
+
+    if "project_code" not in master.columns:
+        raise ValueError(
+            "project_master is missing project_code."
+        )
+
     master["project_code"] = (
         master["project_code"]
         .apply(_to_project_code)
@@ -141,15 +151,8 @@ def _load_dashboard_data() -> pd.DataFrame:
                 errors="coerce",
             )
 
-    # ---------------------------------------------------------
-    # FLASH state/progress fallback
-    # ---------------------------------------------------------
-
     if "flash_state" not in master.columns:
         master["flash_state"] = ""
-
-    if "flash_latest_physical_progress" not in master.columns:
-        master["flash_latest_physical_progress"] = np.nan
 
     master["flash_state"] = (
         master["flash_state"]
@@ -161,14 +164,139 @@ def _load_dashboard_data() -> pd.DataFrame:
     return master
 
 
+# ============================================================
+# PERIOD HELPERS
+# ============================================================
+
+def _period_to_month(
+    period: str | None,
+) -> pd.Timestamp | None:
+
+    if not period:
+        return None
+
+    value = str(
+        period
+    ).strip()
+
+    if not value:
+        return None
+
+    try:
+        parsed = pd.to_datetime(
+            value,
+            format="%B %Y",
+            errors="coerce",
+        )
+
+        if pd.notna(parsed):
+            return parsed.to_period(
+                "M"
+            ).to_timestamp()
+
+    except Exception:
+        pass
+
+    return None
+
+
+def _filter_projects_by_period(
+    projects: pd.DataFrame,
+    period: str | None,
+) -> pd.DataFrame:
+
+    target_month = _period_to_month(
+        period
+    )
+
+    if target_month is None:
+        return projects
+
+    monthly = _load_table(
+        "paimana_monthly_history"
+    )
+
+    if (
+        "project_code" not in monthly.columns
+        or "snapshot_month" not in monthly.columns
+    ):
+        return projects.iloc[0:0].copy()
+
+    monthly["project_code"] = (
+        monthly["project_code"]
+        .apply(_to_project_code)
+    )
+
+    monthly["snapshot_month"] = pd.to_datetime(
+        monthly["snapshot_month"],
+        errors="coerce",
+    )
+
+    monthly = monthly.dropna(
+        subset=[
+            "project_code",
+            "snapshot_month",
+        ]
+    ).copy()
+
+    monthly["snapshot_period"] = (
+        monthly["snapshot_month"]
+        .dt.to_period("M")
+        .dt.to_timestamp()
+    )
+
+    matching_codes = set(
+        monthly.loc[
+            monthly["snapshot_period"].eq(
+                target_month
+            ),
+            "project_code",
+        ]
+    )
+
+    if not matching_codes:
+        return projects.iloc[0:0].copy()
+
+    return projects[
+        projects["project_code"]
+        .isin(matching_codes)
+    ].copy()
+
+
+# ============================================================
+# MODEL RISK
+# ============================================================
+
 def _attach_ml_risk_scores(
     projects: pd.DataFrame,
+    period: str | None = None,
 ) -> pd.DataFrame:
 
     result = projects.copy()
 
-    result["overall_risk_score"] = np.nan
-    result["risk_level_ml"] = None
+    result[
+        "predicted_cost_overrun_pct"
+    ] = np.nan
+
+    result[
+        "future_delay_probability"
+    ] = np.nan
+
+    result[
+        "future_progress_stall_probability"
+    ] = np.nan
+
+    result[
+        "cost_risk_score"
+    ] = np.nan
+
+    result[
+        "overall_risk_score"
+    ] = np.nan
+
+    result[
+        "risk_level_ml"
+    ] = None
 
     ml = load_ml_ready()
 
@@ -182,6 +310,41 @@ def _attach_ml_risk_scores(
         .apply(_to_project_code)
     )
 
+    if (
+        "snapshot_year" in ml.columns
+        and "snapshot_month_num" in ml.columns
+    ):
+        ml["snapshot_date"] = pd.to_datetime(
+            ml["snapshot_year"].astype("Int64").astype(str)
+            + "-"
+            + ml["snapshot_month_num"]
+            .astype("Int64")
+            .astype(str)
+            .str.zfill(2)
+            + "-01",
+            errors="coerce",
+        )
+
+    target_month = _period_to_month(
+        period
+    )
+
+    # --------------------------------------------------------
+    # Select ML snapshot
+    # --------------------------------------------------------
+
+    if (
+        target_month is not None
+        and "snapshot_date" in ml.columns
+    ):
+        eligible = ml[
+            ml["snapshot_date"]
+            .le(target_month)
+        ].copy()
+
+        if not eligible.empty:
+            ml = eligible
+
     sort_columns = [
         column
         for column in [
@@ -192,13 +355,17 @@ def _attach_ml_risk_scores(
     ]
 
     if sort_columns:
-        ml = ml.sort_values(sort_columns)
+        ml = ml.sort_values(
+            sort_columns
+        )
 
     latest_rows = (
-        ml.drop_duplicates(
+        ml
+        .drop_duplicates(
             "project_code",
             keep="last",
         )
+        .copy()
     )
 
     selected_codes = set(
@@ -214,51 +381,65 @@ def _attach_ml_risk_scores(
     if latest_rows.empty:
         return result
 
-    # Use the same batched model inference already introduced
-    # for Project Analytics, avoiding one predict_proba call
-    # per project.
-    try:
-        scores = model_scores_from_features_batch(
-            latest_rows,
-            batch_size=256,
-        )
-    except Exception:
-        return result
+    # --------------------------------------------------------
+    # BATCH MODEL SCORING
+    # --------------------------------------------------------
+
+    scores = model_scores_from_features_batch(
+        latest_rows,
+        batch_size=256,
+    )
 
     if scores.empty:
         return result
 
     scores = scores.copy()
 
-    if "project_code" not in scores.columns:
-        scores["project_code"] = latest_rows[
-            "project_code"
-        ].values
-
     scores["project_code"] = (
         scores["project_code"]
         .apply(_to_project_code)
     )
 
-    score_columns = [
+    scores = scores.drop_duplicates(
         "project_code",
-        "overall_risk",
+        keep="last",
+    )
+
+    # IMPORTANT:
+    # model_scores_from_features_batch returns
+    # overall_risk_score, not overall_risk.
+    # --------------------------------------------------------
+
+    risk_columns = [
+        "project_code",
+        "predicted_cost_overrun_pct",
+        "future_delay_probability",
+        "future_progress_stall_probability",
+        "cost_risk_score",
+        "overall_risk_score",
         "risk_level",
     ]
 
-    score_columns = [
+    available_columns = [
         column
-        for column in score_columns
+        for column in risk_columns
         if column in scores.columns
     ]
 
-    scores = scores[score_columns].copy()
+    scores = scores[
+        available_columns
+    ].copy()
 
     scores = scores.rename(
         columns={
-            "overall_risk": "overall_risk_score",
-            "risk_level": "risk_level_ml",
+            "risk_level":
+                "risk_level_ml",
         }
+    )
+
+    result["project_code"] = (
+        result["project_code"]
+        .apply(_to_project_code)
     )
 
     result = result.merge(
@@ -267,40 +448,53 @@ def _attach_ml_risk_scores(
         how="left",
         suffixes=(
             "",
-            "_score",
+            "_risk",
         ),
     )
 
-    if "overall_risk_score_score" in result.columns:
-        result["overall_risk_score"] = (
-            result[
-                "overall_risk_score_score"
-            ]
+    # --------------------------------------------------------
+    # Resolve merged columns correctly
+    # --------------------------------------------------------
+
+    risk_columns_to_apply = [
+        "predicted_cost_overrun_pct",
+        "future_delay_probability",
+        "future_progress_stall_probability",
+        "cost_risk_score",
+        "overall_risk_score",
+        "risk_level_ml",
+    ]
+
+    for column in risk_columns_to_apply:
+
+        risk_column = (
+            f"{column}_risk"
         )
 
-        result = result.drop(
-            columns=[
-                "overall_risk_score_score"
-            ]
-        )
+        if risk_column in result.columns:
 
-    if "risk_level_ml_score" in result.columns:
-        result["risk_level_ml"] = (
-            result[
-                "risk_level_ml_score"
-            ]
-        )
+            result[column] = (
+                result[risk_column]
+            )
 
-        result = result.drop(
-            columns=[
-                "risk_level_ml_score"
-            ]
-        )
+            result.drop(
+                columns=[
+                    risk_column
+                ],
+                inplace=True,
+            )
 
     return result
 
 
-def _schedule_status(row: pd.Series) -> str:
+# ============================================================
+# SCHEDULE STATUS
+# ============================================================
+
+def _schedule_status(
+    row: pd.Series,
+) -> str:
+
     existing = _clean_string(
         row.get("schedule_status")
     )
@@ -310,7 +504,9 @@ def _schedule_status(row: pd.Series) -> str:
 
     if (
         _safe_number(
-            row.get("is_accelerated"),
+            row.get(
+                "is_accelerated"
+            ),
             0,
         )
         == 1
@@ -319,100 +515,170 @@ def _schedule_status(row: pd.Series) -> str:
 
     if (
         _safe_number(
-            row.get("is_delayed"),
+            row.get(
+                "is_delayed"
+            ),
             0,
         )
         == 1
     ):
         return "Delayed"
 
-    if pd.isna(
-        row.get("revised_end_date")
-    ) or not _clean_string(
-        row.get("revised_end_date")
+    revised_date = row.get(
+        "revised_end_date"
+    )
+
+    if (
+        revised_date is None
+        or pd.isna(revised_date)
+        or not _clean_string(
+            revised_date
+        )
     ):
         return "No Revised Date"
 
     return "On Schedule"
 
 
+# ============================================================
+# COST STATUS
+# ============================================================
+
+def _cost_status(
+    row: pd.Series,
+) -> str:
+
+    existing = _clean_string(
+        row.get("cost_status")
+    )
+
+    if existing:
+        return existing
+
+    has_cost_overrun = (
+        _safe_number(
+            row.get(
+                "has_cost_overrun"
+            ),
+            0,
+        )
+        > 0
+    )
+
+    if has_cost_overrun:
+        return "Cost Overrun"
+
+    revised_cost = row.get(
+        "revised_cost_cr"
+    )
+
+    if (
+        revised_cost is None
+        or pd.isna(revised_cost)
+    ):
+        return "Revised Cost Not Reported"
+
+    return "No Cost Change"
+
+
+# ============================================================
+# PROJECT RECORDS
+# ============================================================
+
 def _build_project_records(
     frame: pd.DataFrame,
 ) -> list[dict[str, Any]]:
 
-    records: list[dict[str, Any]] = []
+    records: list[
+        dict[str, Any]
+    ] = []
 
     for _, row in frame.iterrows():
 
-        risk_score = row.get(
+        score_value = row.get(
             "overall_risk_score"
         )
 
-        if pd.isna(risk_score):
-            risk_score_value = None
+        if (
+            score_value is None
+            or pd.isna(score_value)
+        ):
+            risk_score = None
             risk_level = "Low"
+
         else:
-            risk_score_value = round(
+            risk_score = round(
                 _safe_number(
-                    risk_score
+                    score_value
                 ),
                 2,
             )
 
-            risk_level = _risk_level_from_score(
-                risk_score_value
-            )
-
-        cost_status = _clean_string(
-            row.get("cost_status")
-        )
-
-        if not cost_status:
-            has_cost_overrun = (
-                _safe_number(
-                    row.get(
-                        "has_cost_overrun"
-                    )
+            risk_level = (
+                _risk_level_from_score(
+                    risk_score
                 )
-                > 0
             )
-
-            cost_status = (
-                "High"
-                if has_cost_overrun
-                else "Low"
-            )
-
-        delay_days = _safe_number(
-            row.get("delay_days")
-        )
-
-        delay_months = _safe_number(
-            row.get("delay_months")
-        )
-
-        if delay_months == 0 and delay_days > 0:
-            delay_months = delay_days / 30.4375
-
-        revised_cost = _safe_number(
-            row.get("revised_cost_cr")
-        )
 
         original_cost = _safe_number(
-            row.get("original_cost_cr")
+            row.get(
+                "original_cost_cr"
+            )
         )
 
-        if revised_cost == 0:
+        revised_cost_raw = row.get(
+            "revised_cost_cr"
+        )
+
+        revised_cost = _safe_number(
+            revised_cost_raw,
+            0.0,
+        )
+
+        # Analytical fallback for missing revised cost.
+        if (
+            revised_cost <= 0
+            and "revised_cost_analytical_cr"
+            in row.index
+        ):
             analytical_cost = _safe_number(
                 row.get(
                     "revised_cost_analytical_cr"
-                )
+                ),
+                0.0,
             )
 
             if analytical_cost > 0:
-                revised_cost = analytical_cost
+                revised_cost = (
+                    analytical_cost
+                )
 
-        status = _schedule_status(row)
+        # If there is genuinely no revised cost,
+        # use original cost for portfolio comparison.
+        if revised_cost <= 0:
+            revised_cost = (
+                original_cost
+            )
+
+        delay_days = _safe_number(
+            row.get(
+                "delay_days"
+            )
+        )
+
+        delay_months = _safe_number(
+            row.get(
+                "delay_months"
+            )
+        )
+
+        if (
+            delay_months <= 0
+            and delay_days > 0
+        ):
+            delay_months = (
+                delay_days / 30.4375
+            )
 
         progress = _safe_number(
             row.get(
@@ -422,61 +688,110 @@ def _build_project_records(
 
         records.append(
             {
-                "id": _to_project_code(
-                    row.get("project_code")
-                ),
-                "name": _clean_string(
-                    row.get("project_name")
-                ),
-                "ministry": _clean_string(
-                    row.get("ministry")
-                ),
-                "sector": _clean_string(
-                    row.get("sector")
-                ),
-                "state": _clean_string(
-                    row.get("flash_state")
-                ),
-                "originalCost": round(
-                    original_cost,
-                    2,
-                ),
-                "revisedCost": round(
-                    revised_cost,
-                    2,
-                ),
-                "riskScore": risk_score_value,
-                "riskLevel": risk_level,
-                "costRisk": cost_status,
-                "delayRisk": risk_level,
-                "delayMonths": round(
-                    max(
-                        delay_months,
-                        0,
+                "id":
+                    _to_project_code(
+                        row.get(
+                            "project_code"
+                        )
                     ),
-                    1,
-                ),
-                "physicalProgress": round(
-                    min(
+
+                "name":
+                    _clean_string(
+                        row.get(
+                            "project_name"
+                        )
+                    ),
+
+                "ministry":
+                    _clean_string(
+                        row.get(
+                            "ministry"
+                        )
+                    ),
+
+                "sector":
+                    _clean_string(
+                        row.get(
+                            "sector"
+                        )
+                    ),
+
+                "state":
+                    _clean_string(
+                        row.get(
+                            "flash_state"
+                        )
+                    ),
+
+                "originalCost":
+                    round(
+                        original_cost,
+                        2,
+                    ),
+
+                "revisedCost":
+                    round(
+                        revised_cost,
+                        2,
+                    ),
+
+                "riskScore":
+                    risk_score,
+
+                "riskLevel":
+                    risk_level,
+
+                "costRisk":
+                    _cost_status(
+                        row
+                    ),
+
+                "delayRisk":
+                    risk_level,
+
+                "delayMonths":
+                    round(
                         max(
-                            progress,
+                            delay_months,
                             0,
                         ),
-                        100,
+                        1,
                     ),
-                    1,
-                ),
-                "status": status,
+
+                "physicalProgress":
+                    round(
+                        min(
+                            max(
+                                progress,
+                                0,
+                            ),
+                            100,
+                        ),
+                        1,
+                    ),
+
+                "status":
+                    _schedule_status(
+                        row
+                    ),
             }
         )
 
     return records
 
 
+# ============================================================
+# FILTER OPTIONS
+# ============================================================
+
 def get_dashboard_filter_options() -> dict[str, Any]:
+
     master = _load_dashboard_data()
 
-    def unique_values(column: str) -> list[str]:
+    def unique_values(
+        column: str,
+    ) -> list[str]:
+
         if column not in master.columns:
             return []
 
@@ -502,6 +817,7 @@ def get_dashboard_filter_options() -> dict[str, Any]:
     periods: list[str] = []
 
     if "snapshot_month" in monthly.columns:
+
         dates = pd.to_datetime(
             monthly["snapshot_month"],
             errors="coerce",
@@ -509,27 +825,37 @@ def get_dashboard_filter_options() -> dict[str, Any]:
 
         periods = sorted(
             {
-                date.strftime("%B %Y")
+                date.strftime(
+                    "%B %Y"
+                )
                 for date in dates
             },
-            key=lambda value: pd.to_datetime(
-                value,
-                format="%B %Y",
-            ),
+            key=lambda value:
+                pd.to_datetime(
+                    value,
+                    format="%B %Y",
+                ),
             reverse=True,
         )
 
     return {
         "periods": periods,
-        "ministries": unique_values(
-            "ministry"
-        ),
-        "sectors": unique_values(
-            "sector"
-        ),
-        "states": unique_values(
-            "flash_state"
-        ),
+
+        "ministries":
+            unique_values(
+                "ministry"
+            ),
+
+        "sectors":
+            unique_values(
+                "sector"
+            ),
+
+        "states":
+            unique_values(
+                "flash_state"
+            ),
+
         "risk_levels": [
             "Critical",
             "High",
@@ -537,6 +863,7 @@ def get_dashboard_filter_options() -> dict[str, Any]:
             "Moderate",
             "Low",
         ],
+
         "statuses": [
             "Ongoing",
             "Delayed",
@@ -547,6 +874,10 @@ def get_dashboard_filter_options() -> dict[str, Any]:
         ],
     }
 
+
+# ============================================================
+# DASHBOARD
+# ============================================================
 
 def get_dashboard(
     *,
@@ -561,39 +892,79 @@ def get_dashboard(
 
     projects = _load_dashboard_data()
 
-    # ---------------------------------------------------------
-    # Filter basic master data first
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
+    # PERIOD
+    # --------------------------------------------------------
 
-    if ministry and ministry != "All Ministries":
+    projects = _filter_projects_by_period(
+        projects,
+        period,
+    )
+
+    # --------------------------------------------------------
+    # MINISTRY
+    # --------------------------------------------------------
+
+    if (
+        ministry
+        and ministry != "All Ministries"
+    ):
         projects = projects[
-            projects["ministry"]
+            projects[
+                "ministry"
+            ]
             .astype(str)
             .eq(ministry)
         ]
 
-    if sector and sector != "All Sectors":
+    # --------------------------------------------------------
+    # SECTOR
+    # --------------------------------------------------------
+
+    if (
+        sector
+        and sector != "All Sectors"
+    ):
         projects = projects[
-            projects["sector"]
+            projects[
+                "sector"
+            ]
             .astype(str)
             .eq(sector)
         ]
 
-    if state and state != "All States":
+    # --------------------------------------------------------
+    # STATE
+    # --------------------------------------------------------
+
+    if (
+        state
+        and state != "All States"
+    ):
         projects = projects[
-            projects["flash_state"]
+            projects[
+                "flash_state"
+            ]
             .astype(str)
             .eq(state)
         ]
 
+    # --------------------------------------------------------
+    # SEARCH
+    # --------------------------------------------------------
+
     if search:
+
         search_value = str(
             search
         ).strip().lower()
 
         if search_value:
+
             mask = (
-                projects["project_name"]
+                projects[
+                    "project_name"
+                ]
                 .astype(str)
                 .str.lower()
                 .str.contains(
@@ -602,7 +973,9 @@ def get_dashboard(
                     regex=False,
                 )
                 |
-                projects["project_code"]
+                projects[
+                    "project_code"
+                ]
                 .astype(str)
                 .str.lower()
                 .str.contains(
@@ -611,7 +984,9 @@ def get_dashboard(
                     regex=False,
                 )
                 |
-                projects["ministry"]
+                projects[
+                    "ministry"
+                ]
                 .astype(str)
                 .str.lower()
                 .str.contains(
@@ -620,7 +995,9 @@ def get_dashboard(
                     regex=False,
                 )
                 |
-                projects["sector"]
+                projects[
+                    "sector"
+                ]
                 .astype(str)
                 .str.lower()
                 .str.contains(
@@ -630,34 +1007,56 @@ def get_dashboard(
                 )
             )
 
-            projects = projects[mask]
+            projects = projects[
+                mask
+            ]
 
-    # ---------------------------------------------------------
-    # Risk is model-derived, so attach after basic filtering.
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
+    # ML RISK
+    # --------------------------------------------------------
 
     projects = _attach_ml_risk_scores(
-        projects
+        projects,
+        period=period,
     )
 
-    # Normalize missing scores before filters.
-    projects["risk_level_ui"] = projects[
-        "overall_risk_score"
-    ].apply(
-        lambda value: _risk_level_from_score(
-            value
-            if pd.notna(value)
-            else None
+    projects["risk_level_ui"] = (
+        projects[
+            "overall_risk_score"
+        ]
+        .apply(
+            lambda value:
+                _risk_level_from_score(
+                    value
+                    if pd.notna(value)
+                    else None
+                )
         )
     )
 
-    if risk and risk != "All Risk Levels":
+    # --------------------------------------------------------
+    # RISK FILTER
+    # --------------------------------------------------------
+
+    if (
+        risk
+        and risk != "All Risk Levels"
+    ):
         projects = projects[
-            projects["risk_level_ui"]
-            .eq(risk)
+            projects[
+                "risk_level_ui"
+            ].eq(risk)
         ]
 
-    if status and status != "All Statuses":
+    # --------------------------------------------------------
+    # STATUS FILTER
+    # --------------------------------------------------------
+
+    if (
+        status
+        and status != "All Statuses"
+    ):
+
         statuses = projects.apply(
             _schedule_status,
             axis=1,
@@ -667,15 +1066,21 @@ def get_dashboard(
             statuses.eq(status)
         ]
 
+    # --------------------------------------------------------
+    # BUILD RECORDS
+    # --------------------------------------------------------
+
     records = _build_project_records(
         projects
     )
 
-    # ---------------------------------------------------------
-    # Current metrics
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
+    # KPI METRICS
+    # --------------------------------------------------------
 
-    total_projects = len(records)
+    total_projects = len(
+        records
+    )
 
     high_risk_projects = sum(
         1
@@ -687,19 +1092,58 @@ def get_dashboard(
         }
     )
 
-    cost_risk_projects = sum(
-        1
-        for item in records
-        if item["revisedCost"]
-        > item["originalCost"]
-    )
+    # Use curated master flag,
+    # not revised > original.
+    if "has_cost_overrun" in projects.columns:
 
-    delayed_projects = sum(
-        1
-        for item in records
-        if item["status"]
-        == "Delayed"
-    )
+        cost_risk_projects = int(
+            pd.to_numeric(
+                projects[
+                    "has_cost_overrun"
+                ],
+                errors="coerce",
+            )
+            .fillna(0)
+            .gt(0)
+            .sum()
+        )
+
+    else:
+
+        cost_risk_projects = sum(
+            1
+            for item in records
+            if item["revisedCost"]
+            > item["originalCost"]
+        )
+
+    # Use curated delay flag.
+    if "is_delayed" in projects.columns:
+
+        delayed_projects = int(
+            pd.to_numeric(
+                projects[
+                    "is_delayed"
+                ],
+                errors="coerce",
+            )
+            .fillna(0)
+            .gt(0)
+            .sum()
+        )
+
+    else:
+
+        delayed_projects = sum(
+            1
+            for item in records
+            if item["status"]
+            == "Delayed"
+        )
+
+    # --------------------------------------------------------
+    # RISK DISTRIBUTION
+    # --------------------------------------------------------
 
     risk_distribution = {
         "Critical": 0,
@@ -710,19 +1154,76 @@ def get_dashboard(
     }
 
     for item in records:
+
+        level = item["riskLevel"]
+
+        if level not in risk_distribution:
+            level = "Low"
+
         risk_distribution[
-            item["riskLevel"]
+            level
         ] += 1
+
+    # --------------------------------------------------------
+    # EARLY WARNING CENTER
+    #
+    # Active warning = risk >= 70
+    # Immediate warning = risk >= 85
+    # Same thresholds as ML warning engine.
+    # --------------------------------------------------------
+
+    immediate_warnings = sum(
+        1
+        for item in records
+        if (
+            item["riskScore"] is not None
+            and item["riskScore"] >= 85
+        )
+    )
+
+    high_priority_warnings = sum(
+        1
+        for item in records
+        if (
+            item["riskScore"] is not None
+            and 70 <= item["riskScore"] < 85
+        )
+    )
+
+    active_warnings = (
+        immediate_warnings
+        + high_priority_warnings
+    )
+
+    early_warning_center = {
+        "immediate":
+            immediate_warnings,
+
+        "high":
+            high_priority_warnings,
+
+        "active":
+            active_warnings,
+    }
+
+    # --------------------------------------------------------
+    # HIGHEST RISK PROJECTS
+    # --------------------------------------------------------
 
     highest_risk_projects = sorted(
         records,
         key=lambda item: (
             item["riskScore"]
-            if item["riskScore"] is not None
+            if item["riskScore"]
+            is not None
             else -1
         ),
         reverse=True,
     )[:8]
+
+    # --------------------------------------------------------
+    # FINANCIALS
+    # --------------------------------------------------------
 
     original_cost = sum(
         item["originalCost"]
@@ -734,22 +1235,28 @@ def get_dashboard(
         for item in records
     )
 
-    # ---------------------------------------------------------
-    # Monthly portfolio trend
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
+    # MONTHLY TREND
+    #
+    # This respects the selected portfolio filters.
+    # --------------------------------------------------------
 
     monthly = _load_table(
         "paimana_monthly_history"
     )
 
     monthly["project_code"] = (
-        monthly["project_code"]
+        monthly[
+            "project_code"
+        ]
         .apply(_to_project_code)
     )
 
     monthly["snapshot_month"] = (
         pd.to_datetime(
-            monthly["snapshot_month"],
+            monthly[
+                "snapshot_month"
+            ],
             errors="coerce",
         )
     )
@@ -757,18 +1264,18 @@ def get_dashboard(
     monthly["delay_days"] = pd.to_numeric(
         monthly.get(
             "delay_days",
-            pd.Series(dtype=float),
+            0,
         ),
         errors="coerce",
-    )
+    ).fillna(0)
 
     monthly["cost_overrun_pct"] = pd.to_numeric(
         monthly.get(
             "cost_overrun_pct",
-            pd.Series(dtype=float),
+            0,
         ),
         errors="coerce",
-    )
+    ).fillna(0)
 
     monthly = monthly.dropna(
         subset=[
@@ -777,36 +1284,64 @@ def get_dashboard(
         ]
     )
 
-    trend_rows: list[dict[str, Any]] = []
-
-    grouped = (
-        monthly
-        .groupby("snapshot_month")
+    # Only include currently filtered project codes.
+    selected_codes = set(
+        projects[
+            "project_code"
+        ].astype(str)
     )
 
-    for snapshot_month, frame in grouped:
-        total = (
-            frame["project_code"]
-            .nunique()
+    if selected_codes:
+        monthly = monthly[
+            monthly[
+                "project_code"
+            ].isin(
+                selected_codes
+            )
+        ]
+
+    trend_rows: list[
+        dict[str, Any]
+    ] = []
+
+    grouped = monthly.groupby(
+        "snapshot_month"
+    )
+
+    for (
+        snapshot_month,
+        frame,
+    ) in grouped:
+
+        total = int(
+            frame[
+                "project_code"
+            ].nunique()
         )
 
-        delayed = (
-            frame["delay_days"]
-            .fillna(0)
+        delayed = int(
+            frame[
+                "delay_days"
+            ]
             .gt(0)
             .groupby(
-                frame["project_code"]
+                frame[
+                    "project_code"
+                ]
             )
             .max()
             .sum()
         )
 
-        cost_risk = (
-            frame["cost_overrun_pct"]
-            .fillna(0)
+        cost_risk = int(
+            frame[
+                "cost_overrun_pct"
+            ]
             .gt(0)
             .groupby(
-                frame["project_code"]
+                frame[
+                    "project_code"
+                ]
             )
             .max()
             .sum()
@@ -814,25 +1349,44 @@ def get_dashboard(
 
         trend_rows.append(
             {
-                "month": snapshot_month.strftime(
-                    "%b"
-                ),
-                "year": snapshot_month.year,
-                "label": snapshot_month.strftime(
-                    "%b %Y"
-                ),
-                "projects": int(total),
-                "highRisk": 0,
-                "delayed": int(delayed),
-                "delayRate": round(
-                    (
-                        delayed / total * 100
-                    )
-                    if total > 0
-                    else 0,
-                    2,
-                ),
-                "costRisk": int(cost_risk),
+                "month":
+                    snapshot_month.strftime(
+                        "%b"
+                    ),
+
+                "year":
+                    int(
+                        snapshot_month.year
+                    ),
+
+                "label":
+                    snapshot_month.strftime(
+                        "%b %Y"
+                    ),
+
+                "projects":
+                    total,
+
+                "highRisk":
+                    0,
+
+                "delayed":
+                    delayed,
+
+                "delayRate":
+                    round(
+                        (
+                            delayed
+                            / total
+                            * 100
+                        )
+                        if total
+                        else 0,
+                        2,
+                    ),
+
+                "costRisk":
+                    cost_risk,
             }
         )
 
@@ -840,20 +1394,22 @@ def get_dashboard(
         trend_rows,
         key=lambda item: (
             item["year"],
-            item["month"],
+            pd.to_datetime(
+                item["label"],
+                format="%b %Y",
+            ),
         ),
     )[-12:]
 
-    # ---------------------------------------------------------
-    # Period
-    # ---------------------------------------------------------
+    latest_period = (
+        trend_rows[-1]["label"]
+        if trend_rows
+        else None
+    )
 
-    latest_period = None
-
-    if trend_rows:
-        latest_period = trend_rows[-1][
-            "label"
-        ]
+    # --------------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------------
 
     return {
         "filters": {
@@ -864,30 +1420,50 @@ def get_dashboard(
             "risk": risk,
             "status": status,
         },
+
         "metrics": {
-            "totalProjects": total_projects,
-            "highRiskProjects": high_risk_projects,
-            "costRiskProjects": cost_risk_projects,
-            "delayedProjects": delayed_projects,
-        },
-        "riskDistribution": risk_distribution,
-        "financials": {
-            "originalCost": round(
-                original_cost,
-                2,
-            ),
-            "revisedCost": round(
-                revised_cost,
-                2,
-            ),
+            "totalProjects":
+                total_projects,
+
+            "highRiskProjects":
+                high_risk_projects,
+
+            "costRiskProjects":
+                cost_risk_projects,
+
+            "delayedProjects":
+                delayed_projects,
         },
 
-        "projects": records,
-        
+        "riskDistribution":
+            risk_distribution,
+
+        "earlyWarningCenter":
+            early_warning_center,
+
+        "financials": {
+            "originalCost":
+                round(
+                    original_cost,
+                    2,
+                ),
+
+            "revisedCost":
+                round(
+                    revised_cost,
+                    2,
+                ),
+        },
+
+        "projects":
+            records,
+
         "highestRiskProjects":
             highest_risk_projects,
+
         "monthlyPortfolioData":
             trend_rows,
+
         "latestPeriod":
             latest_period,
     }

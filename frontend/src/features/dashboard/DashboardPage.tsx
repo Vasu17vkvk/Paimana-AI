@@ -10,6 +10,7 @@ import {
     Search,
     ShieldAlert,
     TrendingUp,
+    X,
 } from "lucide-react";
 
 import {
@@ -28,7 +29,6 @@ import Select from "../../components/ui/Select";
 
 import MetricCard from "../../components/cards/MetricCard";
 
-import FilterDrawer from "../../components/filters/FilterDrawer";
 import FilterChips from "../../components/filters/FilterChips";
 
 import PageHeader from "../../components/layout/PageHeader";
@@ -57,45 +57,98 @@ import {
     type DashboardResponse,
 } from "../../services/api";
 
+import {
+    getActiveWarnings,
+    type ActiveWarning,
+} from "../../services/warningsApi";
+
+
+/* =========================================================
+   TYPES
+========================================================= */
+
+interface DashboardFilterOptionsState {
+    reportingPeriods: string[];
+    ministries: string[];
+    sectors: string[];
+    states: string[];
+    riskLevels: string[];
+    statuses: string[];
+}
+
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
 function mapDashboardProject(
-    project: DashboardResponse["projects"][number],
+    project:
+        DashboardResponse["projects"][number],
 ): DashboardProject {
     return {
         id: project.id,
-        name: project.name,
-        ministry: project.ministry,
-        sector: project.sector,
-        state: project.state,
-        originalCost: project.originalCost,
-        revisedCost: project.revisedCost,
-        riskScore: project.riskScore,
+
+        name:
+            project.name || "Unnamed Project",
+
+        ministry:
+            project.ministry || "",
+
+        sector:
+            project.sector || "",
+
+        state:
+            project.state || "",
+
+        originalCost:
+            Number(
+                project.originalCost ?? 0,
+            ),
+
+        revisedCost:
+            Number(
+                project.revisedCost ?? 0,
+            ),
+
+        riskScore:
+            project.riskScore === null ||
+            project.riskScore === undefined
+                ? null
+                : Number(
+                    project.riskScore,
+                ),
+
         riskLevel:
-            (project.riskLevel || "Low") as DashboardProject["riskLevel"],
-        costRisk: project.costRisk,
+            (project.riskLevel ||
+                "Low") as DashboardProject["riskLevel"],
+
+        costRisk:
+            project.costRisk || "—",
+
         delayRisk:
-            (project.delayRisk || project.riskLevel || "Low") as DashboardProject["delayRisk"],
-        delayMonths: project.delayMonths,
-        physicalProgress: project.physicalProgress,
-        status: project.status,
+            (project.delayRisk ||
+                project.riskLevel ||
+                "Low") as DashboardProject["delayRisk"],
+
+        delayMonths:
+            Number(
+                project.delayMonths ?? 0,
+            ),
+
+        physicalProgress:
+            Number(
+                project.physicalProgress ?? 0,
+            ),
+
+        status:
+            project.status || "—",
     };
 }
 
 
 function normalizeDashboardFilters(
     filters: DashboardFilters,
-): {
-    period?: string;
-    ministry?: string;
-    sector?: string;
-    state?: string;
-    risk?: string;
-    status?: string;
-} {
+) {
     return {
         period:
             filters.period &&
@@ -104,30 +157,52 @@ function normalizeDashboardFilters(
                 : undefined,
 
         ministry:
-            filters.ministry !== "All Ministries"
+            filters.ministry &&
+            filters.ministry !==
+                "All Ministries"
                 ? filters.ministry
                 : undefined,
 
         sector:
-            filters.sector !== "All Sectors"
+            filters.sector &&
+            filters.sector !==
+                "All Sectors"
                 ? filters.sector
                 : undefined,
 
         state:
-            filters.state !== "All States"
+            filters.state &&
+            filters.state !==
+                "All States"
                 ? filters.state
                 : undefined,
 
         risk:
-            filters.risk !== "All Risk Levels"
+            filters.risk &&
+            filters.risk !==
+                "All Risk Levels"
                 ? filters.risk
                 : undefined,
 
         status:
-            filters.status !== "All Statuses"
+            filters.status &&
+            filters.status !==
+                "All Statuses"
                 ? filters.status
                 : undefined,
     };
+}
+
+
+function getProjectCodeSet(
+    projects: DashboardProject[],
+) {
+    return new Set(
+        projects.map(
+            (project) =>
+                String(project.id),
+        ),
+    );
 }
 
 
@@ -136,52 +211,130 @@ function normalizeDashboardFilters(
 ========================================================= */
 
 export default function DashboardPage() {
-    const navigate = useNavigate();
-
-    const [filters, setFilters] =
-        useState<DashboardFilters>(
-            defaultDashboardFilters,
-        );
-
-    const [appliedFilters, setAppliedFilters] =
-        useState<DashboardFilters>(
-            defaultDashboardFilters,
-        );
-
-    const [filterDrawerOpen, setFilterDrawerOpen] =
-        useState(false);
-
-    const [search, setSearch] =
-        useState("");
-
-    const [dashboardData, setDashboardData] =
-        useState<DashboardResponse | null>(
-            null,
-        );
-
-    const [reportingPeriods, setReportingPeriods] =
-        useState<string[]>([]);
-
-    const [isLoading, setIsLoading] =
-        useState(true);
-
-    const [isFilterOptionsLoading, setIsFilterOptionsLoading] =
-        useState(true);
-
-    const [error, setError] =
-        useState<string | null>(null);
+    const navigate =
+        useNavigate();
 
 
     /* =====================================================
-       LOAD REAL FILTER OPTIONS
+       FILTER STATE
+    ===================================================== */
+
+    const [
+        filters,
+        setFilters,
+    ] = useState<DashboardFilters>({
+        ...defaultDashboardFilters,
+        period:
+            defaultDashboardFilters.period ||
+            "",
+    });
+
+
+    const [
+        appliedFilters,
+        setAppliedFilters,
+    ] = useState<DashboardFilters>({
+        ...defaultDashboardFilters,
+        period:
+            defaultDashboardFilters.period ||
+            "",
+    });
+
+
+    const [
+        filterDrawerOpen,
+        setFilterDrawerOpen,
+    ] = useState(false);
+
+
+    const [
+        search,
+        setSearch,
+    ] = useState("");
+
+
+    /* =====================================================
+       DATA STATE
+    ===================================================== */
+
+    const [
+        dashboardData,
+        setDashboardData,
+    ] = useState<DashboardResponse | null>(
+        null,
+    );
+
+
+    const [
+        activeWarnings,
+        setActiveWarnings,
+    ] = useState<ActiveWarning[]>(
+        [],
+    );
+
+
+    const [
+        filterOptions,
+        setFilterOptions,
+    ] = useState<DashboardFilterOptionsState>({
+        reportingPeriods: [],
+        ministries: [],
+        sectors: [],
+        states: [],
+        riskLevels: [
+            "Critical",
+            "High",
+            "Elevated",
+            "Moderate",
+            "Low",
+        ],
+        statuses: [
+            "Ongoing",
+            "Delayed",
+            "Completed",
+            "On Schedule",
+            "Accelerated",
+            "No Revised Date",
+        ],
+    });
+
+
+    const [
+        isLoading,
+        setIsLoading,
+    ] = useState(true);
+
+
+    const [
+        isLoadingFilters,
+        setIsLoadingFilters,
+    ] = useState(true);
+
+
+    const [
+        isLoadingWarnings,
+        setIsLoadingWarnings,
+    ] = useState(true);
+
+
+    const [
+        error,
+        setError,
+    ] = useState<string | null>(
+        null,
+    );
+
+
+    /* =====================================================
+       LOAD FILTER OPTIONS
     ===================================================== */
 
     useEffect(() => {
         let cancelled = false;
 
-        const loadFilterOptions =
+        const loadFilters =
             async () => {
-                setIsFilterOptionsLoading(
+                setIsLoadingFilters(
                     true,
                 );
 
@@ -193,41 +346,76 @@ export default function DashboardPage() {
                         return;
                     }
 
-                    setReportingPeriods(
-                        options.periods,
-                    );
+                    const periods =
+                        options.periods ??
+                        [];
 
-                    setFilters(
-                        (current) => {
-                            const period =
-                                current.period ||
-                                options.periods[0] ||
-                                "";
+                    setFilterOptions({
+                        reportingPeriods:
+                            periods,
 
-                            return {
+                        ministries:
+                            options.ministries ??
+                            [],
+
+                        sectors:
+                            options.sectors ??
+                            [],
+
+                        states:
+                            options.states ??
+                            [],
+
+                        riskLevels:
+                            options.risk_levels?.length
+                                ? options.risk_levels
+                                : [
+                                    "Critical",
+                                    "High",
+                                    "Elevated",
+                                    "Moderate",
+                                    "Low",
+                                ],
+
+                        statuses:
+                            options.statuses?.length
+                                ? options.statuses
+                                : [
+                                    "Ongoing",
+                                    "Delayed",
+                                    "Completed",
+                                    "On Schedule",
+                                    "Accelerated",
+                                    "No Revised Date",
+                                ],
+                    });
+
+
+                    if (periods.length > 0) {
+                        setFilters(
+                            (current) => ({
                                 ...current,
-                                period,
-                            };
-                        },
-                    );
+                                period:
+                                    current.period ||
+                                    periods[0],
+                            }),
+                        );
 
-                    setAppliedFilters(
-                        (current) => {
-                            const period =
-                                current.period ||
-                                options.periods[0] ||
-                                "";
-
-                            return {
+                        setAppliedFilters(
+                            (current) => ({
                                 ...current,
-                                period,
-                            };
-                        },
-                    );
+                                period:
+                                    current.period ||
+                                    periods[0],
+                            }),
+                        );
+                    }
                 } catch (
                     requestError
                 ) {
-                    if (cancelled) {
+                    if (
+                        cancelled
+                    ) {
                         return;
                     }
 
@@ -239,14 +427,14 @@ export default function DashboardPage() {
                     );
                 } finally {
                     if (!cancelled) {
-                        setIsFilterOptionsLoading(
+                        setIsLoadingFilters(
                             false,
                         );
                     }
                 }
             };
 
-        loadFilterOptions();
+        loadFilters();
 
         return () => {
             cancelled = true;
@@ -255,11 +443,13 @@ export default function DashboardPage() {
 
 
     /* =====================================================
-       LOAD REAL DASHBOARD DATA
+       LOAD DASHBOARD
     ===================================================== */
 
     useEffect(() => {
-        if (isFilterOptionsLoading) {
+        if (
+            isLoadingFilters
+        ) {
             return;
         }
 
@@ -268,8 +458,13 @@ export default function DashboardPage() {
         const timer =
             window.setTimeout(
                 async () => {
-                    setIsLoading(true);
-                    setError(null);
+                    setIsLoading(
+                        true,
+                    );
+
+                    setError(
+                        null,
+                    );
 
                     try {
                         const data =
@@ -277,12 +472,15 @@ export default function DashboardPage() {
                                 ...normalizeDashboardFilters(
                                     appliedFilters,
                                 ),
+
                                 search:
                                     search.trim() ||
                                     undefined,
                             });
 
-                        if (cancelled) {
+                        if (
+                            cancelled
+                        ) {
                             return;
                         }
 
@@ -292,7 +490,9 @@ export default function DashboardPage() {
                     } catch (
                         requestError
                     ) {
-                        if (cancelled) {
+                        if (
+                            cancelled
+                        ) {
                             return;
                         }
 
@@ -302,12 +502,10 @@ export default function DashboardPage() {
                                 ? requestError.message
                                 : "Unable to load dashboard data.",
                         );
-
-                        setDashboardData(
-                            null,
-                        );
                     } finally {
-                        if (!cancelled) {
+                        if (
+                            !cancelled
+                        ) {
                             setIsLoading(
                                 false,
                             );
@@ -319,6 +517,7 @@ export default function DashboardPage() {
 
         return () => {
             cancelled = true;
+
             window.clearTimeout(
                 timer,
             );
@@ -326,29 +525,156 @@ export default function DashboardPage() {
     }, [
         appliedFilters,
         search,
-        isFilterOptionsLoading,
+        isLoadingFilters,
     ]);
 
 
     /* =====================================================
-       REAL PROJECT DATA
+       LOAD REAL EARLY WARNINGS
     ===================================================== */
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadWarnings =
+            async () => {
+                setIsLoadingWarnings(
+                    true,
+                );
+
+                try {
+                    const warnings =
+                        await getActiveWarnings();
+
+                    if (
+                        cancelled
+                    ) {
+                        return;
+                    }
+
+                    setActiveWarnings(
+                        warnings ?? [],
+                    );
+                } catch {
+                    if (
+                        !cancelled
+                    ) {
+                        setActiveWarnings(
+                            [],
+                        );
+                    }
+                } finally {
+                    if (
+                        !cancelled
+                    ) {
+                        setIsLoadingWarnings(
+                            false,
+                        );
+                    }
+                }
+            };
+
+        loadWarnings();
+
+        const interval =
+            window.setInterval(
+                loadWarnings,
+                60_000,
+            );
+
+        return () => {
+            cancelled = true;
+
+            window.clearInterval(
+                interval,
+            );
+        };
+    }, []);
 
 
     /* =====================================================
-       REAL BACKEND KPI DATA
+       PROJECTS
     ===================================================== */
 
-    const metrics = dashboardData?.metrics ?? {
-        totalProjects: 0,
-        highRiskProjects: 0,
-        costRiskProjects: 0,
-        delayedProjects: 0,
-    };
+    const dashboardProjects =
+        useMemo(() => {
+            return (
+                dashboardData?.projects ??
+                []
+            ).map(
+                mapDashboardProject,
+            );
+        }, [
+            dashboardData,
+        ]);
 
+
+    /* =====================================================
+       HIGHEST RISK PROJECTS
+    ===================================================== */
+
+    const highestRiskProjects =
+        useMemo(() => {
+            if (
+                dashboardData
+                    ?.highestRiskProjects
+            ) {
+                return dashboardData
+                    .highestRiskProjects
+                    .map(
+                        mapDashboardProject,
+                    );
+            }
+
+            return [
+                ...dashboardProjects,
+            ]
+                .sort(
+                    (
+                        first,
+                        second,
+                    ) => {
+                        const firstScore =
+                            first.riskScore ??
+                            -1;
+
+                        const secondScore =
+                            second.riskScore ??
+                            -1;
+
+                        return (
+                            secondScore -
+                            firstScore
+                        );
+                    },
+                )
+                .slice(0, 8);
+        }, [
+            dashboardData,
+            dashboardProjects,
+        ]);
+
+
+    /* =====================================================
+       BACKEND KPI DATA
+    ===================================================== */
+
+    const metrics =
+        dashboardData?.metrics ?? {
+            totalProjects: 0,
+            highRiskProjects: 0,
+            costRiskProjects: 0,
+            delayedProjects: 0,
+        };
+
+
+    /* =====================================================
+       BACKEND RISK DISTRIBUTION
+    ===================================================== */
 
     const riskDistribution =
-        dashboardData?.riskDistribution ?? {
+        dashboardData
+            ?.riskDistribution ?? {
             Critical: 0,
             High: 0,
             Elevated: 0,
@@ -358,23 +684,7 @@ export default function DashboardPage() {
 
 
     /* =====================================================
-       REAL HIGHEST-RISK PROJECTS
-    ===================================================== */
-
-    const highestRiskProjects =
-        useMemo(() => {
-            if (!dashboardData) {
-                return [];
-            }
-
-            return dashboardData.highestRiskProjects.map(
-                mapDashboardProject,
-            );
-        }, [dashboardData]);
-
-
-    /* =====================================================
-       REAL FINANCIAL DATA
+       FINANCIALS
     ===================================================== */
 
     const financials =
@@ -385,44 +695,151 @@ export default function DashboardPage() {
 
 
     /* =====================================================
-       FILTER ACTIONS
+       EXACT EARLY WARNING DATA
     ===================================================== */
 
-    const applyFilters = () => {
-        setAppliedFilters(
-            filters,
-        );
+    const filteredWarningCounts =
+        useMemo(() => {
+            const selectedCodes =
+                getProjectCodeSet(
+                    dashboardProjects,
+                );
 
-        setFilterDrawerOpen(
-            false,
-        );
-    };
+            const warningsForPortfolio =
+                activeWarnings.filter(
+                    (warning) =>
+                        selectedCodes.has(
+                            String(
+                                warning.project_code,
+                            ),
+                        ),
+                );
 
+            const immediate =
+                warningsForPortfolio.filter(
+                    (warning) =>
+                        warning.early_warning_priority ===
+                        "IMMEDIATE",
+                ).length;
 
-    const resetFilters = () => {
-        const period =
-            reportingPeriods[0] ||
-            "";
+            const highPriority =
+                warningsForPortfolio.filter(
+                    (warning) =>
+                        warning.early_warning_priority ===
+                        "HIGH",
+                ).length;
 
-        const resetValues: DashboardFilters = {
-            ...defaultDashboardFilters,
-            period,
-        };
+            const critical =
+                warningsForPortfolio.filter(
+                    (warning) =>
+                        warning.risk_level ===
+                        "CRITICAL",
+                ).length;
 
-        setFilters(
-            resetValues,
-        );
+            const highRisk =
+                warningsForPortfolio.filter(
+                    (warning) =>
+                        warning.risk_level ===
+                        "HIGH",
+                ).length;
 
-        setAppliedFilters(
-            resetValues,
-        );
+            return {
+                active:
+                    warningsForPortfolio.length,
 
-        setSearch("");
-    };
+                immediate,
+
+                highPriority,
+
+                critical,
+
+                highRisk,
+
+                warnings:
+                    warningsForPortfolio,
+            };
+        }, [
+            activeWarnings,
+            dashboardProjects,
+        ]);
 
 
     /* =====================================================
-       LOADING STATE
+       APPLY FILTERS
+    ===================================================== */
+
+    const applyFilters =
+        () => {
+            setAppliedFilters(
+                filters,
+            );
+
+            setFilterDrawerOpen(
+                false,
+            );
+        };
+
+
+    /* =====================================================
+       RESET FILTERS
+    ===================================================== */
+
+    const resetFilters =
+        () => {
+            const firstPeriod =
+                filterOptions
+                    .reportingPeriods[0] ??
+                "";
+
+            const resetValues: DashboardFilters =
+                {
+                    ...defaultDashboardFilters,
+                    period:
+                        firstPeriod,
+                };
+
+            setFilters(
+                resetValues,
+            );
+
+            setAppliedFilters(
+                resetValues,
+            );
+
+            setSearch("");
+        };
+
+
+    /* =====================================================
+       PERIOD CHANGE
+    ===================================================== */
+
+    const handlePeriodChange =
+        (
+            value: string,
+        ) => {
+            const nextFilters =
+                {
+                    ...filters,
+                    period: value,
+                };
+
+            setFilters(
+                nextFilters,
+            );
+
+            /*
+             * Reporting period is a primary dashboard control,
+             * so apply it immediately.
+             */
+            setAppliedFilters(
+                nextFilters,
+            );
+        };
+
+
+    /* =====================================================
+       LOADING
     ===================================================== */
 
     if (
@@ -438,35 +855,46 @@ export default function DashboardPage() {
                     description="Monitor infrastructure projects, emerging risks, cost pressure and schedule performance."
                 />
 
-                <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
                     {[
                         "Total Projects",
                         "High Risk Projects",
                         "Projects at Cost Risk",
                         "Delayed Projects",
                     ].map(
-                        (label) => (
+                        (
+                            label,
+                        ) => (
                             <Card
-                                key={label}
+                                key={
+                                    label
+                                }
                                 padding="md"
                             >
-                                <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-100" />
+
+                                <div className="h-9 w-9 animate-pulse rounded-xl bg-slate-100" />
 
                                 <div className="mt-4 h-2 w-24 animate-pulse rounded bg-slate-100" />
 
                                 <div className="mt-2 h-7 w-20 animate-pulse rounded bg-slate-100" />
 
-                                <div className="mt-2 h-2 w-32 animate-pulse rounded bg-slate-100" />
+                                <div className="mt-2 h-2 w-36 animate-pulse rounded bg-slate-100" />
+
                             </Card>
                         ),
                     )}
+
                 </div>
 
+
                 <div className="mt-5">
+
                     <Card
                         padding="lg"
                         className="py-16 text-center"
                     >
+
                         <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
                             <ShieldAlert
                                 size={20}
@@ -479,9 +907,11 @@ export default function DashboardPage() {
                         </h3>
 
                         <p className="mt-2 text-xs text-slate-400">
-                            Fetching project and ML risk data from the backend.
+                            Fetching current portfolio and ML risk data.
                         </p>
+
                     </Card>
+
                 </div>
 
             </div>
@@ -490,7 +920,7 @@ export default function DashboardPage() {
 
 
     /* =====================================================
-       ERROR STATE
+       ERROR
     ===================================================== */
 
     if (
@@ -507,10 +937,12 @@ export default function DashboardPage() {
                 />
 
                 <div className="mt-6">
+
                     <Card
                         padding="lg"
                         className="border-red-100 bg-red-50/40 py-16 text-center"
                     >
+
                         <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-100 text-red-600">
                             <ShieldAlert
                                 size={20}
@@ -535,7 +967,9 @@ export default function DashboardPage() {
                         >
                             Retry
                         </Button>
+
                     </Card>
+
                 </div>
 
             </div>
@@ -547,7 +981,7 @@ export default function DashboardPage() {
         <div className="mx-auto w-full max-w-[1500px]">
 
             {/* ==================================================
-              PAGE HEADER
+              HEADER
             =================================================== */}
 
             <PageHeader
@@ -565,15 +999,14 @@ export default function DashboardPage() {
                             onChange={(
                                 event,
                             ) =>
-                                setFilters({
-                                    ...filters,
-                                    period:
-                                        event.target.value,
-                                })
+                                handlePeriodChange(
+                                    event.target.value,
+                                )
                             }
                             options={
-                                reportingPeriods.length > 0
-                                    ? reportingPeriods.map(
+                                filterOptions
+                                    .reportingPeriods
+                                    .map(
                                         (
                                             period,
                                         ) => ({
@@ -583,16 +1016,8 @@ export default function DashboardPage() {
                                                 period,
                                         }),
                                     )
-                                    : [
-                                        {
-                                            label:
-                                                "Latest",
-                                            value:
-                                                "",
-                                        },
-                                    ]
                             }
-                            className="w-[150px]"
+                            className="w-[160px]"
                         />
 
                         <Button
@@ -604,7 +1029,9 @@ export default function DashboardPage() {
                                 )
                             }
                         >
-                            <Filter size={14} />
+                            <Filter
+                                size={14}
+                            />
                             Filters
                         </Button>
 
@@ -627,15 +1054,14 @@ export default function DashboardPage() {
                     onChange={(
                         event,
                     ) =>
-                        setFilters({
-                            ...filters,
-                            period:
-                                event.target.value,
-                        })
+                        handlePeriodChange(
+                            event.target.value,
+                        )
                     }
                     options={
-                        reportingPeriods.length > 0
-                            ? reportingPeriods.map(
+                        filterOptions
+                            .reportingPeriods
+                            .map(
                                 (
                                     period,
                                 ) => ({
@@ -645,14 +1071,6 @@ export default function DashboardPage() {
                                         period,
                                 }),
                             )
-                            : [
-                                {
-                                    label:
-                                        "Latest",
-                                    value:
-                                        "",
-                                },
-                            ]
                     }
                     className="flex-1"
                 />
@@ -666,7 +1084,9 @@ export default function DashboardPage() {
                         )
                     }
                 >
-                    <Filter size={14} />
+                    <Filter
+                        size={14}
+                    />
                     Filters
                 </Button>
 
@@ -708,7 +1128,7 @@ export default function DashboardPage() {
 
 
             {/* ==================================================
-              ACTIVE FILTERS
+              ACTIVE FILTER CHIPS
             =================================================== */}
 
             <div className="mb-5">
@@ -717,16 +1137,24 @@ export default function DashboardPage() {
                     filters={
                         appliedFilters
                     }
-                    onChange={
-                        setAppliedFilters
-                    }
+                    onChange={(
+                        nextFilters,
+                    ) => {
+                        setAppliedFilters(
+                            nextFilters,
+                        );
+
+                        setFilters(
+                            nextFilters,
+                        );
+                    }}
                 />
 
             </div>
 
 
             {/* ==================================================
-              REFRESHING INDICATOR
+              REFRESHING
             =================================================== */}
 
             {isLoading && (
@@ -735,20 +1163,8 @@ export default function DashboardPage() {
                         size={13}
                         className="animate-pulse"
                     />
+
                     Updating live dashboard data...
-                </div>
-            )}
-
-
-            {/* ==================================================
-              BACKEND ERROR WHILE OLD DATA EXISTS
-            =================================================== */}
-
-            {error && dashboardData && (
-                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-                    Latest dashboard data is shown. The newest refresh failed:
-                    {" "}
-                    {error}
                 </div>
             )}
 
@@ -782,7 +1198,7 @@ export default function DashboardPage() {
                     value={formatNumber(
                         metrics.highRiskProjects,
                     )}
-                    description="Projects requiring attention"
+                    description="Critical and high-risk projects"
                     icon={
                         <AlertTriangle
                             size={18}
@@ -800,7 +1216,7 @@ export default function DashboardPage() {
                     value={formatNumber(
                         metrics.costRiskProjects,
                     )}
-                    description="Projects showing cost pressure"
+                    description="Projects with recorded cost overrun"
                     icon={
                         <IndianRupee
                             size={18}
@@ -835,7 +1251,7 @@ export default function DashboardPage() {
 
 
             {/* ==================================================
-              PORTFOLIO FINANCIALS
+              FINANCIALS
             =================================================== */}
 
             <section className="mt-5">
@@ -853,11 +1269,12 @@ export default function DashboardPage() {
 
 
             {/* ==================================================
-              RISK + WARNING
+              RISK + EARLY WARNING
             =================================================== */}
 
             <section className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
 
+                {/* Risk Overview */}
                 <Card padding="lg">
 
                     <div className="flex items-start justify-between gap-4">
@@ -869,7 +1286,7 @@ export default function DashboardPage() {
                             </h2>
 
                             <p className="mt-1 text-[11px] text-slate-400">
-                                Distribution of the currently filtered live portfolio.
+                                Current ML risk distribution for the selected portfolio.
                             </p>
 
                         </div>
@@ -884,7 +1301,9 @@ export default function DashboardPage() {
                             }
                         >
                             View analysis
-                            <ArrowRight size={13} />
+                            <ArrowRight
+                                size={13}
+                            />
                         </Button>
 
                     </div>
@@ -899,22 +1318,35 @@ export default function DashboardPage() {
                 </Card>
 
 
+                {/* Early Warning Center */}
                 <Card padding="lg">
 
                     <div className="flex items-start gap-3">
 
                         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-50 text-red-600">
-                            <Bell size={17} />
+                            <Bell
+                                size={17}
+                            />
                         </div>
 
                         <div>
 
-                            <h2 className="text-sm font-bold text-slate-900">
-                                Early Warning Center
-                            </h2>
+                            <div className="flex items-center gap-2">
+
+                                <h2 className="text-sm font-bold text-slate-900">
+                                    Early Warning Center
+                                </h2>
+
+                                {isLoadingWarnings && (
+                                    <span className="text-[9px] text-slate-400">
+                                        Updating...
+                                    </span>
+                                )}
+
+                            </div>
 
                             <p className="mt-1 text-[11px] text-slate-400">
-                                Current projects requiring attention.
+                                Live ML-generated warnings requiring attention.
                             </p>
 
                         </div>
@@ -925,33 +1357,25 @@ export default function DashboardPage() {
                     <div className="mt-6 space-y-3">
 
                         <WarningRow
-                            label="Critical"
+                            label="Immediate"
                             count={
-                                riskDistribution.Critical
+                                filteredWarningCounts.immediate
                             }
                             variant="danger"
                         />
 
                         <WarningRow
-                            label="High"
+                            label="High Priority"
                             count={
-                                riskDistribution.High
+                                filteredWarningCounts.highPriority
                             }
                             variant="warning"
                         />
 
                         <WarningRow
-                            label="Elevated"
+                            label="Active Warnings"
                             count={
-                                riskDistribution.Elevated
-                            }
-                            variant="warning"
-                        />
-
-                        <WarningRow
-                            label="Moderate"
-                            count={
-                                riskDistribution.Moderate
+                                filteredWarningCounts.active
                             }
                             variant="info"
                         />
@@ -969,6 +1393,9 @@ export default function DashboardPage() {
                         }
                     >
                         Open Warning Center
+                        <ArrowRight
+                            size={14}
+                        />
                     </Button>
 
                 </Card>
@@ -977,7 +1404,7 @@ export default function DashboardPage() {
 
 
             {/* ==================================================
-              HIGHEST RISK PROJECTS
+              TOP RISK PROJECTS
             =================================================== */}
 
             <section className="mt-5">
@@ -993,7 +1420,7 @@ export default function DashboardPage() {
                             </h2>
 
                             <p className="mt-1 text-[11px] text-slate-400">
-                                {highestRiskProjects.length} highest-risk projects shown from the live dashboard data
+                                Top projects ranked by current ML risk score
                             </p>
 
                         </div>
@@ -1008,7 +1435,9 @@ export default function DashboardPage() {
                             }
                         >
                             View all
-                            <ArrowRight size={13} />
+                            <ArrowRight
+                                size={13}
+                            />
                         </Button>
 
                     </div>
@@ -1063,7 +1492,9 @@ export default function DashboardPage() {
                                     <tr>
 
                                         <td
-                                            colSpan={7}
+                                            colSpan={
+                                                7
+                                            }
                                             className="px-5 py-12 text-center"
                                         >
 
@@ -1141,12 +1572,22 @@ export default function DashboardPage() {
                             </div>
 
                             <h3 className="mt-1 text-sm font-bold text-slate-900">
-                                {metrics.delayedProjects} projects are currently showing schedule pressure.
+
+                                {metrics.delayedProjects.toLocaleString(
+                                    "en-IN",
+                                )}{" "}
+                                projects are currently showing
+                                schedule pressure.
+
                             </h3>
 
                             <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">
-                                Projects combining elevated risk, cost pressure and
-                                schedule deterioration should receive priority monitoring.
+
+                                Projects combining elevated or
+                                high ML risk with cost and schedule
+                                pressure should receive priority
+                                monitoring.
+
                             </p>
 
                         </div>
@@ -1162,12 +1603,15 @@ export default function DashboardPage() {
               FILTER DRAWER
             =================================================== */}
 
-            <FilterDrawer
+            <DashboardFilterDrawer
                 open={
                     filterDrawerOpen
                 }
                 filters={
                     filters
+                }
+                options={
+                    filterOptions
                 }
                 onChange={
                     setFilters
@@ -1191,7 +1635,326 @@ export default function DashboardPage() {
 
 
 /* =========================================================
-   PORTFOLIO FINANCIALS
+   DASHBOARD FILTER DRAWER
+========================================================= */
+
+function DashboardFilterDrawer({
+    open,
+    filters,
+    options,
+    onChange,
+    onApply,
+    onClose,
+    onReset,
+}: {
+    open: boolean;
+
+    filters: DashboardFilters;
+
+    options: DashboardFilterOptionsState;
+
+    onChange: (
+        filters: DashboardFilters,
+    ) => void;
+
+    onApply: () => void;
+
+    onClose: () => void;
+
+    onReset: () => void;
+}) {
+    if (!open) {
+        return null;
+    }
+
+    return (
+        <>
+            <button
+                type="button"
+                aria-label="Close filters"
+                onClick={
+                    onClose
+                }
+                className="fixed inset-0 z-[70] bg-slate-950/40"
+            />
+
+            <div className="fixed inset-x-0 bottom-0 z-[80] max-h-[90vh] overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:w-[420px] md:rounded-none md:rounded-l-3xl">
+
+                <div className="flex items-center justify-between">
+
+                    <div>
+
+                        <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">
+                            PAIMANA AI
+                        </div>
+
+                        <h2 className="mt-1 text-lg font-bold text-slate-900">
+                            Dashboard Filters
+                        </h2>
+
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={
+                            onClose
+                        }
+                        className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
+                        aria-label="Close filters"
+                    >
+                        <X
+                            size={18}
+                        />
+                    </button>
+
+                </div>
+
+
+                <div className="mt-6 space-y-4">
+
+                    <Select
+                        label="Reporting Period"
+                        value={
+                            filters.period
+                        }
+                        onChange={(
+                            event,
+                        ) =>
+                            onChange({
+                                ...filters,
+                                period:
+                                    event.target.value,
+                            })
+                        }
+                        options={[
+                            {
+                                label:
+                                    "Latest / All Periods",
+                                value:
+                                    "",
+                            },
+                            ...options.reportingPeriods.map(
+                                (
+                                    item,
+                                ) => ({
+                                    label:
+                                        item,
+                                    value:
+                                        item,
+                                }),
+                            ),
+                        ]}
+                    />
+
+
+                    <Select
+                        label="Ministry"
+                        value={
+                            filters.ministry
+                        }
+                        onChange={(
+                            event,
+                        ) =>
+                            onChange({
+                                ...filters,
+                                ministry:
+                                    event.target.value,
+                            })
+                        }
+                        options={[
+                            {
+                                label:
+                                    "All Ministries",
+                                value:
+                                    "All Ministries",
+                            },
+                            ...options.ministries.map(
+                                (
+                                    item,
+                                ) => ({
+                                    label:
+                                        item,
+                                    value:
+                                        item,
+                                }),
+                            ),
+                        ]}
+                    />
+
+
+                    <Select
+                        label="Sector"
+                        value={
+                            filters.sector
+                        }
+                        onChange={(
+                            event,
+                        ) =>
+                            onChange({
+                                ...filters,
+                                sector:
+                                    event.target.value,
+                            })
+                        }
+                        options={[
+                            {
+                                label:
+                                    "All Sectors",
+                                value:
+                                    "All Sectors",
+                            },
+                            ...options.sectors.map(
+                                (
+                                    item,
+                                ) => ({
+                                    label:
+                                        item,
+                                    value:
+                                        item,
+                                }),
+                            ),
+                        ]}
+                    />
+
+
+                    <Select
+                        label="State / Region"
+                        value={
+                            filters.state
+                        }
+                        onChange={(
+                            event,
+                        ) =>
+                            onChange({
+                                ...filters,
+                                state:
+                                    event.target.value,
+                            })
+                        }
+                        options={[
+                            {
+                                label:
+                                    "All States",
+                                value:
+                                    "All States",
+                            },
+                            ...options.states.map(
+                                (
+                                    item,
+                                ) => ({
+                                    label:
+                                        item,
+                                    value:
+                                        item,
+                                }),
+                            ),
+                        ]}
+                    />
+
+
+                    <Select
+                        label="Risk Level"
+                        value={
+                            filters.risk
+                        }
+                        onChange={(
+                            event,
+                        ) =>
+                            onChange({
+                                ...filters,
+                                risk:
+                                    event.target.value,
+                            })
+                        }
+                        options={[
+                            {
+                                label:
+                                    "All Risk Levels",
+                                value:
+                                    "All Risk Levels",
+                            },
+                            ...options.riskLevels.map(
+                                (
+                                    item,
+                                ) => ({
+                                    label:
+                                        item,
+                                    value:
+                                        item,
+                                }),
+                            ),
+                        ]}
+                    />
+
+
+                    <Select
+                        label="Project Status"
+                        value={
+                            filters.status
+                        }
+                        onChange={(
+                            event,
+                        ) =>
+                            onChange({
+                                ...filters,
+                                status:
+                                    event.target.value,
+                            })
+                        }
+                        options={[
+                            {
+                                label:
+                                    "All Statuses",
+                                value:
+                                    "All Statuses",
+                            },
+                            ...options.statuses.map(
+                                (
+                                    item,
+                                ) => ({
+                                    label:
+                                        item,
+                                    value:
+                                        item,
+                                }),
+                            ),
+                        ]}
+                    />
+
+                </div>
+
+
+                <div className="mt-7 flex gap-3 border-t border-slate-100 pt-5">
+
+                    <Button
+                        variant="secondary"
+                        fullWidth
+                        onClick={
+                            onReset
+                        }
+                    >
+                        Reset
+                    </Button>
+
+                    <Button
+                        fullWidth
+                        onClick={
+                            onApply
+                        }
+                    >
+                        Apply Filters
+                    </Button>
+
+                </div>
+
+            </div>
+        </>
+    );
+}
+
+
+/* =========================================================
+   FINANCIALS
 ========================================================= */
 
 function PortfolioFinancials({
@@ -1213,6 +1976,9 @@ function PortfolioFinancials({
             ) *
             100
             : 0;
+
+    const isIncrease =
+        escalation >= 0;
 
     return (
         <Card padding="md">
@@ -1239,7 +2005,7 @@ function PortfolioFinancials({
                             : "info"
                     }
                 >
-                    {escalationPercent >= 0
+                    {isIncrease
                         ? "+"
                         : ""}
                     {escalationPercent.toFixed(
@@ -1272,7 +2038,9 @@ function PortfolioFinancials({
                     value={
                         escalation
                     }
-                    highlight
+                    highlight={
+                        isIncrease
+                    }
                 />
 
             </div>
@@ -1340,50 +2108,90 @@ function RiskDistribution({
         Low: number;
     };
 }) {
-    const total =
-        data.Critical +
-        data.High +
-        data.Elevated +
-        data.Moderate +
-        data.Low;
-
     const items = [
         {
             label: "Critical",
-            value: data.Critical,
-            color: "bg-red-500",
+            value:
+                Number(
+                    data.Critical ?? 0,
+                ),
+
+            color:
+                "bg-red-500",
+
             variant:
                 "danger" as const,
         },
+
         {
             label: "High",
-            value: data.High,
-            color: "bg-orange-500",
+            value:
+                Number(
+                    data.High ?? 0,
+                ),
+
+            color:
+                "bg-orange-500",
+
             variant:
                 "warning" as const,
         },
+
         {
             label: "Elevated",
-            value: data.Elevated,
-            color: "bg-yellow-400",
+            value:
+                Number(
+                    data.Elevated ?? 0,
+                ),
+
+            color:
+                "bg-yellow-400",
+
             variant:
                 "warning" as const,
         },
+
         {
             label: "Moderate",
-            value: data.Moderate,
-            color: "bg-slate-400",
+            value:
+                Number(
+                    data.Moderate ?? 0,
+                ),
+
+            color:
+                "bg-blue-500",
+
             variant:
                 "info" as const,
         },
+
         {
             label: "Low",
-            value: data.Low,
-            color: "bg-emerald-500",
+            value:
+                Number(
+                    data.Low ?? 0,
+                ),
+
+            color:
+                "bg-emerald-500",
+
             variant:
                 "success" as const,
         },
     ];
+
+
+    const total =
+        items.reduce(
+            (
+                sum,
+                item,
+            ) =>
+                sum +
+                item.value,
+            0,
+        );
+
 
     return (
         <div className="mt-8">
@@ -1475,6 +2283,7 @@ function WarningRow({
 }: {
     label: string;
     count: number;
+
     variant:
         | "success"
         | "warning"
@@ -1522,22 +2331,69 @@ function ProjectRow({
     const riskScore =
         project.riskScore;
 
-    const progress = Math.min(
-        Math.max(
-            Number(
-                project.physicalProgress ||
+    const progress =
+        Math.min(
+            Math.max(
+                Number(
+                    project.physicalProgress ??
+                    0,
+                ),
                 0,
             ),
-            0,
-        ),
-        100,
-    );
+            100,
+        );
 
     const delayMonths =
         Number(
-            project.delayMonths ||
+            project.delayMonths ??
             0,
         );
+
+
+    const costRisk =
+        project.costRisk ||
+        "—";
+
+
+    let costVariant:
+        | "success"
+        | "warning"
+        | "danger"
+        | "info" = "info";
+
+
+    if (
+        costRisk
+            .toLowerCase()
+            .includes(
+                "overrun",
+            ) ||
+        costRisk ===
+            "High"
+    ) {
+        costVariant =
+            "warning";
+    }
+
+    if (
+        costRisk
+            .toLowerCase()
+            .includes(
+                "critical",
+            )
+    ) {
+        costVariant =
+            "danger";
+    }
+
+    if (
+        costRisk ===
+        "Low"
+    ) {
+        costVariant =
+            "success";
+    }
+
 
     return (
         <tr
@@ -1578,22 +2434,26 @@ function ProjectRow({
                 <div className="flex items-center gap-2">
 
                     <span className="text-xs font-bold text-slate-900">
-                        {riskScore !==
-                            null &&
-                        riskScore !==
+
+                        {riskScore ===
+                            null ||
+                        riskScore ===
                             undefined
-                            ? Number(
+                            ? "—"
+                            : Number(
                                 riskScore,
                             ).toFixed(
                                 1,
-                            )
-                            : "—"}
+                            )}
+
                     </span>
 
                     <Badge
-                        variant={getRiskBadgeVariant(
-                            riskLevel,
-                        )}
+                        variant={
+                            getRiskBadgeVariant(
+                                riskLevel,
+                            )
+                        }
                         dot
                     >
                         {
@@ -1610,29 +2470,26 @@ function ProjectRow({
 
                 <Badge
                     variant={
-                        project.costRisk ===
-                            "High"
-                            ? "warning"
-                            : project.costRisk ===
-                                "Low"
-                                ? "success"
-                                : "info"
+                        costVariant
                     }
                 >
-                    {project.costRisk ||
-                        "—"}
+                    {
+                        costRisk
+                    }
                 </Badge>
 
             </td>
 
 
             <td className="px-5 py-4 text-xs font-semibold text-red-500">
+
                 {delayMonths >
                     0
                     ? `+${delayMonths.toFixed(
                         1,
                     )} mo`
                     : "—"}
+
             </td>
 
 
@@ -1645,7 +2502,8 @@ function ProjectRow({
                         <div
                             className="h-full rounded-full bg-slate-700"
                             style={{
-                                width: `${progress}%`,
+                                width:
+                                    `${progress}%`,
                             }}
                         />
 
