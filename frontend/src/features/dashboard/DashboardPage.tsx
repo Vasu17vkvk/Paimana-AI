@@ -334,15 +334,6 @@ export default function DashboardPage() {
        REAL PROJECT DATA
     ===================================================== */
 
-    const projects = useMemo(() => {
-    const dashboardProjects =
-        dashboardData?.projects ?? [];
-
-    return dashboardProjects.map(
-        mapDashboardProject,
-    );
-    }, [dashboardData]);
-
 
     /* =====================================================
        REAL BACKEND KPI DATA
