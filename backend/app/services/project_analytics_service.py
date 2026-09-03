@@ -491,6 +491,242 @@ def model_score_from_features(
         cost_features
     ].copy()
 
+def model_scores_from_features_batch(
+    rows: pd.DataFrame,
+    batch_size: int = 256,
+) -> pd.DataFrame:
+    """
+    Run the supplied trained models in batches.
+
+    This is used for portfolio-level risk scoring so that
+    Render does not repeatedly run the sklearn pipelines
+    one project at a time.
+
+    The underlying models, feature contract and risk formula
+    remain unchanged.
+    """
+
+    if rows is None or rows.empty:
+        return pd.DataFrame(
+            columns=[
+                "project_code",
+                "predicted_cost_overrun_pct",
+                "future_delay_probability",
+                "future_progress_stall_probability",
+                "cost_risk_score",
+                "overall_risk_score",
+                "risk_level",
+            ]
+        )
+
+    models = load_models()
+
+    contract = models["contract"]
+
+    features = contract["features"]
+    cost_features = contract["cost_features"]
+
+    # --------------------------------------------------------
+    # Build complete numeric feature frame
+    # --------------------------------------------------------
+
+    values: dict[str, pd.Series] = {}
+
+    for column in features:
+
+        if column in rows.columns:
+
+            series = pd.to_numeric(
+                rows[column],
+                errors="coerce",
+            ).fillna(0.0)
+
+        else:
+
+            series = pd.Series(
+                0.0,
+                index=rows.index,
+            )
+
+        values[column] = series.astype(float)
+
+    X = pd.DataFrame(
+        values,
+        index=rows.index,
+        columns=features,
+    )
+
+    X_cost = X[
+        cost_features
+    ].copy()
+
+    results: list[pd.DataFrame] = []
+
+    # --------------------------------------------------------
+    # Process in memory-safe batches
+    # --------------------------------------------------------
+
+    for start in range(
+        0,
+        len(X),
+        batch_size,
+    ):
+
+        end = min(
+            start + batch_size,
+            len(X),
+        )
+
+        X_batch = X.iloc[
+            start:end
+        ]
+
+        X_cost_batch = X_cost.iloc[
+            start:end
+        ]
+
+        # ----------------------------------------------------
+        # Future delay
+        # ----------------------------------------------------
+
+        raw_delay = (
+            models["delay_model"]
+            .predict_proba(
+                X_batch[features]
+            )[:, 1]
+            .reshape(-1, 1)
+        )
+
+        delay_probability = (
+            models["delay_calibrator"]
+            .predict_proba(
+                raw_delay
+            )[:, 1]
+        )
+
+        # ----------------------------------------------------
+        # Progress stall
+        # ----------------------------------------------------
+
+        raw_stall = (
+            models["stall_model"]
+            .predict_proba(
+                X_batch[features]
+            )[:, 1]
+            .reshape(-1, 1)
+        )
+
+        stall_probability = (
+            models["stall_calibrator"]
+            .predict_proba(
+                raw_stall
+            )[:, 1]
+        )
+
+        # ----------------------------------------------------
+        # Cost overrun
+        # ----------------------------------------------------
+
+        predicted_cost = np.maximum(
+            0.0,
+            models["cost_model"].predict(
+                X_cost_batch[
+                    cost_features
+                ]
+            ),
+        )
+
+        # ----------------------------------------------------
+        # Cost risk
+        # ----------------------------------------------------
+
+        reference = _safe_float(
+            contract.get(
+                "cost_risk_reference_percentile",
+                1.0,
+            ),
+            1.0,
+        )
+
+        if reference <= 0:
+            reference = 1.0
+
+        cost_risk = np.clip(
+            predicted_cost
+            / reference
+            * 100,
+            0,
+            100,
+        )
+
+        # ----------------------------------------------------
+        # Overall risk
+        # ----------------------------------------------------
+
+        overall_risk = np.clip(
+            0.30 * cost_risk
+            + 0.35 * delay_probability * 100
+            + 0.35 * stall_probability * 100,
+            0,
+            100,
+        )
+
+        # ----------------------------------------------------
+        # Risk level
+        # ----------------------------------------------------
+
+        risk_level = np.select(
+            [
+                overall_risk >= 85,
+                overall_risk >= 70,
+                overall_risk >= 40,
+            ],
+            [
+                "CRITICAL",
+                "HIGH",
+                "MEDIUM",
+            ],
+            default="LOW",
+        )
+
+        batch_result = pd.DataFrame(
+            {
+                "project_code": rows.iloc[
+                    start:end
+                ]["project_code"].astype(str).values,
+
+                "predicted_cost_overrun_pct":
+                    predicted_cost,
+
+                "future_delay_probability":
+                    delay_probability,
+
+                "future_progress_stall_probability":
+                    stall_probability,
+
+                "cost_risk_score":
+                    cost_risk,
+
+                "overall_risk_score":
+                    overall_risk,
+
+                "risk_level":
+                    risk_level,
+            }
+        )
+
+        results.append(
+            batch_result
+        )
+
+    if not results:
+        return pd.DataFrame()
+
+    return pd.concat(
+        results,
+        ignore_index=True,
+    )
+
     # --------------------------------------------------------
     # Future delay
     # --------------------------------------------------------
@@ -823,42 +1059,89 @@ def _attach_risk_scores(
     portfolio: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Calculate current model-based risk for projects when the
-    master dataset does not already contain risk outputs.
+    Attach model-based risk scores to a portfolio using
+    memory-safe batched ML inference.
 
-    This is mainly used for project filtering.
+    This preserves the existing models and risk formula,
+    but avoids running sklearn once per project.
     """
 
     result = portfolio.copy()
 
-    result["predicted_cost_overrun_pct"] = np.nan
-    result["future_delay_probability"] = np.nan
-    result["future_progress_stall_probability"] = np.nan
-    result["cost_risk_score"] = np.nan
-    result["overall_risk_score"] = np.nan
-    result["risk_level"] = None
+    # --------------------------------------------------------
+    # Default risk columns
+    # --------------------------------------------------------
+
+    result[
+        "predicted_cost_overrun_pct"
+    ] = np.nan
+
+    result[
+        "future_delay_probability"
+    ] = np.nan
+
+    result[
+        "future_progress_stall_probability"
+    ] = np.nan
+
+    result[
+        "cost_risk_score"
+    ] = np.nan
+
+    result[
+        "overall_risk_score"
+    ] = np.nan
+
+    result[
+        "risk_level"
+    ] = None
+
+    # --------------------------------------------------------
+    # Load ML-ready data
+    # --------------------------------------------------------
 
     ml = load_ml_ready()
 
     if ml.empty:
         return result
 
-    latest_rows = (
-        ml.sort_values(
-            [
-                column
-                for column in [
-                    "snapshot_year",
-                    "snapshot_month_num",
-                ]
-                if column in ml.columns
-            ]
+    # --------------------------------------------------------
+    # Latest snapshot per project
+    # --------------------------------------------------------
+
+    sort_columns = [
+        column
+        for column in [
+            "snapshot_year",
+            "snapshot_month_num",
+        ]
+        if column in ml.columns
+    ]
+
+    if sort_columns:
+
+        latest_rows = (
+            ml
+            .sort_values(sort_columns)
+            .drop_duplicates(
+                "project_code",
+                keep="last",
+            )
         )
-        .drop_duplicates(
-            "project_code",
-            keep="last",
+
+    else:
+
+        latest_rows = (
+            ml
+            .drop_duplicates(
+                "project_code",
+                keep="last",
+            )
         )
-    )
+
+    # --------------------------------------------------------
+    # Keep only projects in current portfolio
+    # --------------------------------------------------------
 
     selected_codes = set(
         result["project_code"]
@@ -869,68 +1152,83 @@ def _attach_risk_scores(
         latest_rows["project_code"]
         .astype(str)
         .isin(selected_codes)
+    ].copy()
+
+    if latest_rows.empty:
+        return result
+
+    # --------------------------------------------------------
+    # Batch model inference
+    # --------------------------------------------------------
+
+    scores = model_scores_from_features_batch(
+        latest_rows,
+        batch_size=256,
+    )
+
+    if scores.empty:
+        return result
+
+    # --------------------------------------------------------
+    # Merge risk results
+    # --------------------------------------------------------
+
+    result["project_code"] = (
+        result["project_code"]
+        .apply(_to_project_code)
+    )
+
+    scores["project_code"] = (
+        scores["project_code"]
+        .apply(_to_project_code)
+    )
+
+    scores = scores.drop_duplicates(
+        "project_code",
+        keep="last",
+    )
+
+    result = result.merge(
+        scores,
+        on="project_code",
+        how="left",
+        suffixes=(
+            "",
+            "_risk",
+        ),
+    )
+
+    # --------------------------------------------------------
+    # Use batched risk values
+    # --------------------------------------------------------
+
+    risk_columns = [
+        "predicted_cost_overrun_pct",
+        "future_delay_probability",
+        "future_progress_stall_probability",
+        "cost_risk_score",
+        "overall_risk_score",
+        "risk_level",
     ]
 
-    for _, ml_row in latest_rows.iterrows():
+    for column in risk_columns:
 
-        code = _to_project_code(
-            ml_row["project_code"]
+        risk_column = (
+            f"{column}_risk"
         )
 
-        try:
-            score = model_score_from_features(
-                ml_row
+        if risk_column in result.columns:
+
+            result[column] = (
+                result[risk_column]
             )
-        except Exception:
-            continue
 
-        mask = (
-            result["project_code"]
-            .astype(str)
-            .eq(code)
-        )
-
-        result.loc[
-            mask,
-            "predicted_cost_overrun_pct"
-        ] = score[
-            "predicted_cost_overrun"
-        ]
-
-        result.loc[
-            mask,
-            "future_delay_probability"
-        ] = score[
-            "delay_probability"
-        ]
-
-        result.loc[
-            mask,
-            "future_progress_stall_probability"
-        ] = score[
-            "stall_probability"
-        ]
-
-        result.loc[
-            mask,
-            "cost_risk_score"
-        ] = score[
-            "cost_risk"
-        ]
-
-        result.loc[
-            mask,
-            "overall_risk_score"
-        ] = score[
-            "overall_risk"
-        ]
-
-        result.loc[
-            mask,
-            "risk_level"
-        ] = score[
-            "risk_level"
-        ]
+            result.drop(
+                columns=[
+                    risk_column
+                ],
+                inplace=True,
+            )
 
     return result
 
