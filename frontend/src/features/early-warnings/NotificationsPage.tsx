@@ -6,11 +6,14 @@ import {
     Info,
     Search,
     ShieldAlert,
-
     X,
 } from "lucide-react";
 
-import { useMemo, useState } from "react";
+import {
+    useEffect,
+    useMemo,
+    useState,
+} from "react";
 
 import { useNavigate } from "react-router-dom";
 
@@ -18,6 +21,12 @@ import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
+
+import {
+    getActiveWarnings,
+    type ActiveWarning,
+} from "../../services/warningsApi";
+
 
 type NotificationType =
     | "critical"
@@ -47,134 +56,224 @@ interface Notification {
 
 
 /* =========================================================
-   MOCK NOTIFICATION DATA
+   EARLY WARNING -> NOTIFICATION MAPPER
 ========================================================= */
 
-const initialNotifications: Notification[] = [
-    {
-        id: "N-001",
-        title: "Critical delay risk detected",
-        message:
-            "Schedule deterioration has increased the predicted delay risk for National Highway Development.",
-        project: "National Highway Development",
-        projectId: "PM-400005",
-        type: "critical",
-        category: "Delay",
-        timestamp: "10 minutes ago",
+function formatWarningReason(
+    reason: string,
+): string {
+    const labels: Record<string, string> = {
+        future_delay:
+            "Future delay risk",
+        progress_stall:
+            "Progress stall risk",
+        cost_pressure:
+            "Cost pressure",
+        extreme_schedule_change:
+            "Extreme schedule change",
+        extreme_cost_overrun:
+            "Extreme cost overrun",
+        financial_physical_divergence:
+            "Financial and physical progress divergence",
+        low_physical_progress:
+            "Low physical progress",
+        data_quality:
+            "Data quality issue",
+    };
+
+    return (
+        labels[reason] ??
+        reason
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (character) =>
+                character.toUpperCase(),
+            )
+    );
+}
+
+
+function getWarningCategory(
+    reasons: string[],
+): NotificationCategory {
+    const normalizedReasons =
+        reasons.map((reason) =>
+            reason.toLowerCase(),
+        );
+
+    if (
+        normalizedReasons.some((reason) =>
+            reason.includes("cost"),
+        )
+    ) {
+        return "Cost";
+    }
+
+    if (
+        normalizedReasons.some(
+            (reason) =>
+                reason.includes("delay") ||
+                reason.includes("schedule"),
+        )
+    ) {
+        return "Delay";
+    }
+
+    if (
+        normalizedReasons.some(
+            (reason) =>
+                reason.includes("progress") ||
+                reason.includes("stall") ||
+                reason.includes("physical"),
+        )
+    ) {
+        return "Progress";
+    }
+
+    return "Risk";
+}
+
+
+function getNotificationType(
+    warning: ActiveWarning,
+): NotificationType {
+    if (
+        warning.risk_level === "CRITICAL" ||
+        warning.early_warning_priority ===
+            "IMMEDIATE"
+    ) {
+        return "critical";
+    }
+
+    if (
+        warning.risk_level === "HIGH" ||
+        warning.risk_level === "MEDIUM" ||
+        warning.early_warning_priority === "HIGH"
+    ) {
+        return "warning";
+    }
+
+    return "info";
+}
+
+
+function formatSnapshot(
+    warning: ActiveWarning,
+): string {
+    if (
+        warning.snapshot_year !== null &&
+        warning.snapshot_month !== null
+    ) {
+        return `Snapshot ${warning.snapshot_year}-${String(
+            warning.snapshot_month,
+        ).padStart(2, "0")}`;
+    }
+
+    if (warning.snapshot_year !== null) {
+        return `Snapshot ${warning.snapshot_year}`;
+    }
+
+    return "Latest monitoring snapshot";
+}
+
+
+function mapWarningToNotification(
+    warning: ActiveWarning,
+): Notification {
+    const reasons =
+        Array.isArray(
+            warning.early_warning_reasons,
+        )
+            ? warning.early_warning_reasons
+            : [];
+
+    const notificationType =
+        getNotificationType(warning);
+
+    const category =
+        getWarningCategory(reasons);
+
+    const reasonText =
+        reasons.length > 0
+            ? reasons
+                .map(formatWarningReason)
+                .join(", ")
+            : "Active early-warning conditions detected by the ML monitoring engine.";
+
+    const isImmediate =
+        warning.early_warning_priority ===
+        "IMMEDIATE";
+
+    const isHigh =
+        warning.early_warning_priority ===
+        "HIGH";
+
+    let title =
+        "Early warning detected";
+
+    if (isImmediate) {
+        title =
+            "Immediate action required";
+    } else if (isHigh) {
+        title =
+            "High-priority early warning";
+    } else if (
+        warning.risk_level ===
+        "CRITICAL"
+    ) {
+        title =
+            "Critical project risk detected";
+    } else if (
+        warning.risk_level ===
+        "HIGH"
+    ) {
+        title =
+            "High project risk detected";
+    }
+
+    const projectCode =
+        String(warning.project_code);
+
+    const score =
+        Number.isFinite(
+            Number(
+                warning.overall_risk_score,
+            ),
+        )
+            ? Number(
+                warning.overall_risk_score,
+            ).toFixed(2)
+            : "N/A";
+
+    const message =
+        `${reasonText}. Current ML risk score: ${score}.`;
+
+    return {
+        id: `EW-${projectCode}-${warning.snapshot_year ?? "NA"}-${warning.snapshot_month ?? "NA"}`,
+
+        title,
+
+        message,
+
+        project:
+            `Project ${projectCode}`,
+
+        projectId:
+            projectCode,
+
+        type:
+            notificationType,
+
+        category,
+
+        timestamp:
+            formatSnapshot(warning),
+
         isRead: false,
-        actionLabel: "View project",
-    },
 
-    {
-        id: "N-002",
-        title: "High cost escalation risk",
-        message:
-            "The predicted cost trajectory has moved above the monitoring threshold.",
-        project: "Freight Logistics Corridor",
-        projectId: "PM-400882",
-        type: "critical",
-        category: "Cost",
-        timestamp: "32 minutes ago",
-        isRead: false,
-        actionLabel: "View prediction",
-    },
-
-    {
-        id: "N-003",
-        title: "Risk score increased",
-        message:
-            "Overall project risk increased from 68 to 82 following new schedule and progress signals.",
-        project: "Regional Water Supply System",
-        projectId: "PM-400117",
-        type: "warning",
-        category: "Risk",
-        timestamp: "1 hour ago",
-        isRead: false,
-        actionLabel: "Review risk",
-    },
-
-    {
-        id: "N-004",
-        title: "Physical progress has stalled",
-        message:
-            "No meaningful physical progress has been recorded during the latest monitoring period.",
-        project: "Regional Power Infrastructure",
-        projectId: "PM-400993",
-        type: "warning",
-        category: "Progress",
-        timestamp: "2 hours ago",
-        isRead: false,
-        actionLabel: "View project",
-    },
-
-    {
-        id: "N-005",
-        title: "Schedule revision detected",
-        message:
-            "The expected completion date has moved by more than six months.",
-        project: "Integrated Railway Corridor",
-        projectId: "PM-400331",
-        type: "warning",
-        category: "Delay",
-        timestamp: "3 hours ago",
-        isRead: true,
-        actionLabel: "View project",
-    },
-
-    {
-        id: "N-006",
-        title: "Cost revision recorded",
-        message:
-            "The latest project estimate reflects an updated approved/revised cost.",
-        project: "Power Transmission Expansion",
-        projectId: "PM-400221",
-        type: "info",
-        category: "Cost",
-        timestamp: "5 hours ago",
-        isRead: true,
-        actionLabel: "View project",
-    },
-
-    {
-        id: "N-007",
-        title: "Monitoring data updated",
-        message:
-            "The latest project monitoring dataset has been successfully processed.",
-        project: "",
-        projectId: "",
-        type: "success",
-        category: "System",
-        timestamp: "Yesterday",
-        isRead: true,
-    },
-
-    {
-        id: "N-008",
-        title: "Monthly monitoring cycle completed",
-        message:
-            "April 2026 monitoring records are now available for dashboard analysis.",
-        project: "",
-        projectId: "",
-        type: "info",
-        category: "System",
-        timestamp: "Yesterday",
-        isRead: true,
-    },
-
-    {
-        id: "N-009",
-        title: "Progress health warning",
-        message:
-            "The project is progressing below the expected trajectory.",
-        project: "Metro Connectivity Programme",
-        projectId: "PM-401104",
-        type: "warning",
-        category: "Progress",
-        timestamp: "2 days ago",
-        isRead: true,
-        actionLabel: "View project",
-    },
-];
+        actionLabel:
+            "View project",
+    };
+}
 
 
 /* =========================================================
@@ -182,28 +281,115 @@ const initialNotifications: Notification[] = [
 ========================================================= */
 
 export default function NotificationsPage() {
-    const navigate = useNavigate();
+    const navigate =
+        useNavigate();
 
-    const [notifications, setNotifications] =
-        useState<Notification[]>(
-            initialNotifications,
-        );
+    const [
+        notifications,
+        setNotifications,
+    ] = useState<Notification[]>([]);
 
-    const [activeTab, setActiveTab] =
-        useState<
-            "All" | "Unread" | "Critical" | NotificationCategory
-        >("All");
+    const [
+        activeTab,
+        setActiveTab,
+    ] = useState<
+        "All" |
+        "Unread" |
+        "Critical" |
+        NotificationCategory
+    >("All");
 
-    const [search, setSearch] =
-        useState("");
+    const [
+        search,
+        setSearch,
+    ] = useState("");
 
-    const [selectedNotification, setSelectedNotification] =
-        useState<Notification | null>(null);
+    const [
+        selectedNotification,
+        setSelectedNotification,
+    ] = useState<Notification | null>(
+        null,
+    );
+
+    const [
+        isLoading,
+        setIsLoading,
+    ] = useState(true);
+
+    const [
+        error,
+        setError,
+    ] = useState<string | null>(
+        null,
+    );
+
+
+    /* =====================================================
+       LOAD REAL EARLY WARNINGS
+    ===================================================== */
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadWarnings =
+            async () => {
+                setIsLoading(true);
+                setError(null);
+
+                try {
+                    const warnings =
+                        await getActiveWarnings();
+
+                    if (cancelled) {
+                        return;
+                    }
+
+                    const mappedNotifications =
+                        warnings.map(
+                            mapWarningToNotification,
+                        );
+
+                    setNotifications(
+                        mappedNotifications,
+                    );
+                } catch (requestError) {
+                    if (cancelled) {
+                        return;
+                    }
+
+                    setError(
+                        requestError instanceof
+                            Error
+                            ? requestError.message
+                            : "Unable to load active early warnings.",
+                    );
+
+                    setNotifications([]);
+                } finally {
+                    if (!cancelled) {
+                        setIsLoading(false);
+                    }
+                }
+            };
+
+        loadWarnings();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+
+    /* =====================================================
+       FILTERED NOTIFICATIONS
+    ===================================================== */
 
     const filteredNotifications =
         useMemo(() => {
             const query =
-                search.trim().toLowerCase();
+                search
+                    .trim()
+                    .toLowerCase();
 
             return notifications.filter(
                 (notification) => {
@@ -219,14 +405,21 @@ export default function NotificationsPage() {
                             .toLowerCase()
                             .includes(query);
 
-                    let matchesTab = true;
+                    let matchesTab =
+                        true;
 
-                    if (activeTab === "Unread") {
+                    if (
+                        activeTab ===
+                        "Unread"
+                    ) {
                         matchesTab =
                             !notification.isRead;
                     }
 
-                    if (activeTab === "Critical") {
+                    if (
+                        activeTab ===
+                        "Critical"
+                    ) {
                         matchesTab =
                             notification.type ===
                             "critical";
@@ -255,6 +448,10 @@ export default function NotificationsPage() {
         ]);
 
 
+    /* =====================================================
+       COUNTS
+    ===================================================== */
+
     const unreadCount =
         notifications.filter(
             (notification) =>
@@ -269,6 +466,18 @@ export default function NotificationsPage() {
                 !notification.isRead,
         ).length;
 
+    const warningCount =
+        notifications.filter(
+            (notification) =>
+                notification.type ===
+                "warning" &&
+                !notification.isRead,
+        ).length;
+
+
+    /* =====================================================
+       ACTIONS
+    ===================================================== */
 
     const markAsRead = (
         notificationId: string,
@@ -278,13 +487,25 @@ export default function NotificationsPage() {
                 current.map(
                     (notification) =>
                         notification.id ===
-                            notificationId
+                        notificationId
                             ? {
                                 ...notification,
                                 isRead: true,
                             }
                             : notification,
                 ),
+        );
+
+        setSelectedNotification(
+            (current) =>
+                current &&
+                current.id ===
+                notificationId
+                    ? {
+                        ...current,
+                        isRead: true,
+                    }
+                    : current,
         );
     };
 
@@ -298,6 +519,16 @@ export default function NotificationsPage() {
                         isRead: true,
                     }),
                 ),
+        );
+
+        setSelectedNotification(
+            (current) =>
+                current
+                    ? {
+                        ...current,
+                        isRead: true,
+                    }
+                    : current,
         );
     };
 
@@ -325,12 +556,16 @@ export default function NotificationsPage() {
     };
 
 
+    /* =====================================================
+       RENDER
+    ===================================================== */
+
     return (
         <div className="mx-auto w-full max-w-[1400px]">
 
             {/* ==================================================
-          PAGE HEADER
-      =================================================== */}
+              PAGE HEADER
+            =================================================== */}
 
             <div className="mb-6">
 
@@ -347,9 +582,9 @@ export default function NotificationsPage() {
                         </h1>
 
                         <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500 sm:text-sm">
-                            Review project alerts, risk changes,
-                            cost and schedule warnings, and system
-                            updates.
+                            Review active AI-generated project
+                            early warnings, risk signals,
+                            and priority alerts.
                         </p>
                     </div>
 
@@ -359,8 +594,13 @@ export default function NotificationsPage() {
                         <Button
                             variant="secondary"
                             size="sm"
-                            onClick={markAllAsRead}
-                            disabled={unreadCount === 0}
+                            onClick={
+                                markAllAsRead
+                            }
+                            disabled={
+                                unreadCount ===
+                                0
+                            }
                         >
                             <CheckCheck size={14} />
                             Mark all as read
@@ -374,8 +614,8 @@ export default function NotificationsPage() {
 
 
             {/* ==================================================
-          SUMMARY CARDS
-      =================================================== */}
+              SUMMARY CARDS
+            =================================================== */}
 
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
 
@@ -391,7 +631,9 @@ export default function NotificationsPage() {
 
                 <NotificationSummary
                     label="Unread"
-                    value={unreadCount}
+                    value={
+                        unreadCount
+                    }
                     icon={
                         <Info size={17} />
                     }
@@ -399,21 +641,20 @@ export default function NotificationsPage() {
 
                 <NotificationSummary
                     label="Critical"
-                    value={criticalCount}
+                    value={
+                        criticalCount
+                    }
                     icon={
-                        <ShieldAlert size={17} />
+                        <ShieldAlert
+                            size={17}
+                        />
                     }
                 />
 
                 <NotificationSummary
                     label="Warnings"
                     value={
-                        notifications.filter(
-                            (item) =>
-                                item.type ===
-                                "warning" &&
-                                !item.isRead,
-                        ).length
+                        warningCount
                     }
                     icon={
                         <AlertTriangle
@@ -426,8 +667,8 @@ export default function NotificationsPage() {
 
 
             {/* ==================================================
-          CONTENT
-      =================================================== */}
+              CONTENT
+            =================================================== */}
 
             <section className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
 
@@ -452,7 +693,9 @@ export default function NotificationsPage() {
 
                                 <Input
                                     value={search}
-                                    onChange={(event) =>
+                                    onChange={(
+                                        event,
+                                    ) =>
                                         setSearch(
                                             event.target.value,
                                         )
@@ -473,7 +716,8 @@ export default function NotificationsPage() {
                                         notifications.length
                                     }
                                     active={
-                                        activeTab === "All"
+                                        activeTab ===
+                                        "All"
                                     }
                                     onClick={() =>
                                         setActiveTab(
@@ -484,7 +728,9 @@ export default function NotificationsPage() {
 
                                 <NotificationTab
                                     label="Unread"
-                                    count={unreadCount}
+                                    count={
+                                        unreadCount
+                                    }
                                     active={
                                         activeTab ===
                                         "Unread"
@@ -518,6 +764,13 @@ export default function NotificationsPage() {
 
                                 <NotificationTab
                                     label="Risk"
+                                    count={
+                                        notifications.filter(
+                                            (item) =>
+                                                item.category ===
+                                                "Risk",
+                                        ).length
+                                    }
                                     active={
                                         activeTab ===
                                         "Risk"
@@ -531,6 +784,13 @@ export default function NotificationsPage() {
 
                                 <NotificationTab
                                     label="Cost"
+                                    count={
+                                        notifications.filter(
+                                            (item) =>
+                                                item.category ===
+                                                "Cost",
+                                        ).length
+                                    }
                                     active={
                                         activeTab ===
                                         "Cost"
@@ -544,6 +804,13 @@ export default function NotificationsPage() {
 
                                 <NotificationTab
                                     label="Delay"
+                                    count={
+                                        notifications.filter(
+                                            (item) =>
+                                                item.category ===
+                                                "Delay",
+                                        ).length
+                                    }
                                     active={
                                         activeTab ===
                                         "Delay"
@@ -557,6 +824,13 @@ export default function NotificationsPage() {
 
                                 <NotificationTab
                                     label="Progress"
+                                    count={
+                                        notifications.filter(
+                                            (item) =>
+                                                item.category ===
+                                                "Progress",
+                                        ).length
+                                    }
                                     active={
                                         activeTab ===
                                         "Progress"
@@ -591,8 +865,46 @@ export default function NotificationsPage() {
                     {/* List */}
                     <div>
 
-                        {filteredNotifications.length ===
-                            0 ? (
+                        {isLoading ? (
+                            <div className="px-5 py-16 text-center">
+
+                                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
+                                    <Bell
+                                        size={20}
+                                        className="animate-pulse"
+                                    />
+                                </div>
+
+                                <h3 className="mt-4 text-sm font-bold text-slate-800">
+                                    Loading early warnings
+                                </h3>
+
+                                <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-slate-400">
+                                    Fetching the latest
+                                    AI-generated project
+                                    alerts.
+                                </p>
+
+                            </div>
+                        ) : error ? (
+                            <div className="px-5 py-16 text-center">
+
+                                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-50 text-red-500">
+                                    <ShieldAlert
+                                        size={20}
+                                    />
+                                </div>
+
+                                <h3 className="mt-4 text-sm font-bold text-slate-800">
+                                    Unable to load warnings
+                                </h3>
+
+                                <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-slate-400">
+                                    {error}
+                                </p>
+
+                            </div>
+                        ) : filteredNotifications.length === 0 ? (
                             <div className="px-5 py-16 text-center">
 
                                 <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
@@ -600,12 +912,14 @@ export default function NotificationsPage() {
                                 </div>
 
                                 <h3 className="mt-4 text-sm font-bold text-slate-800">
-                                    No notifications found
+                                    No active notifications
                                 </h3>
 
                                 <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-slate-400">
-                                    Try changing the selected category
-                                    or search term.
+                                    There are no active early
+                                    warnings matching the
+                                    selected category or
+                                    search term.
                                 </p>
 
                             </div>
@@ -645,11 +959,16 @@ export default function NotificationsPage() {
 
                 {/* Desktop detail panel */}
                 <div className="hidden xl:sticky xl:top-[92px] xl:block xl:self-start">
+
                     {selectedNotification ? (
                         <NotificationDetails
-                            notification={selectedNotification}
+                            notification={
+                                selectedNotification
+                            }
                             onClose={() =>
-                                setSelectedNotification(null)
+                                setSelectedNotification(
+                                    null,
+                                )
                             }
                             onProject={() => {
                                 if (
@@ -664,27 +983,37 @@ export default function NotificationsPage() {
                     ) : (
                         <NotificationDetailsEmpty />
                     )}
+
                 </div>
 
             </section>
 
+
             {/* Mobile notification detail sheet */}
             {selectedNotification && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-slate-950/40 xl:hidden">
+
                     <button
                         type="button"
                         aria-label="Close notification details"
                         onClick={() =>
-                            setSelectedNotification(null)
+                            setSelectedNotification(
+                                null,
+                            )
                         }
                         className="absolute inset-0"
                     />
 
                     <div className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl sm:p-5">
+
                         <NotificationDetails
-                            notification={selectedNotification}
+                            notification={
+                                selectedNotification
+                            }
                             onClose={() =>
-                                setSelectedNotification(null)
+                                setSelectedNotification(
+                                    null,
+                                )
                             }
                             onProject={() => {
                                 if (
@@ -700,7 +1029,9 @@ export default function NotificationsPage() {
                                 }
                             }}
                         />
+
                     </div>
+
                 </div>
             )}
 
@@ -805,7 +1136,8 @@ function NotificationRow({
             notification.type,
         );
 
-    const Icon = config.icon;
+    const Icon =
+        config.icon;
 
     return (
         <div
@@ -928,7 +1260,8 @@ function NotificationDetails({
             notification.type,
         );
 
-    const Icon = config.icon;
+    const Icon =
+        config.icon;
 
     return (
         <Card padding="lg">
@@ -1038,6 +1371,10 @@ function NotificationDetails({
 }
 
 
+/* =========================================================
+   DETAIL METRIC
+========================================================= */
+
 function DetailMetric({
     label,
     value,
@@ -1061,6 +1398,10 @@ function DetailMetric({
 }
 
 
+/* =========================================================
+   EMPTY DETAILS
+========================================================= */
+
 function NotificationDetailsEmpty() {
     return (
         <Card
@@ -1079,8 +1420,8 @@ function NotificationDetailsEmpty() {
                 </h3>
 
                 <p className="mt-2 max-w-xs text-xs leading-5 text-slate-400">
-                    Select an alert from the list to view
-                    details and take action.
+                    Select an alert from the list to
+                    view details and take action.
                 </p>
 
             </div>
@@ -1101,10 +1442,13 @@ function notificationVisual(
         case "critical":
             return {
                 icon: ShieldAlert,
+
                 iconBackground:
                     "bg-red-50",
+
                 iconText:
                     "text-red-600",
+
                 badgeVariant:
                     "danger" as const,
             };
@@ -1112,10 +1456,13 @@ function notificationVisual(
         case "warning":
             return {
                 icon: AlertTriangle,
+
                 iconBackground:
                     "bg-amber-50",
+
                 iconText:
                     "text-amber-600",
+
                 badgeVariant:
                     "warning" as const,
             };
@@ -1123,10 +1470,13 @@ function notificationVisual(
         case "success":
             return {
                 icon: CheckCheck,
+
                 iconBackground:
                     "bg-emerald-50",
+
                 iconText:
                     "text-emerald-600",
+
                 badgeVariant:
                     "success" as const,
             };
@@ -1135,10 +1485,13 @@ function notificationVisual(
         default:
             return {
                 icon: Info,
+
                 iconBackground:
                     "bg-blue-50",
+
                 iconText:
                     "text-blue-600",
+
                 badgeVariant:
                     "info" as const,
             };

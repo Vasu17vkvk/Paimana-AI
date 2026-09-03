@@ -5,7 +5,9 @@ import {
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 
+import { getActiveWarnings } from "../../services/warningsApi";
 
 interface HeaderProps {
     onMobileMenu: () => void;
@@ -15,10 +17,40 @@ export default function Header({
     onMobileMenu,
 }: HeaderProps) {
     const navigate = useNavigate();
+
+    const [activeWarningCount, setActiveWarningCount] =
+        useState(0);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadActiveWarnings = async () => {
+            try {
+                const warnings = await getActiveWarnings();
+
+                if (!cancelled) {
+                    setActiveWarningCount(warnings.length);
+                }
+            } catch {
+                if (!cancelled) {
+                    setActiveWarningCount(0);
+                }
+            }
+        };
+
+        loadActiveWarnings();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     return (
         <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-3 backdrop-blur sm:h-[76px] sm:px-5 lg:px-7">
+
             {/* Left */}
             <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+
                 <button
                     type="button"
                     onClick={onMobileMenu}
@@ -29,6 +61,7 @@ export default function Header({
                 </button>
 
                 <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 sm:max-w-[360px]">
+
                     <Search
                         size={16}
                         className="shrink-0 text-slate-400"
@@ -48,17 +81,22 @@ export default function Header({
 
             {/* Right */}
             <div className="ml-2 flex shrink-0 items-center gap-2 sm:gap-4">
+
                 <button
                     type="button"
                     aria-label="Notifications"
-                    onClick={() =>
-                        navigate("/notifications")
-                    }
+                    onClick={() => navigate("/notifications")}
                     className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
                 >
                     <Bell size={18} />
 
-                    <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-red-500" />
+                    {activeWarningCount > 0 && (
+                        <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white">
+                            {activeWarningCount > 99
+                                ? "99+"
+                                : activeWarningCount}
+                        </span>
+                    )}
                 </button>
 
                 <div className="hidden h-7 w-px bg-slate-200 sm:block" />
