@@ -24,7 +24,9 @@ def create_app() -> Flask:
     # PostgreSQL / SQLAlchemy driver
     # ============================================================
 
-    database_url = app.config.get("SQLALCHEMY_DATABASE_URI")
+    database_url = app.config.get(
+        "SQLALCHEMY_DATABASE_URI"
+    )
 
     if database_url:
         if database_url.startswith("postgres://"):
@@ -33,6 +35,7 @@ def create_app() -> Flask:
                 "postgresql+psycopg://",
                 1,
             )
+
         elif database_url.startswith("postgresql://"):
             database_url = database_url.replace(
                 "postgresql://",
@@ -40,7 +43,9 @@ def create_app() -> Flask:
                 1,
             )
 
-        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+        app.config[
+            "SQLALCHEMY_DATABASE_URI"
+        ] = database_url
 
     # ============================================================
     # CORS
@@ -49,17 +54,21 @@ def create_app() -> Flask:
     frontend_url = os.getenv(
         "FRONTEND_URL",
         "http://localhost:5173",
-    )
+    ).strip().rstrip("/")
+
+    allowed_origins = [
+        "http://localhost:5173",
+        "https://paimana-ai-two.vercel.app",
+    ]
+
+    if frontend_url not in allowed_origins:
+        allowed_origins.append(frontend_url)
 
     CORS(
         app,
         resources={
             r"/api/*": {
-                "origins": [
-                    "http://localhost:5173",
-                    "https://paimana-ai-two.vercel.app",
-                    frontend_url,
-                ]
+                "origins": allowed_origins
             }
         },
     )
@@ -69,7 +78,10 @@ def create_app() -> Flask:
     # ============================================================
 
     db.init_app(app)
-    migrate.init_app(app, db)
+    migrate.init_app(
+        app,
+        db,
+    )
 
     # ============================================================
     # Routes
