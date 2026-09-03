@@ -53,7 +53,7 @@ def create_app() -> Flask:
 
     frontend_url = os.getenv(
         "FRONTEND_URL",
-        "http://localhost:5173",
+        "https://paimana-ai-two.vercel.app",
     ).strip().rstrip("/")
 
     allowed_origins = [
@@ -68,7 +68,19 @@ def create_app() -> Flask:
         app,
         resources={
             r"/api/*": {
-                "origins": allowed_origins
+                "origins": allowed_origins,
+                "methods": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                ],
+                "allow_headers": [
+                    "Content-Type",
+                    "Authorization",
+                ],
             }
         },
     )
