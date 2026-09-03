@@ -497,3 +497,37 @@ export async function getDashboardFilterOptions() {
         "/dashboard/filter-options",
     );
 }
+
+export interface GeographicProject {
+    project_code: string;
+    project_name: string;
+    state: string;
+    sector: string | null;
+    ministry: string | null;
+    physical_progress_pct: number | null;
+    delay_days: number | null;
+    cost_overrun_pct: number | null;
+    risk_score: number | null;
+    risk_level: string | null;
+}
+
+export interface GeographicProjectsResponse {
+    count: number;
+    projects: GeographicProject[];
+}
+
+export async function getGeographicProjects(
+    state?: string,
+): Promise<GeographicProjectsResponse> {
+    const searchParams = new URLSearchParams();
+
+    if (state && state !== "All States") {
+        searchParams.set("state", state);
+    }
+
+    const query = searchParams.toString();
+
+    return apiRequest<GeographicProjectsResponse>(
+        `/geographic/projects${query ? `?${query}` : ""}`,
+    );
+}

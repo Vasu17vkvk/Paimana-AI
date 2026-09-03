@@ -19,6 +19,8 @@ import SectorMinistryAnalyticsPage
 
 import ProjectAnalyticsPage from "../features/project-analytics/ProjectAnalyticsPage";  
 
+import GeographicViewPage from "../features/geographic-view/GeographicViewPage";
+
 function ModulePlaceholder({
     title,
 }: {
@@ -92,9 +94,7 @@ export const router = createBrowserRouter([
 
             {
                 path: "geographic-view",
-                element: (
-                    <ModulePlaceholder title="Geographic View" />
-                ),
+                element: <GeographicViewPage />,
             },
 
             {
