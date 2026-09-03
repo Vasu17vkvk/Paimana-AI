@@ -278,6 +278,89 @@ def load_data(
 
     return master, monthly, flash
 
+def get_filter_options(
+    data_dir: Optional[str | Path] = None,
+) -> dict[str, list[str]]:
+    """
+    Return stable filter options from the full PostgreSQL dataset.
+
+    These options are intentionally independent of the currently
+    selected filters so dropdowns do not disappear after filtering.
+    """
+
+    master, monthly, _flash = load_data(data_dir)
+
+    def clean_values(
+        series: pd.Series,
+    ) -> list[str]:
+        values = (
+            series
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+
+        values = values[
+            values.ne("")
+            & values.ne("nan")
+            & values.ne("None")
+        ]
+
+        return sorted(
+            values.unique().tolist(),
+            key=lambda value: value.lower(),
+        )
+
+    # --------------------------------------------------------
+    # Financial years from monthly history
+    # --------------------------------------------------------
+
+    financial_years = (
+        monthly["snapshot_month"]
+        .dropna()
+        .apply(financial_year)
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    financial_years = sorted(
+        financial_years,
+        reverse=True,
+    )
+
+    # --------------------------------------------------------
+    # Snapshot months from monthly history
+    # --------------------------------------------------------
+
+    snapshot_months = (
+        monthly["snapshot_month"]
+        .dropna()
+        .dt.to_period("M")
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    snapshot_months = sorted(
+        snapshot_months,
+        reverse=True,
+    )
+
+    return {
+        "ministries": clean_values(
+            master["ministry"]
+        ),
+        "sectors": clean_values(
+            master["sector"]
+        ),
+        "states": clean_values(
+            master["flash_state"]
+        ),
+        "financial_years": financial_years,
+        "snapshot_months": snapshot_months,
+    }
+
 
 def financial_year(value: pd.Timestamp) -> Optional[str]:
     if pd.isna(value):

@@ -25,29 +25,50 @@ import {
 
 import {
   getSectorMinistryAnalytics,
+  getSectorMinistryFilterOptions,
   type SummaryRow,
 } from "../../services/sectorMinistryApi";
 
-function formatCrore(value: number): string {
-  if (value >= 100000) {
-    return `₹${(value / 100000).toFixed(2)}L Cr`;
-  }
+function safeNumber(value: number | null | undefined): number {
+  const parsed = Number(value);
 
-  if (value >= 1000) {
-    return `₹${(value / 1000).toFixed(2)}K Cr`;
-  }
-
-  return `₹${value.toFixed(2)} Cr`;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatNumber(value: number): string {
+function formatCrore(
+  value: number | null | undefined,
+): string {
+  const safeValue = safeNumber(value);
+
+  if (safeValue >= 100000) {
+    return `₹${(safeValue / 100000).toFixed(2)}L Cr`;
+  }
+
+  if (safeValue >= 1000) {
+    return `₹${(safeValue / 1000).toFixed(2)}K Cr`;
+  }
+
+  return `₹${safeValue.toFixed(2)} Cr`;
+}
+
+function formatNumber(
+  value: number | null | undefined,
+): string {
   return new Intl.NumberFormat("en-IN").format(
-    Math.round(value),
+    Math.round(safeNumber(value)),
   );
 }
 
-function formatPct(value: number): string {
-  return `${value.toFixed(1)}%`;
+function formatPct(
+  value: number | null | undefined,
+): string {
+  return `${safeNumber(value).toFixed(1)}%`;
+}
+
+function formatMonths(
+  value: number | null | undefined,
+): string {
+  return `${safeNumber(value).toFixed(1)} mo`;
 }
 
 function healthClass(value: number): string {
@@ -73,6 +94,16 @@ export default function SectorMinistryAnalyticsPage() {
   const [state, setState] = useState("All States");
   const [financialYear, setFinancialYear] = useState("All Years");
   const [snapshotMonth, setSnapshotMonth] = useState("All Months");
+
+  const {
+    data: filterOptions,
+    isLoading: isLoadingFilterOptions,
+    isError: isFilterOptionsError,
+  } = useQuery({
+    queryKey: ["sector-ministry-filter-options"],
+    queryFn: getSectorMinistryFilterOptions,
+    staleTime: 5 * 60_000,
+  });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
@@ -145,218 +176,211 @@ export default function SectorMinistryAnalyticsPage() {
         </div>
 
         {/* Filters */}
-<div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-  <div className="mb-3 text-xs font-semibold text-slate-800">
-    Analytics Filters
-  </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-xs font-semibold text-slate-800">
+              Analytics Filters
+            </div>
 
-  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-    {/* View By */}
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        View By
-      </span>
+            {isLoadingFilterOptions && (
+              <div className="text-[10px] text-slate-400">
+                Loading filter options...
+              </div>
+            )}
 
-      <select
-        value={viewBy}
-        onChange={(event) =>
-          setViewBy(
-            event.target.value as "sector" | "ministry",
-          )
-        }
-        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-      >
-        <option value="sector">Sector</option>
-        <option value="ministry">Ministry</option>
-      </select>
-    </label>
+            {isFilterOptionsError && (
+              <div className="text-[10px] text-red-500">
+                Unable to load filter options
+              </div>
+            )}
+          </div>
 
-    {/* Ministry */}
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        Ministry
-      </span>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {/* View By */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                View By
+              </span>
 
-      <select
-        value={ministry}
-        onChange={(event) => setMinistry(event.target.value)}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-      >
-        <option value="All Ministries">
-          All Ministries
-        </option>
+              <select
+                value={viewBy}
+                onChange={(event) =>
+                  setViewBy(
+                    event.target.value as "sector" | "ministry",
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="sector">Sector</option>
+                <option value="ministry">Ministry</option>
+              </select>
+            </label>
 
-        {data?.ministry_summary
-          ?.map((row) => row.ministry)
-          .filter(
-            (value): value is string =>
-              Boolean(value),
-          )
-          .sort((a, b) => a.localeCompare(b))
-          .map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-      </select>
-    </label>
+            {/* Ministry */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Ministry
+              </span>
 
-    {/* Sector */}
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        Sector
-      </span>
+              <select
+                value={ministry}
+                onChange={(event) =>
+                  setMinistry(event.target.value)
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Ministries">
+                  All Ministries
+                </option>
 
-      <select
-        value={sector}
-        onChange={(event) => setSector(event.target.value)}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-      >
-        <option value="All Sectors">
-          All Sectors
-        </option>
+                {filterOptions?.ministries.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
 
-        {data?.sector_summary
-          ?.map((row) => row.sector)
-          .filter(
-            (value): value is string =>
-              Boolean(value),
-          )
-          .sort((a, b) => a.localeCompare(b))
-          .map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-      </select>
-    </label>
+            {/* Sector */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Sector
+              </span>
 
-    {/* State */}
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        State
-      </span>
+              <select
+                value={sector}
+                onChange={(event) =>
+                  setSector(event.target.value)
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Sectors">
+                  All Sectors
+                </option>
 
-      <select
-        value={state}
-        onChange={(event) => setState(event.target.value)}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-      >
-        <option value="All States">
-          All States
-        </option>
+                {filterOptions?.sectors.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
 
-        {/* State options will be added from backend filter_options */}
-      </select>
-    </label>
+            {/* State */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                State
+              </span>
 
-    {/* Financial Year */}
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        Financial Year
-      </span>
+              <select
+                value={state}
+                onChange={(event) =>
+                  setState(event.target.value)
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All States">
+                  All States
+                </option>
 
-      <select
-        value={financialYear}
-        onChange={(event) =>
-          setFinancialYear(event.target.value)
-        }
-        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-      >
-        <option value="All Years">
-          All Years
-        </option>
+                {filterOptions?.states.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
 
-        <option value="FY 2025-26">
-          FY 2025-26
-        </option>
+            {/* Financial Year */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Financial Year
+              </span>
 
-        <option value="FY 2024-25">
-          FY 2024-25
-        </option>
+              <select
+                value={financialYear}
+                onChange={(event) =>
+                  setFinancialYear(
+                    event.target.value,
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Years">
+                  All Years
+                </option>
 
-        <option value="FY 2023-24">
-          FY 2023-24
-        </option>
+                {filterOptions?.financial_years.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={`FY ${value}`}
+                    >
+                      FY {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
 
-        <option value="FY 2022-23">
-          FY 2022-23
-        </option>
+            {/* Snapshot Month */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Snapshot Month
+              </span>
 
-        <option value="FY 2021-22">
-          FY 2021-22
-        </option>
-      </select>
-    </label>
+              <select
+                value={snapshotMonth}
+                onChange={(event) =>
+                  setSnapshotMonth(
+                    event.target.value,
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Months">
+                  All Months
+                </option>
 
-    {/* Snapshot Month */}
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        Snapshot Month
-      </span>
-
-      <select
-        value={snapshotMonth}
-        onChange={(event) =>
-          setSnapshotMonth(event.target.value)
-        }
-        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-      >
-        <option value="All Months">
-          All Months
-        </option>
-
-        <option value="2026-03">
-          March 2026
-        </option>
-
-        <option value="2026-02">
-          February 2026
-        </option>
-
-        <option value="2026-01">
-          January 2026
-        </option>
-
-        <option value="2025-12">
-          December 2025
-        </option>
-
-        <option value="2025-11">
-          November 2025
-        </option>
-
-        <option value="2025-10">
-          October 2025
-        </option>
-
-        <option value="2025-09">
-          September 2025
-        </option>
-
-        <option value="2025-08">
-          August 2025
-        </option>
-
-        <option value="2025-07">
-          July 2025
-        </option>
-
-        <option value="2025-06">
-          June 2025
-        </option>
-
-        <option value="2025-05">
-          May 2025
-        </option>
-
-        <option value="2025-04">
-          April 2025
-        </option>
-      </select>
-    </label>
-  </div>
-</div>
+                {filterOptions?.snapshot_months.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {new Intl.DateTimeFormat(
+                        "en-IN",
+                        {
+                          month: "long",
+                          year: "numeric",
+                        },
+                      ).format(
+                        new Date(
+                          `${value}-01T00:00:00`,
+                        ),
+                      )}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+          </div>
+        </div>
 
         {/* Loading */}
         {isLoading && (
@@ -708,11 +732,11 @@ export default function SectorMinistryAnalyticsPage() {
                   <tbody className="divide-y divide-slate-100">
                     {summaryRows.slice(0, 15).map((row) => (
                       <tr
-                        key={row.sector ?? row.ministry}
+                        key={row.sector ?? row.ministry ?? "unknown"}
                         className="hover:bg-slate-50"
                       >
                         <td className="px-4 py-3 text-xs font-medium text-slate-800">
-                          {row.sector ?? row.ministry}
+                          {row.sector ?? row.ministry ?? "Unknown"}
                         </td>
 
                         <td className="px-4 py-3 text-xs text-slate-600">
@@ -728,7 +752,7 @@ export default function SectorMinistryAnalyticsPage() {
                         </td>
 
                         <td className="px-4 py-3 text-xs text-slate-600">
-                          {row.avg_delay_months.toFixed(1)} mo
+                          {formatMonths(row.avg_delay_months)}
                         </td>
 
                         <td className="px-4 py-3 text-xs font-medium text-slate-700">
@@ -859,25 +883,25 @@ export default function SectorMinistryAnalyticsPage() {
                     )
                       .slice(0, 12)
                       .map((row) => (
-                        <tr key={row.sector ?? row.ministry}>
+                        <tr key={row.sector ?? row.ministry ?? "unknown"}>
                           <td className="px-4 py-3 text-xs font-medium text-slate-800">
-                            {row.sector ?? row.ministry}
+                            {row.sector ?? row.ministry ?? "Unknown"}
                           </td>
 
                           <td className="px-4 py-3 text-xs font-semibold text-emerald-600">
-                            {row["Low Risk"].toFixed(1)}%
+                            {formatPct(row["Low Risk"])}
                           </td>
 
                           <td className="px-4 py-3 text-xs font-semibold text-yellow-600">
-                            {row["Moderate Risk"].toFixed(1)}%
+                            {formatPct(row["Moderate Risk"])}
                           </td>
 
                           <td className="px-4 py-3 text-xs font-semibold text-orange-600">
-                            {row["High Risk"].toFixed(1)}%
+                            {formatPct(row["High Risk"])}
                           </td>
 
                           <td className="px-4 py-3 text-xs font-semibold text-red-600">
-                            {row["Very High Risk"].toFixed(1)}%
+                            {formatPct(row["Very High Risk"])}
                           </td>
                         </tr>
                       ))}
@@ -967,11 +991,11 @@ export default function SectorMinistryAnalyticsPage() {
                         </td>
 
                         <td className="px-4 py-3 text-xs text-orange-600">
-                          {project.delay_months.toFixed(1)} mo
+                          {formatMonths(project.delay_months)}
                         </td>
 
                         <td className="px-4 py-3 text-xs text-red-600">
-                          {project.cost_overrun_pct.toFixed(1)}%
+                          {formatPct(project.cost_overrun_pct)}
                         </td>
                       </tr>
                     ))}
@@ -999,7 +1023,7 @@ export default function SectorMinistryAnalyticsPage() {
                 </div>
 
                 <div className="text-[11px] text-slate-400">
-                  {data.data_quality.rate_pct.toFixed(2)}% flagged
+                  {safeNumber(data.data_quality.rate_pct).toFixed(2)}% flagged
                 </div>
               </div>
             </div>

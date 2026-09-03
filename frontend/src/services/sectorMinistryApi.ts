@@ -9,15 +9,23 @@ export interface SectorMinistryFilters {
   snapshot_month?: string;
 }
 
+export interface SectorMinistryFilterOptions {
+  ministries: string[];
+  sectors: string[];
+  states: string[];
+  financial_years: string[];
+  snapshot_months: string[];
+}
+
 export interface AnalyticsKpis {
-  avg_cost_overrun_pct: number;
-  avg_delay_months: number;
+  avg_cost_overrun_pct: number | null;
+  avg_delay_months: number | null;
   cost_overrun_projects: number;
   cost_overrun_rate_pct: number;
   data_quality?: {
     definition: string;
     projects_flagged: number;
-    rate_pct: number;
+    rate_pct: number | null;
   };
   delay_rate_pct: number;
   delayed_projects: number;
@@ -32,41 +40,41 @@ export interface AnalyticsKpis {
 }
 
 export interface SummaryRow {
-  avg_cost_overrun_pct: number;
-  avg_delay_days: number;
-  avg_delay_months: number;
-  avg_health_score_v1?: number;
+  avg_cost_overrun_pct: number | null;
+  avg_delay_days: number | null;
+  avg_delay_months: number | null;
+  avg_health_score_v1?: number | null;
   cost_overrun_projects: number;
   cost_overrun_rate_pct: number;
-  data_quality_flagged_projects?: number;
-  data_quality_rate_pct?: number;
+  data_quality_flagged_projects?: number | null;
+  data_quality_rate_pct?: number | null;
   delay_rate_pct: number;
   delayed_projects: number;
-  expenditure_to_analytical_cost_pct?: number;
-  sector?: string;
-  ministry?: string;
-  total_analytical_cost_cr?: number;
-  total_cost_change_exposure_cr?: number;
-  total_cost_increase_cr?: number;
-  total_expenditure_cr?: number;
-  total_original_cost_cr?: number;
+  expenditure_to_analytical_cost_pct?: number | null;
+  sector?: string | null;
+  ministry?: string | null;
+  total_analytical_cost_cr?: number | null;
+  total_cost_change_exposure_cr?: number | null;
+  total_cost_increase_cr?: number | null;
+  total_expenditure_cr?: number | null;
+  total_original_cost_cr?: number | null;
   total_projects: number;
-  total_revised_cost_cr?: number;
+  total_revised_cost_cr?: number | null;
 }
 
 export interface HealthRow {
-  sector?: string;
-  ministry?: string;
-  "Low Risk": number;
-  "Moderate Risk": number;
-  "High Risk": number;
-  "Very High Risk": number;
+  sector?: string | null;
+  ministry?: string | null;
+  "Low Risk": number | null;
+  "Moderate Risk": number | null;
+  "High Risk": number | null;
+  "Very High Risk": number | null;
 }
 
 export interface MonthlyTrendRow {
-  avg_cost_overrun_pct: number;
-  avg_delay_days: number;
-  avg_delay_months: number;
+  avg_cost_overrun_pct: number | null;
+  avg_delay_days: number | null;
+  avg_delay_months: number | null;
   cost_overrun_projects: number;
   cost_overrun_rate_pct: number;
   delay_rate_pct: number;
@@ -75,8 +83,8 @@ export interface MonthlyTrendRow {
   revised_cost_cr: number;
   project_count: number;
   snapshot_month: string;
-  sector?: string;
-  ministry?: string;
+  sector?: string | null;
+  ministry?: string | null;
 }
 
 export interface KeyInsight {
@@ -93,20 +101,20 @@ export interface EarlyWarning {
   message: string;
   metric: string;
   reason: string;
-  severity: "moderate" | "high" | "immediate";
+  severity: "low" | "moderate" | "high" | "immediate";
   source_field: string;
   title: string;
   value: number;
 }
 
 export interface PriorityProject {
-  analytics_cost_cr: number;
-  cost_overrun_pct: number;
-  delay_days: number;
-  delay_months: number;
-  final_cost_overrun_pct: number;
-  final_expenditure_cr: number;
-  flash_latest_physical_progress: number;
+  analytics_cost_cr: number | null;
+  cost_overrun_pct: number | null;
+  delay_days: number | null;
+  delay_months: number | null;
+  final_cost_overrun_pct: number | null;
+  final_expenditure_cr: number | null;
+  flash_latest_physical_progress: number | null;
   health_band_v1: string;
   health_drivers_v1: string[];
   health_score_v1: number;
@@ -180,8 +188,14 @@ export interface AnalyticsResponse {
   data_quality: {
     definition: string;
     projects_flagged: number;
-    rate_pct: number;
+    rate_pct: number | null;
   };
+}
+
+export async function getSectorMinistryFilterOptions(): Promise<SectorMinistryFilterOptions> {
+  return apiRequest<SectorMinistryFilterOptions>(
+    "/sector-ministry/filter-options",
+  );
 }
 
 export async function getSectorMinistryAnalytics(
@@ -209,14 +223,20 @@ export async function getSectorMinistryAnalytics(
     filters.financial_year &&
     filters.financial_year !== "All Years"
   ) {
-    params.set("financial_year", filters.financial_year);
+    params.set(
+      "financial_year",
+      filters.financial_year.replace(/^FY\s+/i, ""),
+    );
   }
 
   if (
     filters.snapshot_month &&
     filters.snapshot_month !== "All Months"
   ) {
-    params.set("snapshot_month", filters.snapshot_month);
+    params.set(
+      "snapshot_month",
+      filters.snapshot_month,
+    );
   }
 
   const query = params.toString();
