@@ -13,6 +13,10 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from sqlalchemy import text
+
+from app.extensions import db
+
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 MASTER_FILE = "01_PROJECT_MASTER_CLEANED.csv"
 MONTHLY_FILE = "02_PAIMANA_MONTHLY_HISTORY_CLEAN.csv"
@@ -53,62 +57,225 @@ def _read_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, low_memory=False)
 
 
-def load_data(data_dir: Optional[str | Path] = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    base = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
-    paths = [base / MASTER_FILE, base / MONTHLY_FILE, base / FLASH_FILE]
-    missing = [str(p) for p in paths if not p.exists()]
-    if missing:
-        raise FileNotFoundError("Sector/Ministry V1 requires: " + "; ".join(missing))
+def load_data(
+    data_dir: Optional[str | Path] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Load Sector / Ministry Analytics data from PostgreSQL.
 
-    master, monthly, flash = (_read_csv(p) for p in paths)
-    master = master.loc[:, ~master.columns.duplicated()].copy()
-    monthly = monthly.loc[:, ~monthly.columns.duplicated()].copy()
-    flash = flash.loc[:, ~flash.columns.duplicated()].copy()
-    _require_columns(master, REQUIRED_MASTER_COLUMNS, MASTER_FILE)
-    _require_columns(monthly, REQUIRED_MONTHLY_COLUMNS, MONTHLY_FILE)
-    _require_columns(flash, REQUIRED_FLASH_COLUMNS, FLASH_FILE)
+    PostgreSQL tables:
+        project_master
+        paimana_monthly_history
+        flash_modern_history
 
-    for col in ["original_end_date", "revised_end_date", "first_snapshot", "last_snapshot"]:
+    The data_dir argument is retained for compatibility with
+    the existing function signature, but production data is
+    loaded from PostgreSQL.
+    """
+
+    def load_table(
+        table_name: str,
+    ) -> pd.DataFrame:
+        query = text(
+            f'''
+            SELECT *
+            FROM "{table_name}"
+            '''
+        )
+
+        with db.engine.connect() as connection:
+            df = pd.read_sql(
+                query,
+                connection,
+            )
+
+        if df.empty:
+            raise ValueError(
+                f"PostgreSQL table '{table_name}' is empty."
+            )
+
+        return df.loc[
+            :,
+            ~df.columns.duplicated(),
+        ].copy()
+
+    master = load_table(
+        "project_master"
+    )
+
+    monthly = load_table(
+        "paimana_monthly_history"
+    )
+
+    flash = load_table(
+        "flash_modern_history"
+    )
+
+    # Validate required columns
+    _require_columns(
+        master,
+        REQUIRED_MASTER_COLUMNS,
+        "project_master",
+    )
+
+    _require_columns(
+        monthly,
+        REQUIRED_MONTHLY_COLUMNS,
+        "paimana_monthly_history",
+    )
+
+    _require_columns(
+        flash,
+        REQUIRED_FLASH_COLUMNS,
+        "flash_modern_history",
+    )
+
+    # Date conversions
+    for col in [
+        "original_end_date",
+        "revised_end_date",
+        "first_snapshot",
+        "last_snapshot",
+    ]:
         if col in master.columns:
-            master[col] = pd.to_datetime(master[col], errors="coerce")
-    monthly["snapshot_month"] = pd.to_datetime(monthly["snapshot_month"], errors="coerce")
-    flash["snapshot_month"] = pd.to_datetime(flash["snapshot_month"], errors="coerce")
+            master[col] = pd.to_datetime(
+                master[col],
+                errors="coerce",
+            )
 
+    monthly["snapshot_month"] = pd.to_datetime(
+        monthly["snapshot_month"],
+        errors="coerce",
+    )
+
+    flash["snapshot_month"] = pd.to_datetime(
+        flash["snapshot_month"],
+        errors="coerce",
+    )
+
+    # Numeric conversions for master
     master_numeric = [
-        "original_cost_cr", "revised_cost_cr", "revised_cost_analytical_cr",
-        "expenditure_cr", "final_expenditure_cr", "cost_overrun_cr",
-        "cost_overrun_pct", "final_cost_overrun_pct", "delay_days", "delay_months",
-        "final_schedule_change_days", "flash_latest_physical_progress", "expenditure_pct",
+        "original_cost_cr",
+        "revised_cost_cr",
+        "revised_cost_analytical_cr",
+        "expenditure_cr",
+        "final_expenditure_cr",
+        "cost_overrun_cr",
+        "cost_overrun_pct",
+        "final_cost_overrun_pct",
+        "delay_days",
+        "delay_months",
+        "final_schedule_change_days",
+        "flash_latest_physical_progress",
+        "expenditure_pct",
     ]
+
     for col in master_numeric:
         if col in master.columns:
-            master[col] = pd.to_numeric(master[col], errors="coerce")
+            master[col] = pd.to_numeric(
+                master[col],
+                errors="coerce",
+            )
+
+    # Integer flags
     for col in [
-        "is_delayed", "has_cost_overrun", "extreme_cost_overrun_flag",
-        "extreme_schedule_change_flag", "flash_progress_stagnation_flag", "flash_low_progress_flag",
+        "is_delayed",
+        "has_cost_overrun",
+        "extreme_cost_overrun_flag",
+        "extreme_schedule_change_flag",
+        "flash_progress_stagnation_flag",
+        "flash_low_progress_flag",
     ]:
-        master[col] = pd.to_numeric(master[col], errors="coerce").fillna(0).astype(int)
+        if col in master.columns:
+            master[col] = (
+                pd.to_numeric(
+                    master[col],
+                    errors="coerce",
+                )
+                .fillna(0)
+                .astype(int)
+            )
+
+    # Monthly numeric columns
     for col in [
-        "revised_cost_cr", "expenditure_cr", "delay_days", "cost_overrun_pct",
-        "expenditure_change_cr", "cost_overrun_cr", "schedule_change_days",
+        "revised_cost_cr",
+        "expenditure_cr",
+        "delay_days",
+        "cost_overrun_pct",
+        "expenditure_change_cr",
+        "cost_overrun_cr",
+        "schedule_change_days",
     ]:
         if col in monthly.columns:
-            monthly[col] = pd.to_numeric(monthly[col], errors="coerce")
+            monthly[col] = pd.to_numeric(
+                monthly[col],
+                errors="coerce",
+            )
+
+    # FLASH numeric columns
     for col in [
-        "physical_progress_pct", "expenditure_change_cr", "physical_progress_change_pct",
+        "physical_progress_pct",
+        "expenditure_change_cr",
+        "physical_progress_change_pct",
         "revised_cost_change_cr",
     ]:
         if col in flash.columns:
-            flash[col] = pd.to_numeric(flash[col], errors="coerce")
+            flash[col] = pd.to_numeric(
+                flash[col],
+                errors="coerce",
+            )
 
-    master["analytics_cost_cr"] = master["revised_cost_analytical_cr"].fillna(master["original_cost_cr"])
-    monthly["delay_flag"] = (monthly["delay_days"].fillna(0) > 0).astype(int)
-    monthly["cost_overrun_flag"] = (monthly["cost_overrun_pct"].fillna(0) > 0).astype(int)
-    monthly = monthly.dropna(subset=["project_code", "snapshot_month"]).copy()
-    flash = flash.dropna(subset=["project_code", "snapshot_month"]).copy()
-    master["project_code"] = master["project_code"].astype(str)
-    monthly["project_code"] = monthly["project_code"].astype(str)
-    flash["project_code"] = flash["project_code"].astype(str)
+    # Derived columns
+    master["analytics_cost_cr"] = (
+        master["revised_cost_analytical_cr"]
+        .fillna(master["original_cost_cr"])
+    )
+
+    monthly["delay_flag"] = (
+        monthly["delay_days"]
+        .fillna(0)
+        .gt(0)
+        .astype(int)
+    )
+
+    monthly["cost_overrun_flag"] = (
+        monthly["cost_overrun_pct"]
+        .fillna(0)
+        .gt(0)
+        .astype(int)
+    )
+
+    # Clean invalid records
+    monthly = monthly.dropna(
+        subset=[
+            "project_code",
+            "snapshot_month",
+        ]
+    ).copy()
+
+    flash = flash.dropna(
+        subset=[
+            "project_code",
+            "snapshot_month",
+        ]
+    ).copy()
+
+    # Normalize project codes
+    master["project_code"] = (
+        master["project_code"]
+        .astype(str)
+    )
+
+    monthly["project_code"] = (
+        monthly["project_code"]
+        .astype(str)
+    )
+
+    flash["project_code"] = (
+        flash["project_code"]
+        .astype(str)
+    )
+
     return master, monthly, flash
 
 
