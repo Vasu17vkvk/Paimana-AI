@@ -8,6 +8,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from sqlalchemy import text
+
+from app.extensions import db
 
 # ============================================================
 # PATHS
@@ -148,20 +151,67 @@ def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
 # DATA LOADING
 # ============================================================
 
+# ============================================================
+# DATA LOADING
+# ============================================================
+
+def _load_postgres_table(
+    table_name: str,
+) -> pd.DataFrame:
+    """
+    Load a complete Project Analytics table from PostgreSQL.
+    """
+
+    query = text(
+        f'''
+        SELECT *
+        FROM "{table_name}"
+        '''
+    )
+
+    with db.engine.connect() as connection:
+        df = pd.read_sql(
+            query,
+            connection,
+        )
+
+    if df.empty:
+        raise ValueError(
+            f"PostgreSQL table '{table_name}' is empty."
+        )
+
+    df = df.loc[
+        :,
+        ~df.columns.duplicated(),
+    ].copy()
+
+    return df
+
+
+def _normalize_project_code_column(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Normalize project_code values for consistent API matching.
+    """
+
+    if "project_code" in df.columns:
+        df["project_code"] = (
+            df["project_code"]
+            .apply(_to_project_code)
+        )
+
+    return df
+
+
 def load_master() -> pd.DataFrame:
     global _master_cache
 
     if _master_cache is not None:
         return _master_cache.copy()
 
-    if not MASTER_FILE.exists():
-        raise FileNotFoundError(
-            f"Project master dataset not found: {MASTER_FILE}"
-        )
-
-    df = pd.read_csv(
-        MASTER_FILE,
-        low_memory=False,
+    df = _load_postgres_table(
+        "project_master"
     )
 
     date_columns = [
@@ -180,11 +230,9 @@ def load_master() -> pd.DataFrame:
                 errors="coerce",
             )
 
-    if "project_code" in df.columns:
-        df["project_code"] = (
-            df["project_code"]
-            .apply(_to_project_code)
-        )
+    df = _normalize_project_code_column(
+        df
+    )
 
     _master_cache = df.copy()
 
@@ -197,14 +245,8 @@ def load_history() -> pd.DataFrame:
     if _history_cache is not None:
         return _history_cache.copy()
 
-    if not HISTORY_FILE.exists():
-        raise FileNotFoundError(
-            f"Monthly history dataset not found: {HISTORY_FILE}"
-        )
-
-    df = pd.read_csv(
-        HISTORY_FILE,
-        low_memory=False,
+    df = _load_postgres_table(
+        "paimana_monthly_history"
     )
 
     if "snapshot_month" in df.columns:
@@ -213,11 +255,9 @@ def load_history() -> pd.DataFrame:
             errors="coerce",
         )
 
-    if "project_code" in df.columns:
-        df["project_code"] = (
-            df["project_code"]
-            .apply(_to_project_code)
-        )
+    df = _normalize_project_code_column(
+        df
+    )
 
     _history_cache = df.copy()
 
@@ -230,14 +270,8 @@ def load_flash() -> pd.DataFrame:
     if _flash_cache is not None:
         return _flash_cache.copy()
 
-    if not FLASH_FILE.exists():
-        raise FileNotFoundError(
-            f"FLASH history dataset not found: {FLASH_FILE}"
-        )
-
-    df = pd.read_csv(
-        FLASH_FILE,
-        low_memory=False,
+    df = _load_postgres_table(
+        "flash_modern_history"
     )
 
     if "snapshot_month" in df.columns:
@@ -246,11 +280,9 @@ def load_flash() -> pd.DataFrame:
             errors="coerce",
         )
 
-    if "project_code" in df.columns:
-        df["project_code"] = (
-            df["project_code"]
-            .apply(_to_project_code)
-        )
+    df = _normalize_project_code_column(
+        df
+    )
 
     _flash_cache = df.copy()
 
@@ -263,26 +295,17 @@ def load_ml_ready() -> pd.DataFrame:
     if _ml_ready_cache is not None:
         return _ml_ready_cache.copy()
 
-    if not ML_READY_FILE.exists():
-        raise FileNotFoundError(
-            f"ML-ready dataset not found: {ML_READY_FILE}"
-        )
-
-    df = pd.read_csv(
-        ML_READY_FILE,
-        low_memory=False,
+    df = _load_postgres_table(
+        "paimana_ml_ready"
     )
 
-    if "project_code" in df.columns:
-        df["project_code"] = (
-            df["project_code"]
-            .apply(_to_project_code)
-        )
+    df = _normalize_project_code_column(
+        df
+    )
 
     _ml_ready_cache = df.copy()
 
     return df
-
 
 # ============================================================
 # MODEL LOADING

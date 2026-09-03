@@ -1,28 +1,37 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
+from sqlalchemy import text
 
+from app.extensions import db
 from app.ml import engine
 
 
-DATA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "data"
-    / "PAIMANA_ML_READY_WITH_PROJECT_CODE.csv"
-)
-
-
 def load_ml_data() -> pd.DataFrame:
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(
-            f"ML dataset not found: {DATA_PATH}"
+    """
+    Load ML-ready project data from PostgreSQL.
+
+    PostgreSQL table:
+        paimana_ml_ready
+    """
+
+    query = text(
+        """
+        SELECT *
+        FROM "paimana_ml_ready"
+        """
+    )
+
+    with db.engine.connect() as connection:
+        df = pd.read_sql(
+            query,
+            connection,
         )
 
-    df = pd.read_csv(
-        DATA_PATH
-    )
+    if df.empty:
+        raise FileNotFoundError(
+            "ML dataset table 'paimana_ml_ready' is empty"
+        )
 
     df = df.loc[
         :,
@@ -35,6 +44,10 @@ def load_ml_data() -> pd.DataFrame:
 def get_project_risk(
     project_code: str,
 ) -> dict:
+    """
+    Get the latest ML-based risk result for a project.
+    """
+
     df = load_ml_data()
 
     rows = df[

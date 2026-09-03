@@ -222,7 +222,16 @@ def project_analytics_what_if(
     """
     Run a What-If risk simulation for a project.
 
-    JSON body:
+    Accepted JSON body:
+
+    {
+        "physical_progress_delta": 10,
+        "schedule_delay_days": 30,
+        "monthly_expenditure_change_cr": 20,
+        "revised_cost_change_cr": 50
+    }
+
+    Backward-compatible keys are also accepted:
 
     {
         "progress_delta": 10,
@@ -238,24 +247,41 @@ def project_analytics_what_if(
             silent=True
         ) or {}
 
+        # ----------------------------------------------------
+        # Read frontend field names first
+        # Fallback to original backend field names
+        # ----------------------------------------------------
+
         progress_delta = body.get(
-            "progress_delta",
-            0,
+            "physical_progress_delta",
+            body.get(
+                "progress_delta",
+                0,
+            ),
         )
 
         delay_delta = body.get(
-            "delay_delta",
-            0,
+            "schedule_delay_days",
+            body.get(
+                "delay_delta",
+                0,
+            ),
         )
 
         expenditure_delta = body.get(
-            "expenditure_delta",
-            0,
+            "monthly_expenditure_change_cr",
+            body.get(
+                "expenditure_delta",
+                0,
+            ),
         )
 
         revised_cost_delta = body.get(
-            "revised_cost_delta",
-            0,
+            "revised_cost_change_cr",
+            body.get(
+                "revised_cost_delta",
+                0,
+            ),
         )
 
         result = simulate_project(
@@ -294,7 +320,7 @@ def project_analytics_what_if(
             }
         ), 503
 
-    except (TypeError, ValueError) as exc:
+    except TypeError as exc:
 
         return jsonify(
             {
