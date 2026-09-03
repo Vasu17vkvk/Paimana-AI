@@ -14,6 +14,7 @@ from app.routes.warnings import warnings_bp
 from app.routes.sector_ministry import sector_ministry_bp
 from app.routes.project_analytics import project_analytics_bp
 
+from app.routes.dashboard import dashboard_bp
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -134,6 +135,11 @@ def create_app() -> Flask:
     app.register_blueprint(
         project_analytics_bp,
         url_prefix="/api",
+    )
+
+    app.register_blueprint(
+    dashboard_bp,
+    url_prefix="/api",
     )
 
     return app

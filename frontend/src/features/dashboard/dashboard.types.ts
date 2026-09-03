@@ -8,7 +8,10 @@ export type RiskLevel =
 export type ProjectStatus =
     | "Ongoing"
     | "Delayed"
-    | "Completed";
+    | "Completed"
+    | "On Schedule"
+    | "Accelerated"
+    | "No Revised Date";
 
 export interface DashboardProject {
     id: string;
@@ -20,14 +23,16 @@ export interface DashboardProject {
     originalCost: number;
     revisedCost: number;
 
-    riskScore: number;
-    costRisk: RiskLevel;
+    riskScore: number | null;
+    riskLevel: RiskLevel;
+
+    costRisk: string;
     delayRisk: RiskLevel;
 
     delayMonths: number;
     physicalProgress: number;
 
-    status: ProjectStatus;
+    status: string;
 }
 
 export interface DashboardFilters {
