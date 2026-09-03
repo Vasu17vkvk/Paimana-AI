@@ -1,150 +1,374 @@
-from pathlib import Path
+from __future__ import annotations
 
 import pandas as pd
+from sqlalchemy import text
 
-from app.config.development import DevelopmentConfig
-from app.services.risk_service import get_project_risk
+from app.extensions import db
+from app.ml import engine
 
 
-def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+# ============================================================
+# HELPERS
+# ============================================================
+
+def _to_project_code(value) -> str:
     """
-    Find a dataframe column using case-insensitive matching.
-    Also ignores spaces, underscores and hyphens.
+    Normalize project codes so DB values are handled consistently.
     """
-    normalized = {
-        str(col).strip().lower().replace(" ", "").replace("_", "").replace("-", ""): col
-        for col in df.columns
-    }
+    if value is None:
+        return ""
 
-    for candidate in candidates:
-        key = (
-            candidate.strip()
-            .lower()
-            .replace(" ", "")
-            .replace("_", "")
-            .replace("-", "")
-        )
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
 
-        if key in normalized:
-            return normalized[key]
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
 
-    return None
+    return str(value).strip()
 
 
-def get_project_warnings(project_code: str) -> dict:
-    risk = get_project_risk(project_code)
+def _safe_number(value, default=0):
+    """
+    Convert numpy/pandas values to normal Python numbers.
+    """
+    try:
+        if pd.isna(value):
+            return default
 
-    return {
-        "project_code": risk["project_code"],
-        "snapshot_year": risk["snapshot_year"],
-        "snapshot_month": risk["snapshot_month"],
-        "early_warning_active": risk["early_warning_active"],
-        "early_warning_priority": risk["early_warning_priority"],
-        "early_warning_reasons": risk["early_warning_reasons"],
-        "risk_level": risk["risk_level"],
-        "overall_risk_score": risk["overall_risk_score"],
-    }
+        return value.item() if hasattr(value, "item") else value
+
+    except Exception:
+        return default
 
 
-def get_active_warnings() -> list[dict]:
-    data_dir = Path(DevelopmentConfig.ML_DATA_DIR)
-    csv_path = data_dir / "PAIMANA_ML_READY_WITH_PROJECT_CODE.csv"
+# ============================================================
+# LOAD ML DATA FROM POSTGRESQL
+# ============================================================
 
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"ML data file not found: {csv_path}"
-        )
+def load_ml_data() -> pd.DataFrame:
+    """
+    Load the ML-ready dataset from PostgreSQL.
 
-    df = pd.read_csv(csv_path)
+    PostgreSQL table:
+        paimana_ml_ready
+    """
 
-    # Detect actual project-code column
-    project_code_col = _find_column(
-        df,
-        [
-            "Project Code",
-            "ProjectCode",
-            "project_code",
-            "projectcode",
-            "Code",
-            "Project ID",
-            "Project_ID",
-        ],
+    query = text(
+        """
+        SELECT *
+        FROM "paimana_ml_ready"
+        """
     )
 
-    if project_code_col is None:
+    with db.engine.connect() as connection:
+        df = pd.read_sql(
+            query,
+            connection,
+        )
+
+    if df.empty:
         raise ValueError(
-            f"Could not identify project-code column. "
-            f"Available columns: {list(df.columns)}"
+            "PostgreSQL table 'paimana_ml_ready' is empty."
         )
 
-    # Detect snapshot year/month columns
-    year_col = _find_column(
-        df,
-        [
-            "Snapshot Year",
-            "snapshot_year",
-            "SnapshotYear",
-            "Year",
-        ],
+    df = df.loc[
+        :,
+        ~df.columns.duplicated(),
+    ].copy()
+
+    # Normalize project code
+    if "project_code" not in df.columns:
+        raise ValueError(
+            "PostgreSQL table 'paimana_ml_ready' "
+            "does not contain 'project_code'."
+        )
+
+    df["project_code"] = (
+        df["project_code"]
+        .apply(_to_project_code)
     )
 
-    month_col = _find_column(
-        df,
-        [
-            "Snapshot Month",
-            "snapshot_month",
-            "SnapshotMonth",
-            "Month",
-        ],
+    # Remove invalid project codes
+    df = df[
+        df["project_code"].ne("")
+    ].copy()
+
+    return df
+
+
+# ============================================================
+# PROJECT WARNING
+# ============================================================
+
+def get_project_warnings(
+    project_code: str,
+) -> dict:
+
+    project_code = _to_project_code(
+        project_code
     )
 
-    # Sort by latest snapshot where possible
+    if not project_code:
+        raise ValueError(
+            "Invalid project code."
+        )
+
+    # Load the project ML data directly from PostgreSQL
+    df = load_ml_data()
+
+    rows = df[
+        df["project_code"].eq(
+            project_code
+        )
+    ].copy()
+
+    if rows.empty:
+        raise ValueError(
+            f"Project not found: {project_code}"
+        )
+
+    # --------------------------------------------------------
+    # Latest snapshot
+    # --------------------------------------------------------
+
     sort_columns = []
 
-    if year_col:
-        sort_columns.append(year_col)
+    if "snapshot_year" in rows.columns:
+        sort_columns.append(
+            "snapshot_year"
+        )
 
-    if month_col:
-        sort_columns.append(month_col)
+    if "snapshot_month_num" in rows.columns:
+        sort_columns.append(
+            "snapshot_month_num"
+        )
 
     if sort_columns:
-        df = df.sort_values(sort_columns)
+        rows = rows.sort_values(
+            sort_columns
+        )
 
-    # One latest row per project
-    latest_df = df.drop_duplicates(
-        subset=[project_code_col],
-        keep="last",
+    latest_row = rows.iloc[-1]
+
+    # --------------------------------------------------------
+    # ML prediction
+    # --------------------------------------------------------
+
+    risk = engine.predict_row(
+        latest_row,
+        project_code,
     )
 
-    warnings = []
+    return {
+        "project_code": _to_project_code(
+            risk.get(
+                "project_code",
+                project_code,
+            )
+        ),
+        "snapshot_year": _safe_number(
+            risk.get(
+                "snapshot_year"
+            ),
+            None,
+        ),
+        "snapshot_month": _safe_number(
+            risk.get(
+                "snapshot_month"
+            ),
+            None,
+        ),
+        "early_warning_active": bool(
+            risk.get(
+                "early_warning_active",
+                False,
+            )
+        ),
+        "early_warning_priority": risk.get(
+            "early_warning_priority",
+            "NONE",
+        ),
+        "early_warning_reasons": list(
+            risk.get(
+                "early_warning_reasons",
+                [],
+            )
+            or []
+        ),
+        "risk_level": risk.get(
+            "risk_level",
+            "LOW",
+        ),
+        "overall_risk_score": float(
+            _safe_number(
+                risk.get(
+                    "overall_risk_score",
+                    0,
+                ),
+                0,
+            )
+        ),
+    }
 
-    for raw_project_code in latest_df[project_code_col].tolist():
 
-        if pd.isna(raw_project_code):
+# ============================================================
+# ACTIVE WARNINGS
+# ============================================================
+
+def get_active_warnings() -> list[dict]:
+    """
+    Return all currently active ML-generated warnings.
+
+    Data source:
+        PostgreSQL -> paimana_ml_ready
+
+    The latest snapshot of each project is evaluated using
+    the same supplied ML engine used by Risk Analysis.
+    """
+
+    df = load_ml_data()
+
+    # --------------------------------------------------------
+    # Latest snapshot per project
+    # --------------------------------------------------------
+
+    sort_columns = [
+        column
+        for column in [
+            "snapshot_year",
+            "snapshot_month_num",
+        ]
+        if column in df.columns
+    ]
+
+    if sort_columns:
+        df = df.sort_values(
+            sort_columns
+        )
+
+    latest_df = (
+        df
+        .drop_duplicates(
+            subset=["project_code"],
+            keep="last",
+        )
+        .copy()
+    )
+
+    warnings: list[dict] = []
+
+    # --------------------------------------------------------
+    # Evaluate latest row of each project
+    # --------------------------------------------------------
+
+    for _, latest_row in latest_df.iterrows():
+
+        project_code = _to_project_code(
+            latest_row["project_code"]
+        )
+
+        if not project_code:
             continue
-
-        project_code = str(raw_project_code).strip()
 
         try:
-            risk = get_project_risk(project_code)
+
+            risk = engine.predict_row(
+                latest_row,
+                project_code,
+            )
+
         except Exception:
+            # One bad project must not break the complete
+            # early-warning portfolio.
             continue
 
-        if risk["early_warning_active"]:
-            warnings.append(
-                {
-                    "project_code": risk["project_code"],
-                    "snapshot_year": risk["snapshot_year"],
-                    "snapshot_month": risk["snapshot_month"],
-                    "risk_level": risk["risk_level"],
-                    "overall_risk_score": risk["overall_risk_score"],
-                    "early_warning_priority": risk[
-                        "early_warning_priority"
-                    ],
-                    "early_warning_reasons": risk[
-                        "early_warning_reasons"
-                    ],
-                }
-            )
+        if not risk.get(
+            "early_warning_active",
+            False,
+        ):
+            continue
+
+        warnings.append(
+            {
+                "project_code": project_code,
+
+                "snapshot_year": _safe_number(
+                    risk.get(
+                        "snapshot_year",
+                        latest_row.get(
+                            "snapshot_year"
+                        ),
+                    ),
+                    None,
+                ),
+
+                "snapshot_month": _safe_number(
+                    risk.get(
+                        "snapshot_month",
+                        latest_row.get(
+                            "snapshot_month_num"
+                        ),
+                    ),
+                    None,
+                ),
+
+                "risk_level": risk.get(
+                    "risk_level",
+                    "LOW",
+                ),
+
+                "overall_risk_score": float(
+                    _safe_number(
+                        risk.get(
+                            "overall_risk_score",
+                            0,
+                        ),
+                        0,
+                    )
+                ),
+
+                "early_warning_priority": risk.get(
+                    "early_warning_priority",
+                    "NONE",
+                ),
+
+                "early_warning_reasons": list(
+                    risk.get(
+                        "early_warning_reasons",
+                        [],
+                    )
+                    or []
+                ),
+            }
+        )
+
+    # --------------------------------------------------------
+    # Sort highest priority first
+    # --------------------------------------------------------
+
+    priority_order = {
+        "IMMEDIATE": 0,
+        "HIGH": 1,
+        "NONE": 2,
+    }
+
+    warnings.sort(
+        key=lambda warning: (
+            priority_order.get(
+                warning[
+                    "early_warning_priority"
+                ],
+                99,
+            ),
+            -float(
+                warning[
+                    "overall_risk_score"
+                ]
+            ),
+        )
+    )
 
     return warnings
