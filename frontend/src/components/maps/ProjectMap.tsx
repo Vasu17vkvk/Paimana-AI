@@ -663,18 +663,17 @@ export default function ProjectMap() {
             setError(null);
 
             try {
-                const response =
-                    await getGeographicProjects(
-                        selectedState,
-                    );
+    const response =
+        await getGeographicProjects(
+            selectedState ?? undefined,
+        );
 
-                if (!cancelled) {
-                    setProjects(
-                        response.projects ??
-                            [],
-                    );
-                }
-            } catch (err) {
+    if (!cancelled) {
+        setProjects(
+            response.projects ?? [],
+        );
+    }
+} catch (err) {
                 if (!cancelled) {
                     setProjects([]);
 
