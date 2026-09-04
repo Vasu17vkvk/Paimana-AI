@@ -19,6 +19,10 @@ import PageHeader from "../../components/layout/PageHeader";
 import { apiRequest } from "../../services/api";
 import { formatCrore } from "../../utils/formatNumber";
 
+/* =========================================================
+   TYPES
+========================================================= */
+
 type Filters = {
     sector: string[];
     ministry: string[];
@@ -40,6 +44,7 @@ type Project = {
 
 type Detail = {
     project: Record<string, any>;
+
     risk: {
         overall: number | null;
         level: string | null;
@@ -49,21 +54,51 @@ type Detail = {
         predicted_cost_overrun_pct: number | null;
         alert_priority: string | null;
     };
+
     reasons: {
         title: string;
         explanation: string;
         solution: string;
     }[];
+
     history: {
         schedule: any[];
         progress: any[];
     };
 };
 
-type Simulation = {
-    baseline: Record<string, any>;
-    scenario: Record<string, any>;
+type Scenario = {
+    progress_delta: number;
+    delay_delta: number;
+    expenditure_delta: number;
+    revised_cost_delta: number;
 };
+
+type SimulationMetricKey =
+    | "overall_risk"
+    | "delay_probability"
+    | "stall_probability";
+
+type SimulationMetrics = {
+    overall_risk: number;
+    delay_probability: number;
+    stall_probability: number;
+    risk_level?: string;
+};
+
+type Simulation = {
+    baseline: SimulationMetrics;
+    scenario: SimulationMetrics;
+};
+
+type SimulationCardConfig = {
+    label: string;
+    key: SimulationMetricKey;
+    isProbability: boolean;
+};
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
 const emptyFilters: Filters = {
     sector: [],
@@ -72,6 +107,28 @@ const emptyFilters: Filters = {
     risk: [],
     status: [],
 };
+
+const simulationCards: SimulationCardConfig[] = [
+    {
+        label: "Overall Risk Score",
+        key: "overall_risk",
+        isProbability: false,
+    },
+    {
+        label: "Future Delay",
+        key: "delay_probability",
+        isProbability: true,
+    },
+    {
+        label: "Progress Stall",
+        key: "stall_probability",
+        isProbability: true,
+    },
+];
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function riskVariant(level: string | null) {
     const value = String(level ?? "").toLowerCase();
@@ -86,6 +143,10 @@ function riskVariant(level: string | null) {
 
     return "success" as const;
 }
+
+/* =========================================================
+   MULTI SELECT
+========================================================= */
 
 function MultiSelect({
     label,
@@ -108,7 +169,7 @@ function MultiSelect({
 
             <button
                 type="button"
-                onClick={() => setOpen(!open)}
+                onClick={() => setOpen((current) => !current)}
                 className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-xs text-slate-700 shadow-sm"
             >
                 <span className="truncate">
@@ -121,6 +182,7 @@ function MultiSelect({
             {open && (
                 <>
                     <button
+                        type="button"
                         className="fixed inset-0 z-20"
                         aria-label="Close"
                         onClick={() => setOpen(false)}
@@ -135,19 +197,31 @@ function MultiSelect({
                                 <input
                                     type="checkbox"
                                     checked={value.includes(option)}
-                                    onChange={() =>
-                                        onChange(
-                                            value.includes(option)
-                                                ? value.filter(
-                                                      (item) =>
-                                                          item !== option,
-                                                  )
-                                                : [...value, option],
-                                        )
-                                    }
+                                    onChange={() => {
+                                        if (
+                                            value.includes(
+                                                option,
+                                            )
+                                        ) {
+                                            onChange(
+                                                value.filter(
+                                                    (item) =>
+                                                        item !==
+                                                        option,
+                                                ),
+                                            );
+                                        } else {
+                                            onChange([
+                                                ...value,
+                                                option,
+                                            ]);
+                                        }
+                                    }}
                                 />
 
-                                <span className="truncate">{option}</span>
+                                <span className="truncate">
+                                    {option}
+                                </span>
                             </label>
                         ))}
                     </div>
@@ -156,6 +230,10 @@ function MultiSelect({
         </div>
     );
 }
+
+/* =========================================================
+   LINE CHART
+========================================================= */
 
 function LineChart({
     title,
@@ -175,7 +253,9 @@ function LineChart({
     if (!validPoints.length) {
         return (
             <Card>
-                <h3 className="text-sm font-bold">{title}</h3>
+                <h3 className="text-sm font-bold">
+                    {title}
+                </h3>
 
                 <p className="mt-8 text-center text-xs text-slate-400">
                     No history available.
@@ -184,7 +264,9 @@ function LineChart({
         );
     }
 
-    const values = validPoints.map((item) => Number(item[keyName]));
+    const values = validPoints.map((item) =>
+        Number(item[keyName]),
+    );
 
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -194,15 +276,23 @@ function LineChart({
     const height = 230;
     const padding = 30;
 
-    const coords = validPoints
+    const getX = (index: number) =>
+        padding +
+        (index * (width - padding * 2)) /
+            Math.max(validPoints.length - 1, 1);
+
+    const getY = (value: number) =>
+        height -
+        padding -
+        ((value - min) / span) *
+            (height - padding * 2);
+
+    const coordinates = validPoints
         .map(
             (item, index) =>
-                `${padding + (index * (width - padding * 2)) / Math.max(validPoints.length - 1, 1)},${
-                    height -
-                    padding -
-                    ((Number(item[keyName]) - min) / span) *
-                        (height - padding * 2)
-                }`,
+                `${getX(index)},${getY(
+                    Number(item[keyName]),
+                )}`,
         )
         .join(" ");
 
@@ -214,7 +304,8 @@ function LineChart({
                 </h3>
 
                 <span className="text-[10px] text-slate-400">
-                    Latest {values.at(-1)?.toFixed(1)}
+                    Latest{" "}
+                    {values.at(-1)?.toFixed(1)}
                     {suffix}
                 </span>
             </div>
@@ -240,40 +331,31 @@ function LineChart({
                 />
 
                 <polyline
-                    points={coords}
+                    points={coordinates}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="3"
                     className="text-slate-700"
                 />
 
-                {validPoints.map((item, index) => {
-                    const cx =
-                        padding +
-                        (index * (width - padding * 2)) /
-                            Math.max(validPoints.length - 1, 1);
-
-                    const cy =
-                        height -
-                        padding -
-                        ((Number(item[keyName]) - min) / span) *
-                            (height - padding * 2);
-
-                    return (
-                        <circle
-                            key={index}
-                            cx={cx}
-                            cy={cy}
-                            r="3"
-                            className="fill-slate-700"
-                        />
-                    );
-                })}
+                {validPoints.map((item, index) => (
+                    <circle
+                        key={index}
+                        cx={getX(index)}
+                        cy={getY(
+                            Number(item[keyName]),
+                        )}
+                        r="3"
+                        className="fill-slate-700"
+                    />
+                ))}
             </svg>
 
             <div className="flex justify-between text-[10px] text-slate-400">
                 <span>
-                    {String(validPoints[0]?.date ?? "").slice(0, 10)}
+                    {String(
+                        validPoints[0]?.date ?? "",
+                    ).slice(0, 10)}
                 </span>
 
                 <span>
@@ -286,8 +368,18 @@ function LineChart({
     );
 }
 
+/* =========================================================
+   MAIN PAGE
+========================================================= */
+
 export default function ProjectAnalyticsPage() {
-    const [options, setOptions] = useState<any>({
+    const [options, setOptions] = useState<{
+        sectors: string[];
+        ministries: string[];
+        states: string[];
+        risk_levels: string[];
+        schedule_statuses: string[];
+    }>({
         sectors: [],
         ministries: [],
         states: [],
@@ -298,13 +390,21 @@ export default function ProjectAnalyticsPage() {
     const [filters, setFilters] =
         useState<Filters>(emptyFilters);
 
-    const [projects, setProjects] = useState<Project[]>([]);
-    const [selected, setSelected] = useState("");
-    const [detail, setDetail] = useState<Detail | null>(null);
+    const [projects, setProjects] = useState<Project[]>(
+        [],
+    );
+
+    const [selected, setSelected] =
+        useState<string>("");
+
+    const [detail, setDetail] =
+        useState<Detail | null>(null);
 
     const [search, setSearch] = useState("");
 
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] =
+        useState(false);
+
     const [detailLoading, setDetailLoading] =
         useState(false);
 
@@ -316,18 +416,20 @@ export default function ProjectAnalyticsPage() {
     const [simLoading, setSimLoading] =
         useState(false);
 
-    const [scenario, setScenario] = useState({
-        progress_delta: 0,
-        delay_delta: 0,
-        expenditure_delta: 0,
-        revised_cost_delta: 0,
-    });
+    const [scenario, setScenario] =
+        useState<Scenario>({
+            progress_delta: 0,
+            delay_delta: 0,
+            expenditure_delta: 0,
+            revised_cost_delta: 0,
+        });
 
-    /*
-     * Load filter options once.
-     */
+    /* =====================================================
+       LOAD FILTER OPTIONS
+    ===================================================== */
+
     useEffect(() => {
-        let mounted = true;
+        let cancelled = false;
 
         async function loadFilters() {
             try {
@@ -335,37 +437,44 @@ export default function ProjectAnalyticsPage() {
                     "/analytics/project-filters",
                 );
 
-                if (mounted) {
-                    setOptions({
-                        sectors: Array.isArray(data?.sectors)
-                            ? data.sectors
-                            : [],
+                if (cancelled) {
+                    return;
+                }
 
-                        ministries: Array.isArray(
-                            data?.ministries,
-                        )
-                            ? data.ministries
-                            : [],
+                setOptions({
+                    sectors: Array.isArray(
+                        data?.sectors,
+                    )
+                        ? data.sectors
+                        : [],
 
-                        states: Array.isArray(data?.states)
-                            ? data.states
-                            : [],
+                    ministries: Array.isArray(
+                        data?.ministries,
+                    )
+                        ? data.ministries
+                        : [],
 
-                        risk_levels: Array.isArray(
-                            data?.risk_levels,
-                        )
-                            ? data.risk_levels
-                            : [],
+                    states: Array.isArray(
+                        data?.states,
+                    )
+                        ? data.states
+                        : [],
 
-                        schedule_statuses: Array.isArray(
+                    risk_levels: Array.isArray(
+                        data?.risk_levels,
+                    )
+                        ? data.risk_levels
+                        : [],
+
+                    schedule_statuses:
+                        Array.isArray(
                             data?.schedule_statuses,
                         )
                             ? data.schedule_statuses
                             : [],
-                    });
-                }
+                });
             } catch (e) {
-                if (mounted) {
+                if (!cancelled) {
                     setError(
                         e instanceof Error
                             ? e.message
@@ -378,29 +487,22 @@ export default function ProjectAnalyticsPage() {
         loadFilters();
 
         return () => {
-            mounted = false;
+            cancelled = true;
         };
     }, []);
 
-    /*
-     * Load project list.
-     *
-     * IMPORTANT:
-     * Backend may return either:
-     *
-     * [
-     *   {...},
-     *   {...}
-     * ]
-     *
-     * OR:
-     *
-     * {
-     *   projects: [...]
-     * }
-     *
-     * Both are handled here.
-     */
+    /* =====================================================
+       LOAD PROJECTS
+       
+       Handles BOTH:
+       
+       1. Direct array:
+          [...]
+       
+       2. Object:
+          { projects: [...] }
+    ===================================================== */
+
     useEffect(() => {
         let cancelled = false;
 
@@ -409,12 +511,16 @@ export default function ProjectAnalyticsPage() {
                 setLoading(true);
                 setError("");
 
-                const query = new URLSearchParams();
+                const query =
+                    new URLSearchParams();
 
                 Object.entries(filters).forEach(
                     ([key, values]) => {
                         values.forEach((value) => {
-                            query.append(key, value);
+                            query.append(
+                                key,
+                                value,
+                            );
                         });
                     },
                 );
@@ -423,83 +529,67 @@ export default function ProjectAnalyticsPage() {
                     ? `/analytics/projects?${query.toString()}`
                     : "/analytics/projects";
 
-                const response = await apiRequest<any>(
-                    endpoint,
-                );
+                const response =
+                    await apiRequest<any>(
+                        endpoint,
+                    );
 
                 if (cancelled) {
                     return;
                 }
 
                 /*
-                 * FIX:
-                 * Support both response formats.
+                 * IMPORTANT FIX:
+                 * Backend currently returns a direct
+                 * array, but this also supports
+                 * { projects: [...] }.
                  */
-                const rows: Project[] = Array.isArray(response)
-                    ? response
-                    : Array.isArray(response?.projects)
-                      ? response.projects
-                      : [];
+                const rows: Project[] =
+                    Array.isArray(response)
+                        ? response
+                        : Array.isArray(
+                                response?.projects,
+                            )
+                          ? response.projects
+                          : [];
 
                 setProjects(rows);
 
                 /*
-                 * Automatically select first project
-                 * when current project is not present.
+                 * Automatically select the first project
+                 * if current project no longer exists.
                  */
-                const currentExists =
-                    selected &&
-                    rows.some(
-                        (project) =>
-                            String(project.project_code) ===
-                            String(selected),
-                    );
+                setSelected((currentSelected) => {
+                    const currentExists =
+                        currentSelected &&
+                        rows.some(
+                            (project) =>
+                                String(
+                                    project.project_code,
+                                ) ===
+                                String(
+                                    currentSelected,
+                                ),
+                        );
 
-                const nextSelected = currentExists
-                    ? String(selected)
-                    : rows[0]?.project_code
-                      ? String(rows[0].project_code)
-                      : "";
+                    if (currentExists) {
+                        return String(
+                            currentSelected,
+                        );
+                    }
 
-                setSelected(nextSelected);
-
-                setSimulation(null);
-
-                if (!nextSelected) {
-                    setDetail(null);
-                    return;
-                }
+                    return rows[0]
+                        ?.project_code
+                        ? String(
+                              rows[0].project_code,
+                          )
+                        : "";
+                });
 
                 /*
-                 * Load first/current project's details.
+                 * Reset old simulation when filters change.
                  */
-                setDetailLoading(true);
-
-                try {
-                    const projectDetail =
-                        await apiRequest<Detail>(
-                            `/analytics/project/${encodeURIComponent(
-                                nextSelected,
-                            )}`,
-                        );
-
-                    if (!cancelled) {
-                        setDetail(projectDetail);
-                    }
-                } catch (e) {
-                    if (!cancelled) {
-                        setDetail(null);
-                        setError(
-                            e instanceof Error
-                                ? e.message
-                                : "Unable to load project",
-                        );
-                    }
-                } finally {
-                    if (!cancelled) {
-                        setDetailLoading(false);
-                    }
-                }
+                setSimulation(null);
             } catch (e) {
                 if (!cancelled) {
                     setProjects([]);
@@ -526,42 +616,74 @@ export default function ProjectAnalyticsPage() {
         };
     }, [filters]);
 
-    /*
-     * Analyze manually selected project.
-     */
+    /* =====================================================
+       LOAD SELECTED PROJECT DETAIL
+    ===================================================== */
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadDetail() {
+            if (!selected) {
+                setDetail(null);
+                return;
+            }
+
+            try {
+                setDetailLoading(true);
+                setError("");
+
+                const data =
+                    await apiRequest<Detail>(
+                        `/analytics/project/${encodeURIComponent(
+                            selected,
+                        )}`,
+                    );
+
+                if (!cancelled) {
+                    setDetail(data);
+                }
+            } catch (e) {
+                if (!cancelled) {
+                    setDetail(null);
+
+                    setError(
+                        e instanceof Error
+                            ? e.message
+                            : "Unable to load project",
+                    );
+                }
+            } finally {
+                if (!cancelled) {
+                    setDetailLoading(false);
+                }
+            }
+        }
+
+        loadDetail();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selected]);
+
+    /* =====================================================
+       MANUAL PROJECT ANALYSIS
+    ===================================================== */
+
     async function analyze(code: string) {
         setSelected(String(code));
         setSimulation(null);
-        setDetailLoading(true);
-
-        try {
-            setError("");
-
-            const data = await apiRequest<Detail>(
-                `/analytics/project/${encodeURIComponent(
-                    code,
-                )}`,
-            );
-
-            setDetail(data);
-        } catch (e) {
-            setDetail(null);
-
-            setError(
-                e instanceof Error
-                    ? e.message
-                    : "Unable to load project",
-            );
-        } finally {
-            setDetailLoading(false);
-        }
     }
 
-    /*
-     * Search within currently loaded projects.
-     */
+    /* =====================================================
+       SEARCH
+    ===================================================== */
+
     const visible = useMemo(() => {
-        const query = search.toLowerCase().trim();
+        const query = search
+            .toLowerCase()
+            .trim();
 
         if (!query) {
             return projects;
@@ -574,9 +696,10 @@ export default function ProjectAnalyticsPage() {
         );
     }, [projects, search]);
 
-    /*
-     * Run What-If simulation.
-     */
+    /* =====================================================
+       RUN SIMULATION
+    ===================================================== */
+
     async function simulateNow() {
         if (!selected) {
             return;
@@ -593,7 +716,9 @@ export default function ProjectAnalyticsPage() {
                     )}/simulate`,
                     {
                         method: "POST",
-                        body: JSON.stringify(scenario),
+                        body: JSON.stringify(
+                            scenario,
+                        ),
                     },
                 );
 
@@ -609,10 +734,16 @@ export default function ProjectAnalyticsPage() {
         }
     }
 
-    const activeFilters = Object.values(filters).reduce(
-        (total, values) => total + values.length,
-        0,
-    );
+    const activeFilters =
+        Object.values(filters).reduce(
+            (total, values) =>
+                total + values.length,
+            0,
+        );
+
+    /* =====================================================
+       RENDER
+    ===================================================== */
 
     return (
         <div>
@@ -622,13 +753,17 @@ export default function ProjectAnalyticsPage() {
                 description="Filter the portfolio, inspect a project, understand evidence-based delay indicators and test intervention scenarios using the supplied ML models."
             />
 
+            {/* ERROR */}
             {error && (
                 <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                     {error}
                 </div>
             )}
 
-            {/* FILTERS */}
+            {/* =================================================
+                FILTERS
+            ================================================= */}
+
             <Card className="mb-6">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -638,14 +773,17 @@ export default function ProjectAnalyticsPage() {
                         </div>
 
                         <p className="mt-1 text-xs text-slate-400">
-                            Filters work without selecting a
-                            project.
+                            Filters work without
+                            selecting a project.
                         </p>
                     </div>
 
                     <button
+                        type="button"
                         onClick={() => {
-                            setFilters(emptyFilters);
+                            setFilters(
+                                emptyFilters,
+                            );
                             setSearch("");
                         }}
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"
@@ -658,49 +796,67 @@ export default function ProjectAnalyticsPage() {
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     <MultiSelect
                         label="Sector"
-                        options={options.sectors}
+                        options={
+                            options.sectors
+                        }
                         value={filters.sector}
                         onChange={(value) =>
-                            setFilters((current) => ({
-                                ...current,
-                                sector: value,
-                            }))
+                            setFilters(
+                                (current) => ({
+                                    ...current,
+                                    sector: value,
+                                }),
+                            )
                         }
                     />
 
                     <MultiSelect
                         label="Ministry"
-                        options={options.ministries}
-                        value={filters.ministry}
+                        options={
+                            options.ministries
+                        }
+                        value={
+                            filters.ministry
+                        }
                         onChange={(value) =>
-                            setFilters((current) => ({
-                                ...current,
-                                ministry: value,
-                            }))
+                            setFilters(
+                                (current) => ({
+                                    ...current,
+                                    ministry: value,
+                                }),
+                            )
                         }
                     />
 
                     <MultiSelect
                         label="State"
-                        options={options.states}
+                        options={
+                            options.states
+                        }
                         value={filters.state}
                         onChange={(value) =>
-                            setFilters((current) => ({
-                                ...current,
-                                state: value,
-                            }))
+                            setFilters(
+                                (current) => ({
+                                    ...current,
+                                    state: value,
+                                }),
+                            )
                         }
                     />
 
                     <MultiSelect
                         label="Risk Level"
-                        options={options.risk_levels}
+                        options={
+                            options.risk_levels
+                        }
                         value={filters.risk}
                         onChange={(value) =>
-                            setFilters((current) => ({
-                                ...current,
-                                risk: value,
-                            }))
+                            setFilters(
+                                (current) => ({
+                                    ...current,
+                                    risk: value,
+                                }),
+                            )
                         }
                     />
 
@@ -709,19 +865,24 @@ export default function ProjectAnalyticsPage() {
                         options={
                             options.schedule_statuses
                         }
-                        value={filters.status}
+                        value={
+                            filters.status
+                        }
                         onChange={(value) =>
-                            setFilters((current) => ({
-                                ...current,
-                                status: value,
-                            }))
+                            setFilters(
+                                (current) => ({
+                                    ...current,
+                                    status: value,
+                                }),
+                            )
                         }
                     />
                 </div>
 
                 <div className="mt-4 text-[11px] text-slate-400">
                     <b className="text-slate-600">
-                        {activeFilters} active filters
+                        {activeFilters} active
+                        filters
                     </b>
 
                     {" · "}
@@ -732,7 +893,10 @@ export default function ProjectAnalyticsPage() {
                 </div>
             </Card>
 
-            {/* PROJECT TABLE */}
+            {/* =================================================
+                PROJECT TABLE
+            ================================================= */}
+
             <Card
                 padding="none"
                 className="mb-6 overflow-hidden"
@@ -744,7 +908,8 @@ export default function ProjectAnalyticsPage() {
                         </h2>
 
                         <p className="mt-1 text-xs text-slate-400">
-                            Search by code or name and open
+                            Search by code or
+                            name and open
                             detailed analysis.
                         </p>
                     </div>
@@ -759,7 +924,8 @@ export default function ProjectAnalyticsPage() {
                             value={search}
                             onChange={(event) =>
                                 setSearch(
-                                    event.target.value,
+                                    event.target
+                                        .value,
                                 )
                             }
                             placeholder="Search code or project name…"
@@ -782,96 +948,113 @@ export default function ProjectAnalyticsPage() {
                                     "State",
                                     "Status",
                                     "",
-                                ].map((heading) => (
-                                    <th
-                                        key={heading}
-                                        className="px-4 py-3"
-                                    >
-                                        {heading}
-                                    </th>
-                                ))}
+                                ].map(
+                                    (
+                                        heading,
+                                    ) => (
+                                        <th
+                                            key={
+                                                heading
+                                            }
+                                            className="px-4 py-3"
+                                        >
+                                            {
+                                                heading
+                                            }
+                                        </th>
+                                    ),
+                                )}
                             </tr>
                         </thead>
 
                         <tbody className="divide-y">
-                            {visible.map((project) => (
-                                <tr
-                                    key={
-                                        project.project_code
-                                    }
-                                    className="hover:bg-slate-50"
-                                >
-                                    <td className="px-4 py-3 font-semibold">
-                                        {
+                            {visible.map(
+                                (
+                                    project,
+                                ) => (
+                                    <tr
+                                        key={
                                             project.project_code
                                         }
-                                    </td>
-
-                                    <td className="px-4 py-3 font-medium">
-                                        {
-                                            project.project_name
-                                        }
-                                    </td>
-
-                                    <td className="px-4 py-3">
-                                        <Badge
-                                            variant={riskVariant(
-                                                project.risk_level,
-                                            )}
-                                        >
-                                            {project.risk_level ??
-                                                "N/A"}
-                                        </Badge>
-                                    </td>
-
-                                    <td className="px-4 py-3 font-semibold">
-                                        {project.overall_risk_score ==
-                                        null
-                                            ? "N/A"
-                                            : Number(
-                                                  project.overall_risk_score,
-                                              ).toFixed(1)}
-                                    </td>
-
-                                    <td className="px-4 py-3 text-slate-500">
-                                        {project.sector ??
-                                            "N/A"}
-                                    </td>
-
-                                    <td className="px-4 py-3 text-slate-500">
-                                        {project.ministry ??
-                                            "N/A"}
-                                    </td>
-
-                                    <td className="px-4 py-3 text-slate-500">
-                                        {project.state ??
-                                            "N/A"}
-                                    </td>
-
-                                    <td className="px-4 py-3 text-slate-500">
-                                        {project.schedule_status ??
-                                            "N/A"}
-                                    </td>
-
-                                    <td className="px-4 py-3">
-                                        <button
-                                            onClick={() =>
-                                                analyze(
-                                                    project.project_code,
-                                                )
+                                        className="hover:bg-slate-50"
+                                    >
+                                        <td className="px-4 py-3 font-semibold">
+                                            {
+                                                project.project_code
                                             }
-                                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white"
-                                        >
-                                            Analyze
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
+                                        </td>
+
+                                        <td className="px-4 py-3 font-medium">
+                                            {
+                                                project.project_name
+                                            }
+                                        </td>
+
+                                        <td className="px-4 py-3">
+                                            <Badge
+                                                variant={riskVariant(
+                                                    project.risk_level,
+                                                )}
+                                            >
+                                                {project.risk_level ??
+                                                    "N/A"}
+                                            </Badge>
+                                        </td>
+
+                                        <td className="px-4 py-3 font-semibold">
+                                            {project.overall_risk_score ==
+                                            null
+                                                ? "N/A"
+                                                : Number(
+                                                      project.overall_risk_score,
+                                                  ).toFixed(
+                                                      1,
+                                                  )}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-slate-500">
+                                            {project.sector ??
+                                                "N/A"}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-slate-500">
+                                            {project.ministry ??
+                                                "N/A"}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-slate-500">
+                                            {project.state ??
+                                                "N/A"}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-slate-500">
+                                            {project.schedule_status ??
+                                                "N/A"}
+                                        </td>
+
+                                        <td className="px-4 py-3">
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    analyze(
+                                                        project.project_code,
+                                                    )
+                                                }
+                                                className="rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white"
+                                            >
+                                                Analyze
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ),
+                            )}
 
                             {!visible.length && (
                                 <tr>
                                     <td
-                                        colSpan={9}
+                                        colSpan={
+                                            9
+                                        }
                                         className="px-4 py-12 text-center text-xs text-slate-400"
                                     >
                                         {loading
@@ -885,18 +1068,27 @@ export default function ProjectAnalyticsPage() {
                 </div>
             </Card>
 
-            {/* SELECTED PROJECT */}
+            {/* =================================================
+                DETAIL LOADING
+            ================================================= */}
+
             {detailLoading && !detail && (
                 <Card className="mb-6">
                     <div className="py-10 text-center text-xs text-slate-400">
-                        Loading project analysis…
+                        Loading project
+                        analysis…
                     </div>
                 </Card>
             )}
 
+            {/* =================================================
+                SELECTED PROJECT
+            ================================================= */}
+
             {detail && (
                 <div className="space-y-6">
-                    {/* HEADER */}
+                    {/* PROJECT HEADER */}
+
                     <div className="flex items-end justify-between">
                         <div>
                             <div className="text-[10px] font-bold uppercase text-slate-400">
@@ -905,7 +1097,8 @@ export default function ProjectAnalyticsPage() {
 
                             <h2 className="mt-1 text-2xl font-bold">
                                 {
-                                    detail.project
+                                    detail
+                                        .project
                                         .project_name
                                 }
                             </h2>
@@ -913,7 +1106,8 @@ export default function ProjectAnalyticsPage() {
                             <p className="mt-1 text-xs text-slate-500">
                                 Code:{" "}
                                 {
-                                    detail.project
+                                    detail
+                                        .project
                                         .project_code
                                 }
                             </p>
@@ -921,24 +1115,31 @@ export default function ProjectAnalyticsPage() {
 
                         <Badge
                             variant={riskVariant(
-                                detail.risk.level,
+                                detail.risk
+                                    .level,
                             )}
                             dot
                         >
-                            {detail.risk.level ?? "N/A"} Risk
+                            {detail.risk
+                                .level ??
+                                "N/A"}{" "}
+                            Risk
                         </Badge>
                     </div>
 
                     {/* KPI CARDS */}
+
                     <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
                         {[
                             [
                                 "Risk Score",
-                                detail.risk.overall ==
+                                detail.risk
+                                    .overall ==
                                 null
                                     ? "N/A"
                                     : `${Number(
-                                          detail.risk
+                                          detail
+                                              .risk
                                               .overall,
                                       ).toFixed(
                                           1,
@@ -946,16 +1147,19 @@ export default function ProjectAnalyticsPage() {
                             ],
                             [
                                 "Risk Level",
-                                detail.risk.level,
+                                detail.risk
+                                    .level,
                             ],
                             [
                                 "Delay",
-                                detail.project
+                                detail
+                                    .project
                                     .delay_days ==
                                 null
                                     ? "N/A"
                                     : `${Number(
-                                          detail.project
+                                          detail
+                                              .project
                                               .delay_days,
                                       ).toFixed(
                                           0,
@@ -963,12 +1167,14 @@ export default function ProjectAnalyticsPage() {
                             ],
                             [
                                 "Physical Progress",
-                                detail.project
+                                detail
+                                    .project
                                     .flash_latest_physical_progress ==
                                 null
                                     ? "N/A"
                                     : `${Number(
-                                          detail.project
+                                          detail
+                                              .project
                                               .flash_latest_physical_progress,
                                       ).toFixed(
                                           1,
@@ -976,7 +1182,8 @@ export default function ProjectAnalyticsPage() {
                             ],
                             [
                                 "Original Cost",
-                                detail.project
+                                detail
+                                    .project
                                     .original_cost_cr ==
                                 null
                                     ? "N/A"
@@ -990,7 +1197,8 @@ export default function ProjectAnalyticsPage() {
                             ],
                             [
                                 "Expenditure",
-                                detail.project
+                                detail
+                                    .project
                                     .expenditure_cr ==
                                 null
                                     ? "N/A"
@@ -1007,27 +1215,39 @@ export default function ProjectAnalyticsPage() {
                                 detail.risk
                                     .alert_priority,
                             ],
-                        ].map(([key, value]) => (
-                            <Card
-                                key={String(key)}
-                                padding="sm"
-                            >
-                                <div className="text-[9px] font-bold uppercase text-slate-400">
-                                    {key}
-                                </div>
+                        ].map(
+                            ([key, value]) => (
+                                <Card
+                                    key={String(
+                                        key,
+                                    )}
+                                    padding="sm"
+                                >
+                                    <div className="text-[9px] font-bold uppercase text-slate-400">
+                                        {
+                                            key
+                                        }
+                                    </div>
 
-                                <div className="mt-2 text-lg font-bold">
-                                    {value ?? "N/A"}
-                                </div>
-                            </Card>
-                        ))}
+                                    <div className="mt-2 text-lg font-bold">
+                                        {value ??
+                                            "N/A"}
+                                    </div>
+                                </Card>
+                            ),
+                        )}
                     </div>
 
-                    {/* RISK + PROJECT INFORMATION */}
+                    {/* RISK + PROJECT INFO */}
+
                     <div className="grid gap-6 lg:grid-cols-2">
                         <Card>
                             <div className="mb-4 flex gap-2">
-                                <ShieldAlert size={16} />
+                                <ShieldAlert
+                                    size={
+                                        16
+                                    }
+                                />
 
                                 <h3 className="text-sm font-bold">
                                     Risk Breakdown
@@ -1037,129 +1257,169 @@ export default function ProjectAnalyticsPage() {
                             {[
                                 [
                                     "Cost Risk",
-                                    detail.risk.cost,
+                                    detail.risk
+                                        .cost,
                                 ],
                                 [
                                     "Future Delay",
-                                    detail.risk.delay,
+                                    detail.risk
+                                        .delay,
                                 ],
                                 [
                                     "Progress Stall",
-                                    detail.risk.stall,
+                                    detail.risk
+                                        .stall,
                                 ],
-                            ].map(([key, value]) => (
-                                <div
-                                    key={String(key)}
-                                    className="mb-4"
-                                >
-                                    <div className="mb-1 flex justify-between text-xs">
-                                        <span>{key}</span>
+                            ].map(
+                                ([
+                                    key,
+                                    value,
+                                ]) => (
+                                    <div
+                                        key={String(
+                                            key,
+                                        )}
+                                        className="mb-4"
+                                    >
+                                        <div className="mb-1 flex justify-between text-xs">
+                                            <span>
+                                                {
+                                                    key
+                                                }
+                                            </span>
 
-                                        <b>
-                                            {value == null
-                                                ? "N/A"
-                                                : `${Number(
-                                                      value,
-                                                  ).toFixed(
-                                                      1,
-                                                  )}%`}
-                                        </b>
-                                    </div>
+                                            <b>
+                                                {value ==
+                                                null
+                                                    ? "N/A"
+                                                    : `${Number(
+                                                          value,
+                                                      ).toFixed(
+                                                          1,
+                                                      )}%`}
+                                            </b>
+                                        </div>
 
-                                    <div className="h-2 rounded-full bg-slate-100">
-                                        <div
-                                            className="h-2 rounded-full bg-slate-700"
-                                            style={{
-                                                width: `${Math.min(
-                                                    100,
-                                                    Math.max(
-                                                        0,
-                                                        Number(
-                                                            value ??
-                                                                0,
+                                        <div className="h-2 rounded-full bg-slate-100">
+                                            <div
+                                                className="h-2 rounded-full bg-slate-700"
+                                                style={{
+                                                    width: `${Math.min(
+                                                        100,
+                                                        Math.max(
+                                                            0,
+                                                            Number(
+                                                                value ??
+                                                                    0,
+                                                            ),
                                                         ),
-                                                    ),
-                                                )}%`,
-                                            }}
-                                        />
+                                                    )}%`,
+                                                }}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ),
+                            )}
                         </Card>
 
                         <Card>
                             <h3 className="mb-4 text-sm font-bold">
-                                Project Information
+                                Project
+                                Information
                             </h3>
 
                             <div className="grid gap-3 sm:grid-cols-2">
                                 {[
                                     [
                                         "Ministry",
-                                        detail.project
+                                        detail
+                                            .project
                                             .ministry,
                                     ],
                                     [
                                         "Sector",
-                                        detail.project
+                                        detail
+                                            .project
                                             .sector,
                                     ],
                                     [
                                         "State",
-                                        detail.project
+                                        detail
+                                            .project
                                             .flash_state,
                                     ],
                                     [
                                         "Implementing Agency",
-                                        detail.project
+                                        detail
+                                            .project
                                             .flash_implementing_agency,
                                     ],
                                     [
                                         "Schedule Status",
-                                        detail.project
+                                        detail
+                                            .project
                                             .schedule_status,
                                     ],
                                     [
                                         "Cost Status",
-                                        detail.project
+                                        detail
+                                            .project
                                             .cost_status,
                                     ],
                                     [
                                         "Original Completion",
-                                        detail.project
+                                        detail
+                                            .project
                                             .original_end_date,
                                     ],
                                     [
                                         "Revised Completion",
-                                        detail.project
+                                        detail
+                                            .project
                                             .revised_end_date,
                                     ],
                                     [
                                         "Data Quality",
-                                        detail.project
+                                        detail
+                                            .project
                                             .data_quality_flag,
                                     ],
-                                ].map(([key, value]) => (
-                                    <div key={String(key)}>
-                                        <div className="text-[9px] font-bold uppercase text-slate-400">
-                                            {key}
-                                        </div>
+                                ].map(
+                                    ([
+                                        key,
+                                        value,
+                                    ]) => (
+                                        <div
+                                            key={String(
+                                                key,
+                                            )}
+                                        >
+                                            <div className="text-[9px] font-bold uppercase text-slate-400">
+                                                {
+                                                    key
+                                                }
+                                            </div>
 
-                                        <div className="mt-1 text-xs font-semibold">
-                                            {value ?? "N/A"}
+                                            <div className="mt-1 text-xs font-semibold">
+                                                {value ??
+                                                    "N/A"}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ),
+                                )}
                             </div>
                         </Card>
                     </div>
 
                     {/* HISTORY */}
+
                     <div className="grid gap-6 lg:grid-cols-2">
                         <LineChart
                             title="Schedule Trajectory — Delay"
                             points={
-                                detail.history.schedule
+                                detail
+                                    .history
+                                    .schedule
                             }
                             keyName="delay_days"
                             suffix=" days"
@@ -1168,7 +1428,9 @@ export default function ProjectAnalyticsPage() {
                         <LineChart
                             title="Expenditure Trajectory"
                             points={
-                                detail.history.schedule
+                                detail
+                                    .history
+                                    .schedule
                             }
                             keyName="expenditure_cr"
                             suffix=" Cr"
@@ -1178,94 +1440,129 @@ export default function ProjectAnalyticsPage() {
                     <LineChart
                         title="Physical Progress Trajectory"
                         points={
-                            detail.history.progress
+                            detail.history
+                                .progress
                         }
                         keyName="physical_progress_pct"
                         suffix="%"
                     />
 
-                    {/* REASONS */}
+                    {/* =================================================
+                        REASONS
+                    ================================================= */}
+
                     <Card>
                         <div className="mb-4 flex items-center gap-2">
-                            <AlertTriangle size={17} />
+                            <AlertTriangle
+                                size={
+                                    17
+                                }
+                            />
 
                             <h3 className="text-sm font-bold">
-                                Reasons for Delay &
-                                Recommended Solutions
+                                Reasons for
+                                Delay &
+                                Recommended
+                                Solutions
                             </h3>
                         </div>
 
-                        {detail.reasons.map((reason) => (
-                            <div
-                                key={reason.title}
-                                className="mb-3 rounded-xl border p-4"
-                            >
-                                <div className="flex gap-3">
-                                    <AlertTriangle
-                                        size={15}
-                                        className="mt-0.5 text-red-600"
-                                    />
-
-                                    <div>
-                                        <b className="text-xs">
-                                            {
-                                                reason.title
+                        {detail.reasons.map(
+                            (reason) => (
+                                <div
+                                    key={
+                                        reason.title
+                                    }
+                                    className="mb-3 rounded-xl border p-4"
+                                >
+                                    <div className="flex gap-3">
+                                        <AlertTriangle
+                                            size={
+                                                15
                                             }
-                                        </b>
+                                            className="mt-0.5 text-red-600"
+                                        />
 
-                                        <p className="mt-1 text-xs leading-5 text-slate-500">
-                                            {
-                                                reason.explanation
-                                            }
-                                        </p>
-
-                                        <p className="mt-2 flex gap-2 text-xs leading-5 text-slate-600">
-                                            <CheckCircle2
-                                                size={14}
-                                                className="mt-0.5 text-emerald-600"
-                                            />
-
-                                            <span>
-                                                <b>
-                                                    Recommended
-                                                    solution:
-                                                </b>{" "}
+                                        <div>
+                                            <b className="text-xs">
                                                 {
-                                                    reason.solution
+                                                    reason.title
                                                 }
-                                            </span>
-                                        </p>
+                                            </b>
+
+                                            <p className="mt-1 text-xs leading-5 text-slate-500">
+                                                {
+                                                    reason.explanation
+                                                }
+                                            </p>
+
+                                            <p className="mt-2 flex gap-2 text-xs leading-5 text-slate-600">
+                                                <CheckCircle2
+                                                    size={
+                                                        14
+                                                    }
+                                                    className="mt-0.5 text-emerald-600"
+                                                />
+
+                                                <span>
+                                                    <b>
+                                                        Recommended
+                                                        solution:
+                                                    </b>{" "}
+                                                    {
+                                                        reason.solution
+                                                    }
+                                                </span>
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            ),
+                        )}
                     </Card>
 
-                    {/* WHAT-IF SIMULATOR */}
+                    {/* =================================================
+                        WHAT-IF RISK SIMULATOR
+                    ================================================= */}
+
                     <Card>
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                                 <div className="flex items-center gap-2">
                                     <SlidersHorizontal
-                                        size={17}
+                                        size={
+                                            17
+                                        }
                                     />
 
                                     <h3 className="text-sm font-bold">
-                                        What-If Risk Simulator
+                                        What-If
+                                        Risk
+                                        Simulator
                                     </h3>
                                 </div>
 
                                 <p className="mt-1 text-xs text-slate-400">
-                                    Re-runs the supplied
-                                    trained models on the
-                                    latest project snapshot
-                                    with your scenario changes.
+                                    Re-runs the
+                                    supplied
+                                    trained
+                                    models on
+                                    the latest
+                                    project
+                                    snapshot
+                                    with your
+                                    scenario
+                                    changes.
                                 </p>
                             </div>
 
                             <Button
-                                onClick={simulateNow}
-                                disabled={simLoading}
+                                onClick={
+                                    simulateNow
+                                }
+                                disabled={
+                                    simLoading
+                                }
                             >
                                 {simLoading
                                     ? "Running…"
@@ -1274,68 +1571,85 @@ export default function ProjectAnalyticsPage() {
                         </div>
 
                         {/* SLIDERS */}
+
                         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                            {(
-                                [
-                                    [
-                                        "progress_delta",
-                                        "Physical progress change",
-                                        -30,
-                                        30,
-                                        1,
-                                    ],
-                                    [
-                                        "delay_delta",
-                                        "Additional delay (days)",
-                                        -365,
-                                        365,
-                                        5,
-                                    ],
-                                    [
-                                        "expenditure_delta",
-                                        "Monthly expenditure change (₹ Cr)",
-                                        -200,
-                                        200,
-                                        5,
-                                    ],
-                                    [
-                                        "revised_cost_delta",
-                                        "Revised-cost change (₹ Cr)",
-                                        -500,
-                                        500,
-                                        10,
-                                    ],
-                                ] as const
-                            ).map(
-                                ([
+                            {[
+                                {
+                                    key: "progress_delta" as const,
+                                    label: "Physical progress change",
+                                    min: -30,
+                                    max: 30,
+                                    step: 1,
+                                },
+                                {
+                                    key: "delay_delta" as const,
+                                    label: "Additional delay (days)",
+                                    min: -365,
+                                    max: 365,
+                                    step: 5,
+                                },
+                                {
+                                    key: "expenditure_delta" as const,
+                                    label: "Monthly expenditure change (₹ Cr)",
+                                    min: -200,
+                                    max: 200,
+                                    step: 5,
+                                },
+                                {
+                                    key: "revised_cost_delta" as const,
+                                    label: "Revised-cost change (₹ Cr)",
+                                    min: -500,
+                                    max: 500,
+                                    step: 10,
+                                },
+                            ].map(
+                                ({
                                     key,
                                     label,
                                     min,
                                     max,
                                     step,
-                                ]) => (
+                                }) => (
                                     <label
-                                        key={key}
+                                        key={
+                                            key
+                                        }
                                         className="rounded-xl border bg-slate-50 p-4"
                                     >
                                         <span className="text-[10px] font-bold uppercase text-slate-400">
-                                            {label}
+                                            {
+                                                label
+                                            }
                                         </span>
 
                                         <div className="mt-2 text-lg font-bold">
-                                            {scenario[key]}
+                                            {
+                                                scenario[
+                                                    key
+                                                ]
+                                            }
                                         </div>
 
                                         <input
                                             className="mt-3 w-full"
                                             type="range"
-                                            min={min}
-                                            max={max}
-                                            step={step}
-                                            value={
-                                                scenario[key]
+                                            min={
+                                                min
                                             }
-                                            onChange={(event) =>
+                                            max={
+                                                max
+                                            }
+                                            step={
+                                                step
+                                            }
+                                            value={
+                                                scenario[
+                                                    key
+                                                ]
+                                            }
+                                            onChange={(
+                                                event,
+                                            ) =>
                                                 setScenario(
                                                     (
                                                         current,
@@ -1355,118 +1669,79 @@ export default function ProjectAnalyticsPage() {
                             )}
                         </div>
 
-                        {/* SIMULATION RESULT */}
+                        {/* =================================================
+                            SIMULATION RESULTS
+                        ================================================= */}
+
                         {simulation && (
                             <div className="mt-6">
                                 <div className="grid gap-4 md:grid-cols-3">
-                                    {[
-                                        [
-                                            "Overall Risk Score",
-                                            "overall_risk",
-                                            false,
-                                        ],
-                                        [
-                                            "Future Delay",
-                                            "delay_probability",
-                                            true,
-                                        ],
-                                        [
-                                            "Progress Stall",
-                                            "stall_probability",
-                                            true,
-                                        ],
-                                    ].map(
-                                        ([
-                                            label,
-                                            key,
-                                            isProbability,
-                                        ]) => {
-                                            const baseline =
-                                                Number(
-                                                    simulation
-                                                        .baseline[
-                                                        key
-                                                    ],
-                                                );
+                                    {simulationCards.map((card) => {
+                                        const baseline = Number(
+                                            simulation.baseline[card.key],
+                                        );
 
-                                            const scenarioValue =
-                                                Number(
-                                                    simulation
-                                                        .scenario[
-                                                        key
-                                                    ],
-                                                );
+                                        const scenarioValue = Number(
+                                            simulation.scenario[card.key],
+                                        );
 
-                                            const multiplier =
-                                                isProbability
-                                                    ? 100
-                                                    : 1;
+                                        const multiplier = card.isProbability
+                                            ? 100
+                                            : 1;
 
-                                            return (
-                                                <Card
-                                                    key={String(
-                                                        label,
-                                                    )}
-                                                    padding="sm"
-                                                >
-                                                    <div className="text-[9px] font-bold uppercase text-slate-400">
-                                                        {label}
-                                                    </div>
+                                        return (
+                                            <Card
+                                                key={card.key}
+                                                padding="sm"
+                                            >
+                                                <div className="text-[9px] font-bold uppercase text-slate-400">
+                                                    {card.label}
+                                                </div>
 
-                                                    <div className="mt-2 flex justify-between">
-                                                        <div>
-                                                            <div className="text-xl font-bold">
-                                                                {(
-                                                                    scenarioValue *
-                                                                    multiplier
-                                                                ).toFixed(
-                                                                    1,
-                                                                )}
-                                                                {isProbability
-                                                                    ? "%"
-                                                                    : "/100"}
-                                                            </div>
-
-                                                            <div className="text-[10px] text-slate-400">
-                                                                Baseline{" "}
-                                                                {(
-                                                                    baseline *
-                                                                    multiplier
-                                                                ).toFixed(
-                                                                    1,
-                                                                )}
-                                                                {isProbability
-                                                                    ? "%"
-                                                                    : "/100"}
-                                                            </div>
+                                                <div className="mt-2 flex justify-between">
+                                                    <div>
+                                                        <div className="text-xl font-bold">
+                                                            {(
+                                                                scenarioValue *
+                                                                multiplier
+                                                            ).toFixed(1)}
+                                                            {card.isProbability
+                                                                ? "%"
+                                                                : "/100"}
                                                         </div>
 
-                                                        {scenarioValue >
-                                                        baseline ? (
-                                                            <TrendingUp
-                                                                className="text-red-500"
-                                                                size={
-                                                                    18
-                                                                }
-                                                            />
-                                                        ) : scenarioValue <
-                                                          baseline ? (
-                                                            <TrendingDown
-                                                                className="text-emerald-500"
-                                                                size={
-                                                                    18
-                                                                }
-                                                            />
-                                                        ) : null}
+                                                        <div className="text-[10px] text-slate-400">
+                                                            Baseline{" "}
+                                                            {(
+                                                                baseline *
+                                                                multiplier
+                                                            ).toFixed(1)}
+                                                            {card.isProbability
+                                                                ? "%"
+                                                                : "/100"}
+                                                        </div>
                                                     </div>
-                                                </Card>
-                                            );
-                                        },
-                                    )}
+
+                                                    {scenarioValue > baseline ? (
+                                                        <TrendingUp
+                                                            className="text-red-500"
+                                                            size={18}
+                                                        />
+                                                    ) : scenarioValue < baseline ? (
+                                                        <TrendingDown
+                                                            className="text-emerald-500"
+                                                            size={18}
+                                                        />
+                                                    ) : null}
+                                                </div>
+                                            </Card>
+                                        );
+                                    })}
                                 </div>
 
                                 <div className="mt-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
-                                    Scenario risk level:{" "}
+                                    Scenario risk
+                                    level:{" "}
                                     <b>
                                         {
                                             simulation
@@ -1476,11 +1751,13 @@ export default function ProjectAnalyticsPage() {
                                     </b>
                                     .{" "}
                                     {Number(
-                                        simulation.scenario
+                                        simulation
+                                            .scenario
                                             .overall_risk,
                                     ) >
                                     Number(
-                                        simulation.baseline
+                                        simulation
+                                            .baseline
                                             .overall_risk,
                                     )
                                         ? "Risk increases under this scenario."
