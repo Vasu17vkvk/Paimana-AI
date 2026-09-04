@@ -87,6 +87,20 @@ export interface ProjectAnalyticsSummary {
 }
 
 
+export interface ProjectAnalyticsFilterParams {
+    sector?: string[];
+    ministry?: string[];
+    state?: string[];
+    risk_level?: string[];
+    schedule_status?: string[];
+    search?: string;
+}
+
+
+/* =========================================================
+   PROJECT ANALYTICS - FILTER OPTIONS
+========================================================= */
+
 export async function getProjectAnalyticsFilterOptions() {
     return apiRequest<ProjectAnalyticsFilterOptions>(
         "/project-analytics/filter-options",
@@ -94,130 +108,321 @@ export async function getProjectAnalyticsFilterOptions() {
 }
 
 
+/* =========================================================
+   PROJECT ANALYTICS - PROJECT LIST
+========================================================= */
+
 export async function getProjectAnalyticsProjects(
-    params?: {
-        sector?: string;
-        ministry?: string;
-        state?: string;
-        risk_level?: string;
-        schedule_status?: string;
-    },
+    params?: ProjectAnalyticsFilterParams,
 ) {
     const searchParams =
         new URLSearchParams();
 
-    if (params?.sector) {
+    /* -----------------------------------------------------
+       Sector - multi select
+    ----------------------------------------------------- */
+
+    params?.sector?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Sectors"
+        ) {
+            searchParams.append(
+                "sector",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Ministry - multi select
+    ----------------------------------------------------- */
+
+    params?.ministry?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Ministries"
+        ) {
+            searchParams.append(
+                "ministry",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       State - multi select
+    ----------------------------------------------------- */
+
+    params?.state?.forEach((value) => {
+        if (
+            value &&
+            value !== "All States"
+        ) {
+            searchParams.append(
+                "state",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Risk level - multi select
+    ----------------------------------------------------- */
+
+    params?.risk_level?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Risk Levels"
+        ) {
+            searchParams.append(
+                "risk_level",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Schedule status - multi select
+    ----------------------------------------------------- */
+
+    params?.schedule_status?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Schedule Statuses"
+        ) {
+            searchParams.append(
+                "schedule_status",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Search
+    ----------------------------------------------------- */
+
+    if (
+        params?.search &&
+        params.search.trim()
+    ) {
         searchParams.set(
-            "sector",
-            params.sector,
+            "search",
+            params.search.trim(),
         );
     }
 
-    if (params?.ministry) {
-        searchParams.set(
-            "ministry",
-            params.ministry,
-        );
-    }
-
-    if (params?.state) {
-        searchParams.set(
-            "state",
-            params.state,
-        );
-    }
-
-    if (params?.risk_level) {
-        searchParams.set(
-            "risk_level",
-            params.risk_level,
-        );
-    }
-
-    if (params?.schedule_status) {
-        searchParams.set(
-            "schedule_status",
-            params.schedule_status,
-        );
-    }
 
     const query =
         searchParams.toString();
 
+
     return apiRequest<ProjectAnalyticsProjectsResponse>(
-        `/project-analytics/projects${
-            query
-                ? `?${query}`
-                : ""
+        `/project-analytics/projects${query
+            ? `?${query}`
+            : ""
         }`,
     );
 }
 
 
+/* =========================================================
+   PROJECT ANALYTICS - SUMMARY
+========================================================= */
+
 export async function getProjectAnalyticsSummary(
-    params?: {
-        sector?: string;
-        ministry?: string;
-        state?: string;
-        risk_level?: string;
-        schedule_status?: string;
-    },
+    params?: ProjectAnalyticsFilterParams,
 ) {
     const searchParams =
         new URLSearchParams();
 
-    if (params?.sector) {
+    /* -----------------------------------------------------
+       Sector - multi select
+    ----------------------------------------------------- */
+
+    params?.sector?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Sectors"
+        ) {
+            searchParams.append(
+                "sector",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Ministry - multi select
+    ----------------------------------------------------- */
+
+    params?.ministry?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Ministries"
+        ) {
+            searchParams.append(
+                "ministry",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       State - multi select
+    ----------------------------------------------------- */
+
+    params?.state?.forEach((value) => {
+        if (
+            value &&
+            value !== "All States"
+        ) {
+            searchParams.append(
+                "state",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Risk level - multi select
+    ----------------------------------------------------- */
+
+    params?.risk_level?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Risk Levels"
+        ) {
+            searchParams.append(
+                "risk_level",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Schedule status - multi select
+    ----------------------------------------------------- */
+
+    params?.schedule_status?.forEach((value) => {
+        if (
+            value &&
+            value !== "All Schedule Statuses"
+        ) {
+            searchParams.append(
+                "schedule_status",
+                value,
+            );
+        }
+    });
+
+
+    /* -----------------------------------------------------
+       Search
+    ----------------------------------------------------- */
+
+    if (
+        params?.search &&
+        params.search.trim()
+    ) {
         searchParams.set(
-            "sector",
-            params.sector,
+            "search",
+            params.search.trim(),
         );
     }
 
-    if (params?.ministry) {
-        searchParams.set(
-            "ministry",
-            params.ministry,
-        );
-    }
-
-    if (params?.state) {
-        searchParams.set(
-            "state",
-            params.state,
-        );
-    }
-
-    if (params?.risk_level) {
-        searchParams.set(
-            "risk_level",
-            params.risk_level,
-        );
-    }
-
-    if (params?.schedule_status) {
-        searchParams.set(
-            "schedule_status",
-            params.schedule_status,
-        );
-    }
 
     const query =
         searchParams.toString();
 
+
     return apiRequest<ProjectAnalyticsSummary>(
-        `/project-analytics/summary${
-            query
-                ? `?${query}`
-                : ""
+        `/project-analytics/summary${query
+            ? `?${query}`
+            : ""
         }`,
     );
+}
+
+
+/* =========================================================
+   PROJECT ANALYTICS - PROJECT DETAIL
+========================================================= */
+
+export interface ProjectAnalyticsProjectDetail {
+    project_code: string;
+    project_name: string | null;
+    ministry: string | null;
+    sector: string | null;
+    state: string | null;
+    implementing_agency: string | null;
+    schedule_status: string | null;
+    cost_status: string | null;
+    original_completion: string | null;
+    revised_completion: string | null;
+    data_quality_flag: string | null;
+    data_completeness_score: number | null;
+}
+
+
+export interface ProjectAnalyticsKeyFacts {
+    risk_score: number | null;
+    risk_level: string | null;
+    delay_days: number | null;
+    physical_progress_pct: number | null;
+    original_cost_cr: number | null;
+    expenditure_cr: number | null;
+    alert_priority: string | null;
+}
+
+
+export interface ProjectAnalyticsRiskBreakdown {
+    cost_risk: number | null;
+    future_delay: number | null;
+    progress_stall: number | null;
+    overall_risk: number | null;
+    risk_level: string | null;
+}
+
+
+export interface ProjectAnalyticsDelayReason {
+    title: string;
+    explanation: string;
+    recommended_solution: string;
+}
+
+
+export interface ProjectAnalyticsHistoryRecord {
+    [key: string]: string | number | null;
+}
+
+
+export interface ProjectAnalyticsDetail {
+    project: ProjectAnalyticsProjectDetail;
+    key_facts: ProjectAnalyticsKeyFacts;
+    risk: ProjectAnalyticsRiskBreakdown;
+    delay_reasons: ProjectAnalyticsDelayReason[];
+    history: ProjectAnalyticsHistoryRecord[];
+    flash_history: ProjectAnalyticsHistoryRecord[];
+    progress_trajectory: ProjectAnalyticsHistoryRecord[];
+    risk_trajectory: ProjectAnalyticsHistoryRecord[];
+    has_ml_snapshot: boolean;
 }
 
 
 export async function getProjectAnalyticsDetail(
     projectCode: string,
 ) {
-    return apiRequest<any>(
+    return apiRequest<ProjectAnalyticsDetail>(
         `/project-analytics/project/${encodeURIComponent(
             projectCode,
         )}`,
@@ -225,16 +430,60 @@ export async function getProjectAnalyticsDetail(
 }
 
 
+/* =========================================================
+   PROJECT ANALYTICS - WHAT IF
+========================================================= */
+
+export interface ProjectAnalyticsScenario {
+    physical_progress_delta: number;
+    schedule_delay_days: number;
+    monthly_expenditure_change_cr: number;
+    revised_cost_change_cr: number;
+}
+
+
+export interface ProjectAnalyticsRiskResult {
+    delay_probability: number;
+    stall_probability: number;
+    predicted_cost_overrun: number;
+    cost_risk: number;
+    overall_risk: number;
+    risk_level: string;
+}
+
+
+export interface ProjectAnalyticsWhatIfChange {
+    overall_risk: number;
+    delay_probability: number;
+    stall_probability: number;
+    predicted_cost_overrun: number;
+    cost_risk: number;
+}
+
+
+export interface ProjectAnalyticsWhatIfResponse {
+    project_code: string;
+
+    scenario_inputs: {
+        progress_delta: number;
+        delay_delta: number;
+        expenditure_delta: number;
+        revised_cost_delta: number;
+    };
+
+    baseline: ProjectAnalyticsRiskResult;
+
+    scenario: ProjectAnalyticsRiskResult;
+
+    change: ProjectAnalyticsWhatIfChange;
+}
+
+
 export async function simulateProjectAnalytics(
     projectCode: string,
-    scenario: {
-        physical_progress_delta: number;
-        schedule_delay_days: number;
-        monthly_expenditure_change_cr: number;
-        revised_cost_change_cr: number;
-    },
+    scenario: ProjectAnalyticsScenario,
 ) {
-    return apiRequest<any>(
+    return apiRequest<ProjectAnalyticsWhatIfResponse>(
         `/project-analytics/project/${encodeURIComponent(
             projectCode,
         )}/what-if`,
@@ -329,10 +578,10 @@ export interface DashboardResponse {
     metrics: DashboardMetrics;
 
     riskDistribution:
-        DashboardRiskDistribution;
+    DashboardRiskDistribution;
 
     financials:
-        DashboardFinancials;
+    DashboardFinancials;
 
     /*
      * Full filtered project list.
@@ -342,22 +591,22 @@ export interface DashboardResponse {
      * project records instead of dashboard.data.ts.
      */
     projects:
-        DashboardApiProject[];
+    DashboardApiProject[];
 
     /*
      * Top projects ordered by current risk score.
      */
     highestRiskProjects:
-        DashboardApiProject[];
+    DashboardApiProject[];
 
     /*
      * Monthly portfolio history.
      */
     monthlyPortfolioData:
-        DashboardMonthlyPoint[];
+    DashboardMonthlyPoint[];
 
     latestPeriod:
-        string | null;
+    string | null;
 }
 
 
@@ -406,7 +655,7 @@ export async function getDashboard(
     if (
         params?.ministry &&
         params.ministry !==
-            "All Ministries"
+        "All Ministries"
     ) {
         searchParams.set(
             "ministry",
@@ -418,7 +667,7 @@ export async function getDashboard(
     if (
         params?.sector &&
         params.sector !==
-            "All Sectors"
+        "All Sectors"
     ) {
         searchParams.set(
             "sector",
@@ -430,7 +679,7 @@ export async function getDashboard(
     if (
         params?.state &&
         params.state !==
-            "All States"
+        "All States"
     ) {
         searchParams.set(
             "state",
@@ -442,7 +691,7 @@ export async function getDashboard(
     if (
         params?.risk &&
         params.risk !==
-            "All Risk Levels"
+        "All Risk Levels"
     ) {
         searchParams.set(
             "risk",
@@ -454,7 +703,7 @@ export async function getDashboard(
     if (
         params?.status &&
         params.status !==
-            "All Statuses"
+        "All Statuses"
     ) {
         searchParams.set(
             "status",
@@ -479,10 +728,9 @@ export async function getDashboard(
 
 
     return apiRequest<DashboardResponse>(
-        `/dashboard${
-            query
-                ? `?${query}`
-                : ""
+        `/dashboard${query
+            ? `?${query}`
+            : ""
         }`,
     );
 }

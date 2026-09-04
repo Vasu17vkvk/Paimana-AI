@@ -1,13 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  getProjectAnalyticsDetail,
   getProjectAnalyticsFilterOptions,
   getProjectAnalyticsProjects,
   getProjectAnalyticsSummary,
+  simulateProjectAnalytics,
+  type ProjectAnalyticsDetail,
   type ProjectAnalyticsFilterOptions,
   type ProjectAnalyticsProject,
   type ProjectAnalyticsSummary,
+  type ProjectAnalyticsWhatIfResponse,
 } from "../../services/api";
 import ProjectAnalyticsCharts from "./ProjectAnalyticsCharts";
+
+import ProjectAnalyticsDetailCharts from "./ProjectAnalyticsDetailCharts";
 
 const emptyFilters: ProjectAnalyticsFilterOptions = {
   sectors: [],
@@ -62,7 +74,7 @@ function statusClass(status: string | null) {
     return "bg-red-100 text-red-700";
   }
 
-  if (status === "On Track") {
+  if (status === "On Track" || status === "On Schedule") {
     return "bg-green-100 text-green-700";
   }
 
@@ -73,32 +85,312 @@ function statusClass(status: string | null) {
   return "bg-slate-100 text-slate-600";
 }
 
+type MultiSelectDropdownProps = {
+  label: string;
+  options: string[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+};
+
+function MultiSelectDropdown({
+  label,
+  options,
+  selected,
+  onChange,
+  placeholder = "Search...",
+}: MultiSelectDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(
+          event.target as Node,
+        )
+      ) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "mousedown",
+      handleOutsideClick,
+    );
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick,
+      );
+    };
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query
+      .trim()
+      .toLowerCase();
+
+    const filtered = normalizedQuery
+      ? options.filter((option) =>
+        option
+          .toLowerCase()
+          .includes(normalizedQuery),
+      )
+      : options;
+
+    return [...filtered].sort((a, b) => {
+      const aSelected = selected.includes(a);
+      const bSelected = selected.includes(b);
+
+      if (aSelected && !bSelected) return -1;
+      if (!aSelected && bSelected) return 1;
+
+      return a.localeCompare(b);
+    });
+  }, [options, query, selected]);
+
+  function toggleValue(value: string) {
+    if (selected.includes(value)) {
+      onChange(
+        selected.filter(
+          (item) => item !== value,
+        ),
+      );
+      return;
+    }
+
+    onChange([
+      ...selected,
+      value,
+    ]);
+  }
+
+  function clearSelection(
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) {
+    event.stopPropagation();
+    onChange([]);
+  }
+
+  const selectionLabel =
+    selected.length === 0
+      ? `All ${label}s`
+      : selected.length === 1
+        ? selected[0]
+        : `${selected.length} selected`;
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative"
+    >
+      <label className="mb-1.5 block text-xs font-medium text-slate-600">
+        {label}
+      </label>
+
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2.5 text-left transition ${open
+          ? "border-slate-400 ring-2 ring-slate-100"
+          : "border-slate-200 hover:border-slate-300"
+          }`}
+      >
+        <span
+          className={`min-w-0 truncate text-sm ${selected.length > 0
+            ? "font-medium text-slate-800"
+            : "text-slate-400"
+            }`}
+        >
+          {selectionLabel}
+        </span>
+
+        <span className="flex shrink-0 items-center gap-2">
+          {selected.length > 0 && (
+            <span
+              onClick={clearSelection}
+              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-200"
+            >
+              {selected.length}
+            </span>
+          )}
+
+          <span
+            className={`text-xs text-slate-400 transition-transform ${open ? "rotate-180" : ""
+              }`}
+          >
+            ▼
+          </span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+          <div className="border-b border-slate-100 p-3">
+            <input
+              type="text"
+              value={query}
+              onChange={(event) =>
+                setQuery(event.target.value)
+              }
+              onClick={(event) =>
+                event.stopPropagation()
+              }
+              placeholder={placeholder}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:bg-white"
+            />
+
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">
+                {selected.length > 0
+                  ? `${selected.length} selected`
+                  : "Nothing selected"}
+              </span>
+
+              {selected.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onChange([])}
+                  className="text-[11px] font-medium text-slate-500 hover:text-slate-800"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto p-2">
+            {filteredOptions.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-slate-400">
+                No matching options
+              </div>
+            ) : (
+              filteredOptions.map((option) => {
+                const checked =
+                  selected.includes(option);
+
+                return (
+                  <label
+                    key={option}
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 transition ${checked
+                      ? "bg-slate-50"
+                      : "hover:bg-slate-50"
+                      }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        toggleValue(option)
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-300"
+                    />
+
+                    <span className="min-w-0 text-xs leading-5 text-slate-700">
+                      {option}
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function numberValue(
+  value: unknown,
+  fallback = null,
+): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
 export default function ProjectAnalyticsPage() {
   const [filters, setFilters] =
     useState<ProjectAnalyticsFilterOptions>(emptyFilters);
 
-  const [selectedSector, setSelectedSector] = useState("");
-  const [selectedMinistry, setSelectedMinistry] = useState("");
-  const [selectedState, setSelectedState] = useState("");
-  const [selectedRisk, setSelectedRisk] = useState("");
-  const [selectedSchedule, setSelectedSchedule] = useState("");
+  const [selectedSector, setSelectedSector] = useState<string[]>([]);
+  const [selectedMinistry, setSelectedMinistry] = useState<string[]>([]);
+  const [selectedState, setSelectedState] = useState<string[]>([]);
+  const [selectedRisk, setSelectedRisk] = useState<string[]>([]);
+  const [selectedSchedule, setSelectedSchedule] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
 
   const [summary, setSummary] =
     useState<ProjectAnalyticsSummary>(emptySummary);
 
-  const [projects, setProjects] = useState<ProjectAnalyticsProject[]>([]);
+  const [projects, setProjects] =
+    useState<ProjectAnalyticsProject[]>([]);
 
-  const [loadingFilters, setLoadingFilters] = useState(true);
-  const [loadingData, setLoadingData] = useState(false);
-  const [error, setError] = useState("");
+  const [selectedProjectCode, setSelectedProjectCode] =
+    useState("");
+
+  const [projectDetail, setProjectDetail] =
+    useState<ProjectAnalyticsDetail | null>(null);
+
+  const [loadingProjectDetail, setLoadingProjectDetail] =
+    useState(false);
+
+  const [whatIfResult, setWhatIfResult] =
+    useState<ProjectAnalyticsWhatIfResponse | null>(null);
+
+  const [whatIfLoading, setWhatIfLoading] =
+    useState(false);
+
+  const [scenario, setScenario] = useState({
+    physical_progress_delta: 0,
+    schedule_delay_days: 0,
+    monthly_expenditure_change_cr: 0,
+    revised_cost_change_cr: 0,
+  });
+
+  const [loadingFilters, setLoadingFilters] =
+    useState(true);
+
+  const [loadingData, setLoadingData] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
 
   const requestParams = useMemo(
     () => ({
-      ...(selectedSector ? { sector: selectedSector } : {}),
-      ...(selectedMinistry ? { ministry: selectedMinistry } : {}),
-      ...(selectedState ? { state: selectedState } : {}),
-      ...(selectedRisk ? { risk_level: selectedRisk } : {}),
-      ...(selectedSchedule ? { schedule_status: selectedSchedule } : {}),
+      ...(selectedSector.length > 0
+        ? { sector: selectedSector }
+        : {}),
+      ...(selectedMinistry.length > 0
+        ? { ministry: selectedMinistry }
+        : {}),
+      ...(selectedState.length > 0
+        ? { state: selectedState }
+        : {}),
+      ...(selectedRisk.length > 0
+        ? { risk_level: selectedRisk }
+        : {}),
+      ...(selectedSchedule.length > 0
+        ? { schedule_status: selectedSchedule }
+        : {}),
+      ...(search.trim()
+        ? { search: search.trim() }
+        : {}),
     }),
     [
       selectedSector,
@@ -106,6 +398,7 @@ export default function ProjectAnalyticsPage() {
       selectedState,
       selectedRisk,
       selectedSchedule,
+      search,
     ],
   );
 
@@ -115,7 +408,9 @@ export default function ProjectAnalyticsPage() {
         setLoadingFilters(true);
         setError("");
 
-        const response = await getProjectAnalyticsFilterOptions();
+        const response =
+          await getProjectAnalyticsFilterOptions();
+
         setFilters(response);
       } catch (err) {
         setError(
@@ -137,9 +432,16 @@ export default function ProjectAnalyticsPage() {
         setLoadingData(true);
         setError("");
 
-        const [summaryResponse, projectsResponse] = await Promise.all([
-          getProjectAnalyticsSummary(requestParams),
-          getProjectAnalyticsProjects(requestParams),
+        const [
+          summaryResponse,
+          projectsResponse,
+        ] = await Promise.all([
+          getProjectAnalyticsSummary(
+            requestParams,
+          ),
+          getProjectAnalyticsProjects(
+            requestParams,
+          ),
         ]);
 
         setSummary(summaryResponse);
@@ -158,13 +460,160 @@ export default function ProjectAnalyticsPage() {
     loadAnalytics();
   }, [requestParams]);
 
+  useEffect(() => {
+    if (!selectedProjectCode) {
+      setProjectDetail(null);
+      setWhatIfResult(null);
+      return;
+    }
+
+    async function loadProjectDetail() {
+      try {
+        setLoadingProjectDetail(true);
+        setError("");
+
+        const response =
+          await getProjectAnalyticsDetail(
+            selectedProjectCode,
+          );
+
+        setProjectDetail(response);
+        setWhatIfResult(null);
+
+        setScenario({
+          physical_progress_delta: 0,
+          schedule_delay_days: 0,
+          monthly_expenditure_change_cr: 0,
+          revised_cost_change_cr: 0,
+        });
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load project details.",
+        );
+
+        setProjectDetail(null);
+      } finally {
+        setLoadingProjectDetail(false);
+      }
+    }
+
+    loadProjectDetail();
+  }, [selectedProjectCode]);
+
   function clearFilters() {
-    setSelectedSector("");
-    setSelectedMinistry("");
-    setSelectedState("");
-    setSelectedRisk("");
-    setSelectedSchedule("");
+    setSelectedSector([]);
+    setSelectedMinistry([]);
+    setSelectedState([]);
+    setSelectedRisk([]);
+    setSelectedSchedule([]);
+    setSearch("");
   }
+
+  function updateScenario(
+    field:
+      | "physical_progress_delta"
+      | "schedule_delay_days"
+      | "monthly_expenditure_change_cr"
+      | "revised_cost_change_cr",
+    value: number,
+  ) {
+    setScenario((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  async function runWhatIf() {
+    if (!selectedProjectCode) {
+      return;
+    }
+
+    try {
+      setWhatIfLoading(true);
+      setError("");
+
+      const response =
+        await simulateProjectAnalytics(
+          selectedProjectCode,
+          scenario,
+        );
+
+      setWhatIfResult(response);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to run What-If simulation.",
+      );
+    } finally {
+      setWhatIfLoading(false);
+    }
+  }
+
+  function resetWhatIf() {
+    setScenario({
+      physical_progress_delta: 0,
+      schedule_delay_days: 0,
+      monthly_expenditure_change_cr: 0,
+      revised_cost_change_cr: 0,
+    });
+
+    setWhatIfResult(null);
+  }
+
+  const projectInfo =
+    projectDetail?.project;
+
+  const keyFacts =
+    projectDetail?.key_facts;
+
+  const risk =
+    projectDetail?.risk;
+
+  const selectedRiskLevel =
+    typeof risk?.risk_level === "string"
+      ? risk.risk_level
+      : null;
+
+  const selectedRiskScore =
+    numberValue(risk?.overall_risk);
+
+  const selectedDelayProbability =
+    numberValue(risk?.future_delay);
+
+  const selectedProgressStall =
+    numberValue(risk?.progress_stall);
+
+  const selectedCostRisk =
+    numberValue(risk?.cost_risk);
+
+  const selectedPhysicalProgress =
+    numberValue(keyFacts?.physical_progress_pct);
+
+  const selectedDelayDays =
+    numberValue(keyFacts?.delay_days);
+
+  const selectedOriginalCost =
+    numberValue(keyFacts?.original_cost_cr);
+
+  const selectedExpenditure =
+    numberValue(keyFacts?.expenditure_cr);
+
+  const selectedProjectName =
+    typeof projectInfo?.project_name === "string"
+      ? projectInfo.project_name
+      : selectedProjectCode;
+
+  const baseline =
+    whatIfResult?.baseline;
+
+  const simulated =
+    whatIfResult?.scenario;
+
+  const change =
+    whatIfResult?.change;
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -222,111 +671,62 @@ export default function ProjectAnalyticsPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <MultiSelectDropdown
+              label="Sector"
+              options={filters.sectors}
+              selected={selectedSector}
+              onChange={setSelectedSector}
+              placeholder="Search sectors..."
+            />
 
-            {/* Sector */}
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-600">
-                Sector
-              </label>
+            <MultiSelectDropdown
+              label="Ministry"
+              options={filters.ministries}
+              selected={selectedMinistry}
+              onChange={setSelectedMinistry}
+              placeholder="Search ministries..."
+            />
 
-              <select
-                value={selectedSector}
-                onChange={(e) => setSelectedSector(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400"
-              >
-                <option value="">All Sectors</option>
+            <MultiSelectDropdown
+              label="State / UT"
+              options={filters.states}
+              selected={selectedState}
+              onChange={setSelectedState}
+              placeholder="Search states..."
+            />
 
-                {filters.sectors.map((sector) => (
-                  <option key={sector} value={sector}>
-                    {sector}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <MultiSelectDropdown
+              label="Risk Level"
+              options={filters.risk_levels}
+              selected={selectedRisk}
+              onChange={setSelectedRisk}
+              placeholder="Search risk levels..."
+            />
 
-            {/* Ministry */}
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-600">
-                Ministry
-              </label>
+            <MultiSelectDropdown
+              label="Schedule Status"
+              options={filters.schedule_statuses}
+              selected={selectedSchedule}
+              onChange={setSelectedSchedule}
+              placeholder="Search schedule status..."
+            />
+          </div>
 
-              <select
-                value={selectedMinistry}
-                onChange={(e) => setSelectedMinistry(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400"
-              >
-                <option value="">All Ministries</option>
+          {/* Search */}
+          <div className="mt-4">
+            <label className="mb-1.5 block text-xs font-medium text-slate-600">
+              Search Project
+            </label>
 
-                {filters.ministries.map((ministry) => (
-                  <option key={ministry} value={ministry}>
-                    {ministry}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* State */}
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-600">
-                State / UT
-              </label>
-
-              <select
-                value={selectedState}
-                onChange={(e) => setSelectedState(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400"
-              >
-                <option value="">All States / UTs</option>
-
-                {filters.states.map((state) => (
-                  <option key={state} value={state}>
-                    {state}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Risk */}
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-600">
-                Risk Level
-              </label>
-
-              <select
-                value={selectedRisk}
-                onChange={(e) => setSelectedRisk(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400"
-              >
-                <option value="">All Risk Levels</option>
-
-                {filters.risk_levels.map((risk) => (
-                  <option key={risk} value={risk}>
-                    {risk}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Schedule */}
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-600">
-                Schedule Status
-              </label>
-
-              <select
-                value={selectedSchedule}
-                onChange={(e) => setSelectedSchedule(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400"
-              >
-                <option value="">All Schedule Statuses</option>
-
-                {filters.schedule_statuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) =>
+                setSearch(e.target.value)
+              }
+              placeholder="Search by project code or project name..."
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400"
+            />
           </div>
         </section>
 
@@ -381,7 +781,7 @@ export default function ProjectAnalyticsPage() {
             </p>
 
             <p className="mt-2 text-3xl font-bold text-slate-900">
-              {summary.average_risk_score.toFixed(1)}
+              {formatNumber(summary.average_risk_score)}
             </p>
 
             <p className="mt-2 text-xs text-slate-500">
@@ -424,7 +824,11 @@ export default function ProjectAnalyticsPage() {
           </div>
         </section>
 
-        <ProjectAnalyticsCharts projects={projects ?? []} />
+        {!search.trim() && !selectedProjectCode && (
+          <ProjectAnalyticsCharts
+            projects={projects ?? []}
+          />
+        )}
 
         {/* Project Table */}
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -474,6 +878,10 @@ export default function ProjectAnalyticsPage() {
                   <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Schedule
                   </th>
+
+                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Analysis
+                  </th>
                 </tr>
               </thead>
 
@@ -481,7 +889,10 @@ export default function ProjectAnalyticsPage() {
                 {projects.map((project) => (
                   <tr
                     key={project.project_code}
-                    className="transition hover:bg-slate-50"
+                    className={`transition hover:bg-slate-50 ${selectedProjectCode === project.project_code
+                      ? "bg-slate-50"
+                      : ""
+                      }`}
                   >
                     <td className="px-5 py-4">
                       <div className="max-w-[360px]">
@@ -532,13 +943,27 @@ export default function ProjectAnalyticsPage() {
                         {project.schedule_status || "—"}
                       </span>
                     </td>
+
+                    <td className="px-5 py-4">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedProjectCode(
+                            project.project_code,
+                          )
+                        }
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
+                      >
+                        Analyze
+                      </button>
+                    </td>
                   </tr>
                 ))}
 
                 {!loadingData && projects.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-5 py-12 text-center text-sm text-slate-400"
                     >
                       No projects found for the selected filters.
@@ -549,6 +974,895 @@ export default function ProjectAnalyticsPage() {
             </table>
           </div>
         </section>
+
+        {/* Project Detail */}
+        {selectedProjectCode && (
+          <section className="space-y-6">
+
+            <div className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-center">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Selected Project
+                </p>
+
+                <h2 className="mt-1 text-xl font-bold text-slate-900">
+                  {selectedProjectName}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Project Code: {selectedProjectCode}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedProjectCode("")
+                }
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                Close Analysis
+              </button>
+            </div>
+
+            {loadingProjectDetail && (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+                Loading project analysis...
+              </div>
+            )}
+
+            {!loadingProjectDetail && projectDetail && (
+              <>
+                {/* Project Header / Key Facts */}
+                <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Risk Score
+                    </p>
+
+                    <p className="mt-2 text-3xl font-bold text-slate-900">
+                      {formatNumber(selectedRiskScore)}
+                    </p>
+
+                    <div className="mt-2">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${riskClass(
+                          selectedRiskLevel,
+                        )}`}
+                      >
+                        {selectedRiskLevel || "N/A"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Future Delay Probability
+                    </p>
+
+                    <p className="mt-2 text-3xl font-bold text-slate-900">
+                      {formatPercent(selectedDelayProbability)}
+                    </p>
+
+                    <p className="mt-2 text-xs text-slate-500">
+                      Model-based prediction
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Physical Progress
+                    </p>
+
+                    <p className="mt-2 text-3xl font-bold text-slate-900">
+                      {formatPercent(selectedPhysicalProgress)}
+                    </p>
+
+                    <p className="mt-2 text-xs text-slate-500">
+                      Latest available progress
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Delay Days
+                    </p>
+
+                    <p className="mt-2 text-3xl font-bold text-slate-900">
+                      {formatNumber(selectedDelayDays)}
+                    </p>
+
+                    <p className="mt-2 text-xs text-slate-500">
+                      Recorded schedule delay
+                    </p>
+                  </div>
+                </section>
+
+                {/* Project Facts */}
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Project Overview
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Ministry
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        {typeof projectInfo?.ministry === "string"
+                          ? projectInfo.ministry
+                          : "—"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Sector
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        {typeof projectInfo?.sector === "string"
+                          ? projectInfo.sector
+                          : "—"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        State / UT
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        {typeof projectInfo?.state === "string"
+                          ? projectInfo.state
+                          : "—"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Implementing Agency
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        {typeof projectInfo?.implementing_agency === "string"
+                          ? projectInfo.implementing_agency
+                          : "—"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Schedule Status
+                      </p>
+
+                      <div className="mt-1">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(
+                            typeof projectInfo?.schedule_status === "string"
+                              ? projectInfo.schedule_status
+                              : null,
+                          )}`}
+                        >
+                          {typeof projectInfo?.schedule_status === "string"
+                            ? projectInfo.schedule_status
+                            : "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Original Completion
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        {typeof projectInfo?.original_completion === "string"
+                          ? projectInfo.original_completion
+                          : "—"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Revised Completion
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        {typeof projectInfo?.revised_completion === "string"
+                          ? projectInfo.revised_completion
+                          : "—"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Original Cost
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium text-slate-800">
+                        ₹ {formatNumber(selectedOriginalCost)} Cr
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Risk Breakdown */}
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Risk Breakdown
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+
+                    <div className="rounded-lg bg-slate-50 p-4">
+                      <p className="text-xs text-slate-400">
+                        Cost Risk
+                      </p>
+
+                      <p className="mt-2 text-2xl font-bold text-slate-900">
+                        {formatPercent(selectedCostRisk)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg bg-slate-50 p-4">
+                      <p className="text-xs text-slate-400">
+                        Future Delay
+                      </p>
+
+                      <p className="mt-2 text-2xl font-bold text-slate-900">
+                        {formatPercent(selectedDelayProbability)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg bg-slate-50 p-4">
+                      <p className="text-xs text-slate-400">
+                        Progress Stall
+                      </p>
+
+                      <p className="mt-2 text-2xl font-bold text-slate-900">
+                        {formatPercent(selectedProgressStall)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg bg-slate-50 p-4">
+                      <p className="text-xs text-slate-400">
+                        Overall Risk
+                      </p>
+
+                      <p className="mt-2 text-2xl font-bold text-slate-900">
+                        {formatNumber(selectedRiskScore)}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                <ProjectAnalyticsDetailCharts
+                  history={projectDetail.history}
+                  flashHistory={projectDetail.flash_history}
+                  progressTrajectory={
+                    projectDetail.progress_trajectory
+                  }
+                  riskTrajectory={
+                    projectDetail.risk_trajectory
+                  }
+                />
+
+                {/* Delay Reasons */}
+                {projectDetail.delay_reasons.length > 0 && (
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Reasons for Delay
+                      </h3>
+                    </div>
+
+                    <div className="space-y-3">
+                      {projectDetail.delay_reasons.map(
+                        (reason, index) => (
+                          <div
+                            key={`${reason.title}-${index}`}
+                            className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                          >
+                            <p className="text-sm font-semibold text-slate-800">
+                              {reason.title}
+                            </p>
+
+                            <p className="mt-1 text-sm text-slate-600">
+                              {reason.explanation}
+                            </p>
+
+                            <div className="mt-3 rounded-lg bg-white p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                Recommended Solution
+                              </p>
+
+                              <p className="mt-1 text-sm text-slate-700">
+                                {reason.recommended_solution}
+                              </p>
+                            </div>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {/* What-If Simulator */}
+                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-5">
+                    <h3 className="text-lg font-semibold text-slate-900">
+                      What-If Risk Simulator
+                    </h3>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Adjust project assumptions and compare baseline versus scenario risk.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+
+                    {/* Physical Progress */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-slate-700">
+                          Physical Progress Change
+                        </label>
+
+                        <span className="text-sm font-semibold text-slate-900">
+                          {scenario.physical_progress_delta > 0
+                            ? "+"
+                            : ""}
+                          {scenario.physical_progress_delta}%
+                        </span>
+                      </div>
+
+                      <input
+                        type="range"
+                        min={-30}
+                        max={30}
+                        step={1}
+                        value={scenario.physical_progress_delta}
+                        onChange={(e) =>
+                          updateScenario(
+                            "physical_progress_delta",
+                            Number(e.target.value),
+                          )
+                        }
+                        className="mt-3 w-full"
+                      />
+
+                      <div className="mt-1 flex justify-between text-xs text-slate-400">
+                        <span>-30%</span>
+                        <span>0%</span>
+                        <span>+30%</span>
+                      </div>
+                    </div>
+
+                    {/* Delay */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-slate-700">
+                          Additional Schedule Delay
+                        </label>
+
+                        <span className="text-sm font-semibold text-slate-900">
+                          {scenario.schedule_delay_days > 0
+                            ? "+"
+                            : ""}
+                          {scenario.schedule_delay_days} days
+                        </span>
+                      </div>
+
+                      <input
+                        type="range"
+                        min={-365}
+                        max={365}
+                        step={1}
+                        value={scenario.schedule_delay_days}
+                        onChange={(e) =>
+                          updateScenario(
+                            "schedule_delay_days",
+                            Number(e.target.value),
+                          )
+                        }
+                        className="mt-3 w-full"
+                      />
+
+                      <div className="mt-1 flex justify-between text-xs text-slate-400">
+                        <span>-365</span>
+                        <span>0</span>
+                        <span>+365</span>
+                      </div>
+                    </div>
+
+                    {/* Expenditure */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-slate-700">
+                          Monthly Expenditure Change
+                        </label>
+
+                        <span className="text-sm font-semibold text-slate-900">
+                          {scenario.monthly_expenditure_change_cr > 0
+                            ? "+"
+                            : ""}
+                          ₹ {scenario.monthly_expenditure_change_cr} Cr
+                        </span>
+                      </div>
+
+                      <input
+                        type="range"
+                        min={-200}
+                        max={200}
+                        step={1}
+                        value={
+                          scenario.monthly_expenditure_change_cr
+                        }
+                        onChange={(e) =>
+                          updateScenario(
+                            "monthly_expenditure_change_cr",
+                            Number(e.target.value),
+                          )
+                        }
+                        className="mt-3 w-full"
+                      />
+
+                      <div className="mt-1 flex justify-between text-xs text-slate-400">
+                        <span>-₹200 Cr</span>
+                        <span>₹0</span>
+                        <span>+₹200 Cr</span>
+                      </div>
+                    </div>
+
+                    {/* Revised Cost */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-slate-700">
+                          Revised Cost Change
+                        </label>
+
+                        <span className="text-sm font-semibold text-slate-900">
+                          {scenario.revised_cost_change_cr > 0
+                            ? "+"
+                            : ""}
+                          ₹ {scenario.revised_cost_change_cr} Cr
+                        </span>
+                      </div>
+
+                      <input
+                        type="range"
+                        min={-500}
+                        max={500}
+                        step={1}
+                        value={scenario.revised_cost_change_cr}
+                        onChange={(e) =>
+                          updateScenario(
+                            "revised_cost_change_cr",
+                            Number(e.target.value),
+                          )
+                        }
+                        className="mt-3 w-full"
+                      />
+
+                      <div className="mt-1 flex justify-between text-xs text-slate-400">
+                        <span>-₹500 Cr</span>
+                        <span>₹0</span>
+                        <span>+₹500 Cr</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Simulator Actions */}
+                  <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={runWhatIf}
+                      disabled={whatIfLoading}
+                      className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {whatIfLoading
+                        ? "Running Simulation..."
+                        : "Run What-If Simulation"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={resetWhatIf}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    >
+                      Reset Scenario
+                    </button>
+                  </div>
+
+                  {/* What-If Result */}
+                  {whatIfResult && (
+                    <div className="mt-6 space-y-5">
+
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-900">
+                          Scenario Comparison
+                        </h4>
+
+                        <p className="mt-1 text-xs text-slate-500">
+                          Baseline versus simulated project risk.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+
+                        {/* Baseline */}
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Baseline
+                          </p>
+
+                          <p className="mt-3 text-3xl font-bold text-slate-900">
+                            {formatNumber(
+                              numberValue(
+                                baseline?.overall_risk,
+                              ),
+                            )}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            Overall Risk
+                          </p>
+
+                          <div className="mt-4 space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Delay Probability
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    baseline?.delay_probability,
+                                  ) !== null
+                                    ? numberValue(
+                                      baseline?.delay_probability,
+                                    )! * 100
+                                    : null,
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Progress Stall
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    baseline?.stall_probability,
+                                  ) !== null
+                                    ? numberValue(
+                                      baseline?.stall_probability,
+                                    )! * 100
+                                    : null,
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Predicted Cost Overrun
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    baseline?.predicted_cost_overrun,
+                                  ),
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Cost Risk
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    baseline?.cost_risk,
+                                  ),
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Scenario */}
+                        <div className="rounded-xl border border-slate-200 bg-white p-5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Scenario
+                          </p>
+
+                          <p className="mt-3 text-3xl font-bold text-slate-900">
+                            {formatNumber(
+                              numberValue(
+                                simulated?.overall_risk,
+                              ),
+                            )}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            Overall Risk
+                          </p>
+
+                          <div className="mt-4 space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Risk Level
+                              </span>
+
+                              <span
+                                className={`rounded-full px-2 py-1 text-xs font-semibold ${riskClass(
+                                  typeof simulated?.risk_level === "string"
+                                    ? simulated?.risk_level
+                                    : null,
+                                )}`}
+                              >
+                                {typeof simulated?.risk_level === "string"
+                                  ? simulated?.risk_level
+                                  : "N/A"}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Delay Probability
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    simulated?.delay_probability,
+                                  ) !== null
+                                    ? numberValue(
+                                      simulated?.delay_probability,
+                                    )! * 100
+                                    : null,
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Progress Stall
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    simulated?.stall_probability,
+                                  ) !== null
+                                    ? numberValue(
+                                      simulated?.stall_probability,
+                                    )! * 100
+                                    : null,
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Predicted Cost Overrun
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    simulated?.predicted_cost_overrun,
+                                  ),
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Cost Risk
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    simulated?.cost_risk,
+                                  ),
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Change */}
+                        <div className="rounded-xl border border-slate-200 bg-white p-5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Change
+                          </p>
+
+                          <p className="mt-3 text-3xl font-bold text-slate-900">
+                            {formatNumber(
+                              numberValue(
+                                change?.overall_risk,
+                              ),
+                            )}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            Risk Score Change
+                          </p>
+
+                          <div className="mt-4 space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Delay Probability
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    change?.delay_probability,
+                                  ) !== null
+                                    ? numberValue(
+                                      change?.delay_probability,
+                                    )! * 100
+                                    : null,
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Progress Stall
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    change?.stall_probability,
+                                  ) !== null
+                                    ? numberValue(
+                                      change?.stall_probability,
+                                    )! * 100
+                                    : null,
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Predicted Cost Overrun
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    change?.predicted_cost_overrun,
+                                  ),
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">
+                                Cost Risk
+                              </span>
+
+                              <span className="font-medium">
+                                {formatPercent(
+                                  numberValue(
+                                    change?.cost_risk,
+                                  ),
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Scenario Inputs */}
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Applied Scenario Inputs
+                        </p>
+
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              Progress
+                            </p>
+
+                            <p className="mt-1 text-sm font-semibold text-slate-800">
+                              {scenario.physical_progress_delta > 0
+                                ? "+"
+                                : ""}
+                              {scenario.physical_progress_delta}%
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              Schedule Delay
+                            </p>
+
+                            <p className="mt-1 text-sm font-semibold text-slate-800">
+                              {scenario.schedule_delay_days > 0
+                                ? "+"
+                                : ""}
+                              {scenario.schedule_delay_days} days
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              Monthly Expenditure
+                            </p>
+
+                            <p className="mt-1 text-sm font-semibold text-slate-800">
+                              {scenario.monthly_expenditure_change_cr > 0
+                                ? "+"
+                                : ""}
+                              ₹ {scenario.monthly_expenditure_change_cr} Cr
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              Revised Cost
+                            </p>
+
+                            <p className="mt-1 text-sm font-semibold text-slate-800">
+                              {scenario.revised_cost_change_cr > 0
+                                ? "+"
+                                : ""}
+                              ₹ {scenario.revised_cost_change_cr} Cr
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                {/* Latest Expenditure */}
+                <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Expenditure
+                    </p>
+
+                    <p className="mt-2 text-2xl font-bold text-slate-900">
+                      ₹ {formatNumber(selectedExpenditure)} Cr
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Progress Stall Risk
+                    </p>
+
+                    <p className="mt-2 text-2xl font-bold text-slate-900">
+                      {formatPercent(selectedProgressStall)}
+                    </p>
+                  </div>
+                </section>
+              </>
+            )}
+          </section>
+        )}
 
       </div>
     </div>

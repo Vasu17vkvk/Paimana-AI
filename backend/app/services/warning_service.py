@@ -222,11 +222,9 @@ def get_active_warnings() -> list[dict]:
     """
     Return all currently active ML-generated warnings.
 
-    Data source:
-        PostgreSQL -> paimana_ml_ready
-
-    The latest snapshot of each project is evaluated using
-    the same supplied ML engine used by Risk Analysis.
+    Uses the latest snapshot of each project and the same
+    PAIMANA ML engine logic as Risk Analysis, but performs
+    model inference in vectorized batches.
     """
 
     df = load_ml_data()
@@ -258,37 +256,49 @@ def get_active_warnings() -> list[dict]:
         .copy()
     )
 
+    if latest_df.empty:
+        return []
+
+    # --------------------------------------------------------
+    # Batch ML prediction
+    # --------------------------------------------------------
+
+    predictions = engine.predict_batch(
+        latest_df,
+        batch_size=256,
+    )
+
+    if predictions.empty:
+        return []
+
     warnings: list[dict] = []
 
     # --------------------------------------------------------
-    # Evaluate latest row of each project
+    # Keep only active warnings
     # --------------------------------------------------------
 
-    for _, latest_row in latest_df.iterrows():
+    active_predictions = predictions[
+        predictions[
+            "early_warning_active"
+        ].fillna(False)
+    ].copy()
+
+    if active_predictions.empty:
+        return []
+
+    # --------------------------------------------------------
+    # Convert predictions to API response
+    # --------------------------------------------------------
+
+    for _, prediction in active_predictions.iterrows():
 
         project_code = _to_project_code(
-            latest_row["project_code"]
+            prediction.get(
+                "project_code"
+            )
         )
 
         if not project_code:
-            continue
-
-        try:
-
-            risk = engine.predict_row(
-                latest_row,
-                project_code,
-            )
-
-        except Exception:
-            # One bad project must not break the complete
-            # early-warning portfolio.
-            continue
-
-        if not risk.get(
-            "early_warning_active",
-            False,
-        ):
             continue
 
         warnings.append(
@@ -296,33 +306,29 @@ def get_active_warnings() -> list[dict]:
                 "project_code": project_code,
 
                 "snapshot_year": _safe_number(
-                    risk.get(
-                        "snapshot_year",
-                        latest_row.get(
-                            "snapshot_year"
-                        ),
+                    prediction.get(
+                        "snapshot_year"
                     ),
                     None,
                 ),
 
                 "snapshot_month": _safe_number(
-                    risk.get(
-                        "snapshot_month",
-                        latest_row.get(
-                            "snapshot_month_num"
-                        ),
+                    prediction.get(
+                        "snapshot_month"
                     ),
                     None,
                 ),
 
-                "risk_level": risk.get(
-                    "risk_level",
-                    "LOW",
+                "risk_level": (
+                    prediction.get(
+                        "risk_level",
+                        "LOW",
+                    )
                 ),
 
                 "overall_risk_score": float(
                     _safe_number(
-                        risk.get(
+                        prediction.get(
                             "overall_risk_score",
                             0,
                         ),
@@ -330,13 +336,15 @@ def get_active_warnings() -> list[dict]:
                     )
                 ),
 
-                "early_warning_priority": risk.get(
-                    "early_warning_priority",
-                    "NONE",
+                "early_warning_priority": (
+                    prediction.get(
+                        "early_warning_priority",
+                        "NONE",
+                    )
                 ),
 
                 "early_warning_reasons": list(
-                    risk.get(
+                    prediction.get(
                         "early_warning_reasons",
                         [],
                     )

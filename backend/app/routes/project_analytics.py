@@ -58,29 +58,62 @@ def project_analytics_filter_options():
 def project_analytics_projects():
     """
     Return projects matching the selected filters.
+
+    Multi-select query parameters are supported.
+
+    Example:
+
+    /project-analytics/projects
+        ?sector=Roads
+        &sector=Railways
+        &state=Gujarat
+        &state=Maharashtra
+        &risk_level=HIGH
+        &risk_level=CRITICAL
+        &search=400005
     """
 
     try:
 
+        # ----------------------------------------------------
+        # Multi-select filters
+        # ----------------------------------------------------
+
+        sectors = request.args.getlist(
+            "sector"
+        )
+
+        ministries = request.args.getlist(
+            "ministry"
+        )
+
+        states = request.args.getlist(
+            "state"
+        )
+
+        risk_levels = request.args.getlist(
+            "risk_level"
+        )
+
+        schedule_statuses = request.args.getlist(
+            "schedule_status"
+        )
+
+        # ----------------------------------------------------
+        # Search remains single value
+        # ----------------------------------------------------
+
+        search = request.args.get(
+            "search"
+        )
+
         result = get_matching_projects(
-            sector=request.args.get(
-                "sector"
-            ),
-            ministry=request.args.get(
-                "ministry"
-            ),
-            state=request.args.get(
-                "state"
-            ),
-            risk_level=request.args.get(
-                "risk_level"
-            ),
-            schedule_status=request.args.get(
-                "schedule_status"
-            ),
-            search=request.args.get(
-                "search"
-            ),
+            sector=sectors,
+            ministry=ministries,
+            state=states,
+            risk_level=risk_levels,
+            schedule_status=schedule_statuses,
+            search=search,
         )
 
         return jsonify(
@@ -114,29 +147,51 @@ def project_analytics_projects():
 def project_analytics_summary():
     """
     Return portfolio-level summary for the selected filters.
+
+    Multi-select query parameters are supported.
     """
 
     try:
 
+        # ----------------------------------------------------
+        # Multi-select filters
+        # ----------------------------------------------------
+
+        sectors = request.args.getlist(
+            "sector"
+        )
+
+        ministries = request.args.getlist(
+            "ministry"
+        )
+
+        states = request.args.getlist(
+            "state"
+        )
+
+        risk_levels = request.args.getlist(
+            "risk_level"
+        )
+
+        schedule_statuses = request.args.getlist(
+            "schedule_status"
+        )
+
+        # ----------------------------------------------------
+        # Search
+        # ----------------------------------------------------
+
+        search = request.args.get(
+            "search"
+        )
+
         result = get_portfolio_summary(
-            sector=request.args.get(
-                "sector"
-            ),
-            ministry=request.args.get(
-                "ministry"
-            ),
-            state=request.args.get(
-                "state"
-            ),
-            risk_level=request.args.get(
-                "risk_level"
-            ),
-            schedule_status=request.args.get(
-                "schedule_status"
-            ),
-            search=request.args.get(
-                "search"
-            ),
+            sector=sectors,
+            ministry=ministries,
+            state=states,
+            risk_level=risk_levels,
+            schedule_status=schedule_statuses,
+            search=search,
         )
 
         return jsonify(
