@@ -16,6 +16,8 @@ from app.routes.project_analytics import project_analytics_bp
 
 from app.routes.dashboard import dashboard_bp
 
+from app.routes.geographic import geographic_bp
+
 def create_app() -> Flask:
     app = Flask(__name__)
 
@@ -139,6 +141,11 @@ def create_app() -> Flask:
 
     app.register_blueprint(
     dashboard_bp,
+    url_prefix="/api",
+    )
+
+    app.register_blueprint(
+    geographic_bp,
     url_prefix="/api",
     )
 

@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import {
     GeoJSON,
@@ -7,8 +6,11 @@ import {
     Marker,
     Popup,
     TileLayer,
+    Tooltip,
     useMap,
 } from "react-leaflet";
+
+import "leaflet/dist/leaflet.css";
 
 import indiaStatesUrl from "../../assets/india-states.geojson?url";
 
@@ -17,77 +19,47 @@ import {
     type GeographicProject,
 } from "../../services/api";
 
-interface GeoJsonFeature {
-    type: string;
+/* =========================================================
+   TYPES
+========================================================= */
+
+type Coordinate = [number, number];
+
+type GeoJSONGeometry = {
+    type: "Polygon" | "MultiPolygon";
+    coordinates:
+    | Coordinate[][]
+    | Coordinate[][][];
+};
+
+type GeoJSONFeature = {
+    type: "Feature";
     properties?: Record<string, unknown>;
-    geometry?: {
-        type: string;
-        coordinates: unknown;
-    } | null;
-}
+    geometry:
+    | GeoJSONGeometry
+    | null;
+};
 
-interface GeoJsonCollection {
-    type: string;
-    features: GeoJsonFeature[];
-}
-
-type LatLng = [number, number];
+type GeoJSONFeatureCollection = {
+    type: "FeatureCollection";
+    features: GeoJSONFeature[];
+};
 
 /* =========================================================
    INDIA MAP CONFIG
 ========================================================= */
 
-const INDIA_CENTER: LatLng = [22.5, 79];
-
-const INDIA_BOUNDS: L.LatLngBoundsExpression = [
-    [6, 68],
-    [37, 98],
+const INDIA_CENTER: Coordinate = [
+    22.9734,
+    78.6569,
 ];
-
-/*
- * Approximate centers used ONLY for displaying projects
- * when actual project GPS coordinates are unavailable.
- */
-const INDIA_STATE_CENTER: Record<string, LatLng> = {
-    Gujarat: [22.3, 71.6],
-    Maharashtra: [19.3, 75.3],
-    Rajasthan: [27.0, 74.2],
-    "Madhya Pradesh": [23.5, 78.5],
-    "Uttar Pradesh": [26.8, 80.9],
-    Bihar: [25.9, 85.3],
-    Jharkhand: [23.6, 85.3],
-    Chhattisgarh: [21.3, 82.0],
-    Odisha: [20.3, 84.4],
-    "West Bengal": [23.0, 87.8],
-    Karnataka: [15.3, 75.7],
-    Kerala: [10.4, 76.3],
-    "Tamil Nadu": [11.1, 78.6],
-    "Andhra Pradesh": [15.9, 79.7],
-    Telangana: [17.9, 79.3],
-    Goa: [15.3, 74.1],
-    Punjab: [31.1, 75.3],
-    Haryana: [29.1, 76.1],
-    "Himachal Pradesh": [31.8, 77.2],
-    Uttarakhand: [30.1, 79.2],
-    Assam: [26.2, 92.9],
-    Meghalaya: [25.5, 91.3],
-    Tripura: [23.8, 91.3],
-    Mizoram: [23.3, 92.8],
-    Manipur: [24.7, 93.9],
-    Nagaland: [26.1, 94.4],
-    "Arunachal Pradesh": [28.2, 94.7],
-    Sikkim: [27.5, 88.5],
-    "Jammu and Kashmir": [33.8, 76.3],
-    Ladakh: [34.1, 77.6],
-    Delhi: [28.6, 77.2],
-};
 
 /* =========================================================
    STATE HELPERS
 ========================================================= */
 
 function getStateName(
-    feature: GeoJsonFeature,
+    feature: GeoJSONFeature,
 ): string {
     const properties =
         feature.properties ?? {};
@@ -103,7 +75,8 @@ function getStateName(
     ];
 
     for (const key of possibleKeys) {
-        const value = properties[key];
+        const value =
+            properties[key];
 
         if (
             typeof value === "string" &&
@@ -137,57 +110,53 @@ function statesMatch(
 }
 
 /* =========================================================
-   RISK HELPERS
+   RISK
 ========================================================= */
 
-function riskColor(
+function getRiskColor(
     riskLevel: string | null,
 ): string {
-    switch (riskLevel) {
+    switch (
+    riskLevel?.toUpperCase()
+    ) {
         case "CRITICAL":
             return "#991b1b";
 
         case "HIGH":
-            return "#dc2626";
+            return "#ef4444";
 
         case "MEDIUM":
-            return "#d97706";
+            return "#f59e0b";
 
         case "LOW":
-            return "#16a34a";
+            return "#22c55e";
 
         default:
             return "#64748b";
     }
 }
 
-/*
- * Large clickable marker.
- * HTML div marker gives us a much larger hit area than
- * a tiny CircleMarker.
- */
-function createProjectIcon(
+function createRiskIcon(
     riskLevel: string | null,
 ): L.DivIcon {
     const color =
-        riskColor(riskLevel);
+        getRiskColor(riskLevel);
 
     return L.divIcon({
         className:
-            "paimana-project-marker",
+            "paimana-risk-marker",
         html: `
             <div
                 style="
                     width: 18px;
                     height: 18px;
-                    border-radius: 9999px;
                     background: ${color};
-                    border: 3px solid #ffffff;
+                    border: 3px solid white;
+                    border-radius: 50%;
                     box-sizing: border-box;
                     cursor: pointer;
                     box-shadow:
-                        0 1px 5px rgba(15, 23, 42, 0.45),
-                        0 0 0 1px ${color};
+                        0 2px 8px rgba(0,0,0,0.45);
                 "
             ></div>
         `,
@@ -198,355 +167,731 @@ function createProjectIcon(
 }
 
 /* =========================================================
-   DETERMINISTIC POSITION GENERATOR
-========================================================= */
-
-function seededRandom(
-    seed: number,
-): number {
-    const value =
-        Math.sin(seed * 12.9898) *
-        43758.5453;
-
-    return (
-        value - Math.floor(value)
-    );
-}
-
-/*
- * Creates visually well-spaced positions around a state's
- * approximate center.
- *
- * These are REPRESENTATIVE positions, NOT real GPS.
- */
-function generateProjectPositions(
-    state: string,
-    count: number,
-): LatLng[] {
-    const center =
-        INDIA_STATE_CENTER[state];
-
-    if (!center || count <= 0) {
-        return [];
-    }
-
-    const [
-        centerLat,
-        centerLng,
-    ] = center;
-
-    /*
-     * State-specific display area.
-     *
-     * Larger states get larger spread.
-     */
-    const stateSpread: Record<
-        string,
-        {
-            lat: number;
-            lng: number;
-        }
-    > = {
-        Gujarat: {
-            lat: 2.2,
-            lng: 2.8,
-        },
-
-        Maharashtra: {
-            lat: 3.0,
-            lng: 3.8,
-        },
-
-        Rajasthan: {
-            lat: 4.0,
-            lng: 5.2,
-        },
-
-        "Madhya Pradesh": {
-            lat: 3.2,
-            lng: 4.2,
-        },
-
-        "Uttar Pradesh": {
-            lat: 3.0,
-            lng: 4.5,
-        },
-
-        Bihar: {
-            lat: 1.5,
-            lng: 2.5,
-        },
-
-        Jharkhand: {
-            lat: 1.5,
-            lng: 2.3,
-        },
-
-        Chhattisgarh: {
-            lat: 2.2,
-            lng: 3.0,
-        },
-
-        Odisha: {
-            lat: 2.4,
-            lng: 3.5,
-        },
-
-        "West Bengal": {
-            lat: 2.2,
-            lng: 3.1,
-        },
-
-        Karnataka: {
-            lat: 2.6,
-            lng: 3.5,
-        },
-
-        Kerala: {
-            lat: 1.7,
-            lng: 1.2,
-        },
-
-        "Tamil Nadu": {
-            lat: 2.4,
-            lng: 3.0,
-        },
-
-        "Andhra Pradesh": {
-            lat: 2.5,
-            lng: 3.5,
-        },
-
-        Telangana: {
-            lat: 1.8,
-            lng: 2.4,
-        },
-
-        Punjab: {
-            lat: 1.2,
-            lng: 1.8,
-        },
-
-        Haryana: {
-            lat: 1.3,
-            lng: 1.8,
-        },
-
-        "Himachal Pradesh": {
-            lat: 1.6,
-            lng: 2.0,
-        },
-
-        Uttarakhand: {
-            lat: 1.5,
-            lng: 1.8,
-        },
-
-        Assam: {
-            lat: 1.8,
-            lng: 3.8,
-        },
-
-        "Arunachal Pradesh": {
-            lat: 2.0,
-            lng: 4.0,
-        },
-
-        "Jammu and Kashmir": {
-            lat: 2.2,
-            lng: 3.5,
-        },
-
-        Ladakh: {
-            lat: 2.6,
-            lng: 4.0,
-        },
-
-        Delhi: {
-            lat: 0.4,
-            lng: 0.5,
-        },
-    };
-
-    const spread =
-        stateSpread[state] ?? {
-            lat: 2,
-            lng: 2.5,
-        };
-
-    const positions: LatLng[] = [];
-
-    /*
-     * We intentionally use a wider grid for many projects.
-     */
-    const columns = Math.max(
-        6,
-        Math.ceil(
-            Math.sqrt(
-                count * 1.25,
-            ),
-        ),
-    );
-
-    const rows = Math.ceil(
-        count / columns,
-    );
-
-    const latStep =
-        spread.lat /
-        Math.max(
-            rows - 1,
-            1,
-        );
-
-    const lngStep =
-        spread.lng /
-        Math.max(
-            columns - 1,
-            1,
-        );
-
-    for (
-        let index = 0;
-        index < count;
-        index++
-    ) {
-        const row =
-            Math.floor(
-                index / columns,
-            );
-
-        const column =
-            index % columns;
-
-        const rowCount =
-            Math.min(
-                columns,
-                count -
-                    row *
-                        columns,
-            );
-
-        const baseLat =
-            centerLat -
-            spread.lat / 2 +
-            row *
-                latStep;
-
-        const rowWidth =
-            (rowCount - 1) *
-            lngStep;
-
-        const rowStart =
-            centerLng -
-            rowWidth / 2;
-
-        const baseLng =
-            rowStart +
-            column *
-                lngStep;
-
-        /*
-         * Controlled jitter.
-         * This avoids a perfect spreadsheet appearance.
-         */
-        const jitterLat =
-            (
-                seededRandom(
-                    index + 100,
-                ) -
-                0.5
-            ) *
-            latStep *
-            0.30;
-
-        const jitterLng =
-            (
-                seededRandom(
-                    index + 500,
-                ) -
-                0.5
-            ) *
-            lngStep *
-            0.30;
-
-        const stagger =
-            row % 2 === 0
-                ? -lngStep * 0.12
-                : lngStep * 0.12;
-
-        positions.push([
-            baseLat +
-                jitterLat,
-
-            baseLng +
-                jitterLng +
-                stagger,
-        ]);
-    }
-
-    return positions;
-}
-
-/* =========================================================
    MAP VIEW CONTROLLER
 ========================================================= */
 
-function MapViewportController({
+function MapViewController({
     selectedState,
+    selectedBounds,
 }: {
     selectedState: string | null;
+    selectedBounds: L.LatLngBounds | null;
 }) {
     const map = useMap();
 
+    const lastStateRef =
+        useRef<string | null>(
+            null,
+        );
+
     useEffect(() => {
+        /*
+         * India view.
+         */
         if (!selectedState) {
-            map.fitBounds(
-                INDIA_BOUNDS,
+            lastStateRef.current =
+                null;
+
+            map.setView(
+                INDIA_CENTER,
+                5,
                 {
-                    padding: [
-                        20,
-                        20,
-                    ],
+                    animate: true,
                 },
             );
 
             return;
         }
 
-        const center =
-            Object.entries(
-                INDIA_STATE_CENTER,
-            ).find(
-                ([state]) =>
-                    statesMatch(
-                        state,
-                        selectedState,
-                    ),
-            )?.[1];
-
-        if (center) {
-            map.setView(
-                center,
-                6,
-                {
-                    animate: true,
-                },
-            );
+        /*
+         * We need the actual state bounds.
+         */
+        if (!selectedBounds) {
+            return;
         }
+
+        /*
+         * Don't repeatedly zoom into
+         * the same state.
+         */
+        if (
+            lastStateRef.current ===
+            selectedState
+        ) {
+            return;
+        }
+
+        lastStateRef.current =
+            selectedState;
+
+        /*
+         * Reference behavior:
+         * fit the real GeoJSON state bounds.
+         */
+        map.fitBounds(
+            selectedBounds.pad(
+                0.08,
+            ),
+            {
+                padding: [
+                    50,
+                    50,
+                ],
+                maxZoom: 7,
+                animate: true,
+            },
+        );
     }, [
         map,
         selectedState,
+        selectedBounds,
     ]);
 
     return null;
 }
 
 /* =========================================================
-   MAIN MAP COMPONENT
+   POINT IN RING
+========================================================= */
+
+function pointInRing(
+    point: Coordinate,
+    ring: Coordinate[],
+): boolean {
+    const [x, y] =
+        point;
+
+    let inside = false;
+
+    for (
+        let i = 0,
+        j = ring.length - 1;
+        i < ring.length;
+        j = i++
+    ) {
+        const xi =
+            ring[i]?.[0];
+
+        const yi =
+            ring[i]?.[1];
+
+        const xj =
+            ring[j]?.[0];
+
+        const yj =
+            ring[j]?.[1];
+
+        if (
+            typeof xi !== "number" ||
+            typeof yi !== "number" ||
+            typeof xj !== "number" ||
+            typeof yj !== "number"
+        ) {
+            continue;
+        }
+
+        const intersects =
+            yi > y !==
+            yj > y &&
+            x <
+            ((xj - xi) *
+                (y - yi)) /
+            (yj - yi) +
+            xi;
+
+        if (
+            intersects
+        ) {
+            inside =
+                !inside;
+        }
+    }
+
+    return inside;
+}
+
+/* =========================================================
+   POINT IN POLYGON
+   Supports holes
+========================================================= */
+
+function pointInPolygon(
+    point: Coordinate,
+    polygon: Coordinate[][],
+): boolean {
+    if (
+        polygon.length ===
+        0
+    ) {
+        return false;
+    }
+
+    /*
+     * Outer ring.
+     */
+    if (
+        !pointInRing(
+            point,
+            polygon[0],
+        )
+    ) {
+        return false;
+    }
+
+    /*
+     * Remaining rings = holes.
+     */
+    for (
+        let index = 1;
+        index <
+        polygon.length;
+        index++
+    ) {
+        if (
+            pointInRing(
+                point,
+                polygon[index],
+            )
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* =========================================================
+   POINT INSIDE POLYGON / MULTIPOLYGON
+========================================================= */
+
+function pointInsideGeometry(
+    point: Coordinate,
+    geometry: GeoJSONGeometry,
+): boolean {
+    if (
+        geometry.type ===
+        "Polygon"
+    ) {
+        return pointInPolygon(
+            point,
+            geometry.coordinates as Coordinate[][],
+        );
+    }
+
+    if (
+        geometry.type ===
+        "MultiPolygon"
+    ) {
+        const polygons =
+            geometry.coordinates as Coordinate[][][];
+
+        return polygons.some(
+            (
+                polygon,
+            ) =>
+                pointInPolygon(
+                    point,
+                    polygon,
+                ),
+        );
+    }
+
+    return false;
+}
+
+/* =========================================================
+   CANDIDATE POINTS INSIDE ACTUAL STATE
+========================================================= */
+
+function getInsideCandidates(
+    bounds: L.LatLngBounds,
+    geometry: GeoJSONGeometry,
+): Coordinate[] {
+    const south =
+        bounds.getSouth();
+
+    const north =
+        bounds.getNorth();
+
+    const west =
+        bounds.getWest();
+
+    const east =
+        bounds.getEast();
+
+    /*
+     * Reference logic:
+     * dense 60 x 60 candidate grid.
+     */
+    const gridSize = 60;
+
+    const candidates: Coordinate[] =
+        [];
+
+    for (
+        let row = 0;
+        row < gridSize;
+        row++
+    ) {
+        const lat =
+            south +
+            ((north - south) *
+                (row + 0.5)) /
+            gridSize;
+
+        for (
+            let column = 0;
+            column < gridSize;
+            column++
+        ) {
+            const lng =
+                west +
+                ((east - west) *
+                    (column + 0.5)) /
+                gridSize;
+
+            /*
+             * GeoJSON expects [lng, lat].
+             */
+            const inside =
+                pointInsideGeometry(
+                    [lng, lat],
+                    geometry,
+                );
+
+            if (
+                inside
+            ) {
+                /*
+                 * Leaflet marker expects [lat, lng].
+                 */
+                candidates.push(
+                    [
+                        lat,
+                        lng,
+                    ],
+                );
+            }
+        }
+    }
+
+    return candidates;
+}
+
+/* =========================================================
+   DISTANCE BETWEEN MAP POINTS
+========================================================= */
+
+function pointDistance(
+    a: Coordinate,
+    b: Coordinate,
+): number {
+    const latDifference =
+        a[0] - b[0];
+
+    const lngDifference =
+        a[1] - b[1];
+
+    return (
+        latDifference *
+        latDifference +
+        lngDifference *
+        lngDifference
+    );
+}
+
+/* =========================================================
+   FARTHEST-POINT SAMPLING
+========================================================= */
+
+function getMarkerPositions(
+    total: number,
+    bounds: L.LatLngBounds,
+    geometry: GeoJSONGeometry,
+): Coordinate[] {
+    if (total <= 0) {
+        return [];
+    }
+
+    const candidates =
+        getInsideCandidates(
+            bounds,
+            geometry,
+        );
+
+    if (
+        candidates.length ===
+        0
+    ) {
+        return [];
+    }
+
+    /*
+     * If there are fewer candidate points
+     * than projects, use all candidates.
+     */
+    if (
+        candidates.length <=
+        total
+    ) {
+        return candidates;
+    }
+
+    const selected: Coordinate[] =
+        [];
+
+    /*
+     * Start from the candidate
+     * closest to state center.
+     */
+    const center: Coordinate =
+        [
+            bounds.getCenter().lat,
+            bounds.getCenter().lng,
+        ];
+
+    let firstIndex = 0;
+    let firstDistance =
+        Infinity;
+
+    candidates.forEach(
+        (
+            candidate,
+            index,
+        ) => {
+            const distance =
+                pointDistance(
+                    candidate,
+                    center,
+                );
+
+            if (
+                distance <
+                firstDistance
+            ) {
+                firstDistance =
+                    distance;
+
+                firstIndex =
+                    index;
+            }
+        },
+    );
+
+    selected.push(
+        candidates[
+        firstIndex
+        ],
+    );
+
+    /*
+     * Farthest-point sampling:
+     * each next point is chosen as
+     * far away as possible from the
+     * markers already selected.
+     */
+    while (
+        selected.length <
+        total
+    ) {
+        let bestCandidate:
+            | Coordinate
+            | null = null;
+
+        let bestDistance =
+            -1;
+
+        for (const candidate of candidates) {
+            const alreadySelected =
+                selected.some(
+                    (
+                        point,
+                    ) =>
+                        point[0] ===
+                        candidate[0] &&
+                        point[1] ===
+                        candidate[1],
+                );
+
+            if (
+                alreadySelected
+            ) {
+                continue;
+            }
+
+            let minimumDistance =
+                Infinity;
+
+            for (const point of selected) {
+                const distance =
+                    pointDistance(
+                        candidate,
+                        point,
+                    );
+
+                if (
+                    distance <
+                    minimumDistance
+                ) {
+                    minimumDistance =
+                        distance;
+                }
+            }
+
+            if (
+                minimumDistance >
+                bestDistance
+            ) {
+                bestDistance =
+                    minimumDistance;
+
+                bestCandidate =
+                    candidate;
+            }
+        }
+
+        if (
+            !bestCandidate
+        ) {
+            break;
+        }
+
+        selected.push(
+            bestCandidate,
+        );
+    }
+
+    return selected;
+}
+
+/* =========================================================
+   POPUP CONTENT
+========================================================= */
+
+function ProjectPopup({
+    project,
+}: {
+    project: GeographicProject;
+}) {
+    return (
+        <div
+            style={{
+                minWidth:
+                    "270px",
+                maxWidth:
+                    "320px",
+            }}
+        >
+            {/* Project Code */}
+            <div
+                style={{
+                    fontSize:
+                        "12px",
+                    color:
+                        "#94a3b8",
+                }}
+            >
+                Project{" "}
+                {project.project_code}
+            </div>
+
+            {/* Project Name */}
+            <div
+                style={{
+                    marginTop:
+                        "5px",
+                    fontWeight:
+                        700,
+                    fontSize:
+                        "15px",
+                    lineHeight:
+                        1.4,
+                    color:
+                        "#1e293b",
+                }}
+            >
+                {
+                    project.project_name
+                }
+            </div>
+
+            {/* Risk */}
+            <div
+                style={{
+                    marginTop:
+                        "12px",
+                    padding:
+                        "12px",
+                    border:
+                        "1px solid #e2e8f0",
+                    borderRadius:
+                        "8px",
+                    background:
+                        "#f8fafc",
+                }}
+            >
+                <div
+                    style={{
+                        display:
+                            "flex",
+                        justifyContent:
+                            "space-between",
+                    }}
+                >
+                    <span>
+                        Risk Score
+                    </span>
+
+                    <strong>
+                        {project.risk_score !==
+                            null
+                            ? project.risk_score.toFixed(
+                                1,
+                            )
+                            : "N/A"}
+
+                        {project.risk_score !==
+                            null &&
+                            "/100"}
+                    </strong>
+                </div>
+
+                <div
+                    style={{
+                        display:
+                            "flex",
+                        justifyContent:
+                            "space-between",
+                        marginTop:
+                            "8px",
+                    }}
+                >
+                    <span>
+                        Risk Level
+                    </span>
+
+                    <strong
+                        style={{
+                            color: getRiskColor(
+                                project.risk_level,
+                            ),
+                        }}
+                    >
+                        {
+                            project.risk_level ??
+                            "N/A"
+                        }
+                    </strong>
+                </div>
+            </div>
+
+            {/* Progress / Delay / Cost */}
+            <div
+                style={{
+                    marginTop:
+                        "12px",
+                    lineHeight:
+                        1.8,
+                }}
+            >
+                <div>
+                    <strong>
+                        Progress:
+                    </strong>{" "}
+                    {project.physical_progress_pct !==
+                        null
+                        ? `${project.physical_progress_pct.toFixed(
+                            1,
+                        )}%`
+                        : "N/A"}
+                </div>
+
+                <div>
+                    <strong>
+                        Delay:
+                    </strong>{" "}
+                    {project.delay_days !==
+                        null
+                        ? `${Math.round(
+                            project.delay_days,
+                        )} days`
+                        : "N/A"}
+                </div>
+
+                <div>
+                    <strong>
+                        Cost Overrun:
+                    </strong>{" "}
+                    {project.cost_overrun_pct !==
+                        null
+                        ? `${Number(
+                            project.cost_overrun_pct,
+                        ).toFixed(
+                            1,
+                        )}%`
+                        : "N/A"}
+                </div>
+            </div>
+
+            {/* Metadata */}
+            <div
+                style={{
+                    marginTop:
+                        "12px",
+                    paddingTop:
+                        "10px",
+                    borderTop:
+                        "1px solid #e2e8f0",
+                    fontSize:
+                        "12px",
+                    color:
+                        "#64748b",
+                    lineHeight:
+                        1.7,
+                }}
+            >
+                <div>
+                    <strong>
+                        State:
+                    </strong>{" "}
+                    {
+                        project.state
+                    }
+                </div>
+
+                <div>
+                    <strong>
+                        Sector:
+                    </strong>{" "}
+                    {project.sector ??
+                        "-"}
+                </div>
+
+                <div>
+                    <strong>
+                        Ministry:
+                    </strong>{" "}
+                    {project.ministry ??
+                        "-"}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* =========================================================
+   MAIN COMPONENT
 ========================================================= */
 
 export default function ProjectMap() {
+    const [
+        indiaStates,
+        setIndiaStates,
+    ] =
+        useState<GeoJSONFeatureCollection | null>(
+            null,
+        );
+
     const [
         selectedState,
         setSelectedState,
@@ -555,29 +900,38 @@ export default function ProjectMap() {
     );
 
     const [
-        geoJson,
-        setGeoJson,
+        selectedBounds,
+        setSelectedBounds,
     ] =
-        useState<GeoJsonCollection | null>(
+        useState<L.LatLngBounds | null>(
+            null,
+        );
+
+    const [
+        selectedGeometry,
+        setSelectedGeometry,
+    ] =
+        useState<GeoJSONGeometry | null>(
             null,
         );
 
     const [
         projects,
         setProjects,
-    ] = useState<
-        GeographicProject[]
-    >([]);
+    ] =
+        useState<
+            GeographicProject[]
+        >([]);
 
     const [
-        loadingMap,
-        setLoadingMap,
-    ] = useState(true);
-
-    const [
-        loadingProjects,
-        setLoadingProjects,
+        loading,
+        setLoading,
     ] = useState(false);
+
+    const [
+        mapLoading,
+        setMapLoading,
+    ] = useState(true);
 
     const [
         error,
@@ -587,50 +941,68 @@ export default function ProjectMap() {
     );
 
     /* =====================================================
-       LOAD INDIA GEOJSON
+       LOAD INDIA STATES
     ===================================================== */
 
     useEffect(() => {
-        let cancelled = false;
+        let cancelled =
+            false;
 
-        async function loadGeoJson() {
+        async function loadIndiaStates() {
             try {
-                setLoadingMap(true);
-                setError(null);
+                setMapLoading(
+                    true,
+                );
+
+                setError(
+                    null,
+                );
 
                 const response =
                     await fetch(
                         indiaStatesUrl,
                     );
 
-                if (!response.ok) {
+                if (
+                    !response.ok
+                ) {
                     throw new Error(
-                        `Failed to load India state map (${response.status}).`,
+                        `GeoJSON file could not be loaded (${response.status}).`,
                     );
                 }
 
                 const data =
-                    (await response.json()) as GeoJsonCollection;
+                    (await response.json()) as GeoJSONFeatureCollection;
 
-                if (!cancelled) {
-                    setGeoJson(data);
+                if (
+                    !cancelled
+                ) {
+                    setIndiaStates(
+                        data,
+                    );
                 }
             } catch (err) {
-                if (!cancelled) {
+                if (
+                    !cancelled
+                ) {
                     setError(
                         err instanceof Error
                             ? err.message
-                            : "Failed to load India state map.",
+                            : "GeoJSON file could not be loaded.",
                     );
                 }
             } finally {
-                if (!cancelled) {
-                    setLoadingMap(false);
+                if (
+                    !cancelled
+                ) {
+                    setMapLoading(
+                        false,
+                    );
                 }
             }
         }
 
-        void loadGeoJson();
+        void loadIndiaStates();
 
         return () => {
             cancelled = true;
@@ -638,54 +1010,79 @@ export default function ProjectMap() {
     }, []);
 
     /* =====================================================
-       LOAD PROJECTS ONLY WHEN A STATE IS SELECTED
+       LOAD PROJECTS ONLY AFTER STATE SELECTION
     ===================================================== */
 
     useEffect(() => {
-        let cancelled = false;
+        let cancelled =
+            false;
 
         /*
          * IMPORTANT:
-         * All India view = NO project API call.
+         * India view = no API call + no markers.
          */
         if (!selectedState) {
-            setProjects([]);
-            setLoadingProjects(false);
-            setError(null);
+            setProjects(
+                [],
+            );
+
+            setLoading(
+                false,
+            );
 
             return () => {
                 cancelled = true;
             };
         }
 
+        /*
+         * Narrowed string value.
+         */
+        const state =
+            selectedState;
+
         async function loadProjects() {
-            setLoadingProjects(true);
-            setError(null);
-
             try {
-    const response =
-        await getGeographicProjects(
-            selectedState ?? undefined,
-        );
+                setLoading(
+                    true,
+                );
 
-    if (!cancelled) {
-        setProjects(
-            response.projects ?? [],
-        );
-    }
-} catch (err) {
-                if (!cancelled) {
-                    setProjects([]);
+                setError(
+                    null,
+                );
+
+                const response =
+                    await getGeographicProjects(
+                        state,
+                    );
+
+                if (
+                    !cancelled
+                ) {
+                    setProjects(
+                        response.projects ??
+                        [],
+                    );
+                }
+            } catch (err) {
+                if (
+                    !cancelled
+                ) {
+                    setProjects(
+                        [],
+                    );
 
                     setError(
                         err instanceof Error
                             ? err.message
-                            : "Failed to load geographic projects.",
+                            : "Projects API failed.",
                     );
                 }
             } finally {
-                if (!cancelled) {
-                    setLoadingProjects(
+                if (
+                    !cancelled
+                ) {
+                    setLoading(
                         false,
                     );
                 }
@@ -702,73 +1099,237 @@ export default function ProjectMap() {
     ]);
 
     /* =====================================================
-       PROJECT MARKER POSITIONS
+       STATE STYLE
     ===================================================== */
 
-    const positionedProjects =
+    const stateStyle = (
+        feature:
+            | GeoJSONFeature
+            | undefined,
+    ) => {
+        const stateName =
+            feature
+                ? getStateName(
+                    feature,
+                )
+                : "";
+
+        const selected =
+            Boolean(
+                selectedState,
+            ) &&
+            statesMatch(
+                stateName,
+                selectedState as string,
+            );
+
+        return {
+            color: selected
+                ? "#1d4ed8"
+                : "#64748b",
+
+            weight: selected
+                ? 2.5
+                : 1.1,
+
+            fillColor: selected
+                ? "#60a5fa"
+                : "#dbeafe",
+
+            fillOpacity: selected
+                ? 0.45
+                : 0.22,
+        };
+    };
+
+    /* =====================================================
+       STATE INTERACTION
+    ===================================================== */
+
+    const onEachState = (
+        feature: GeoJSONFeature,
+        layer: L.Layer,
+    ) => {
+        const stateName =
+            getStateName(
+                feature,
+            );
+
+        layer.bindTooltip(
+            stateName,
+            {
+                sticky: true,
+                direction:
+                    "top",
+            },
+        );
+
+        layer.on({
+            mouseover: (
+                event,
+            ) => {
+                const target =
+                    event.target as L.Path;
+
+                target.setStyle({
+                    weight: 2,
+                    color: "#2563eb",
+                    fillColor:
+                        "#93c5fd",
+                    fillOpacity: 0.5,
+                });
+            },
+
+            mouseout: (
+                event,
+            ) => {
+                const target =
+                    event.target as L.Path;
+
+                target.setStyle(
+                    stateStyle(
+                        feature,
+                    ),
+                );
+            },
+
+            click: (
+                event,
+            ) => {
+                /*
+                 * Clicking the same state again:
+                 * don't refetch.
+                 */
+                if (
+                    selectedState &&
+                    statesMatch(
+                        selectedState,
+                        stateName,
+                    )
+                ) {
+                    return;
+                }
+
+                const target =
+                    event.target as L.Polygon;
+
+                /*
+                 * Actual state geometry bounds.
+                 */
+                const bounds =
+                    target.getBounds();
+
+                /*
+                 * Actual GeoJSON geometry.
+                 */
+                const geometry =
+                    feature.geometry;
+
+                if (!geometry) {
+                    setError(
+                        `Geometry unavailable for ${stateName}.`,
+                    );
+
+                    return;
+                }
+
+                /*
+                 * Save actual state data.
+                 */
+                setSelectedBounds(
+                    bounds,
+                );
+
+                setSelectedGeometry(
+                    geometry,
+                );
+
+                setSelectedState(
+                    stateName,
+                );
+
+                setProjects(
+                    [],
+                );
+
+                setError(
+                    null,
+                );
+            },
+        });
+    };
+
+    /* =====================================================
+       MARKER POSITIONS
+    ===================================================== */
+
+    const markerPositions =
         useMemo(() => {
             /*
-             * INDIA VIEW:
-             * Always zero project dots.
+             * India view = ZERO markers.
              */
             if (
                 !selectedState ||
-                !projects.length
+                !selectedBounds ||
+                !selectedGeometry ||
+                projects.length ===
+                0
             ) {
                 return [];
             }
 
-            const positions =
-                generateProjectPositions(
-                    selectedState,
-                    projects.length,
-                );
-
-            return projects
-                .map(
-                    (
-                        project,
-                        index,
-                    ) => {
-                        const position =
-                            positions[
-                                index
-                            ];
-
-                        if (!position) {
-                            return null;
-                        }
-
-                        return {
-                            project,
-                            position,
-                        };
-                    },
-                )
-                .filter(
-                    (
-                        item,
-                    ): item is {
-                        project: GeographicProject;
-                        position: LatLng;
-                    } =>
-                        item !== null,
-                );
+            return getMarkerPositions(
+                projects.length,
+                selectedBounds,
+                selectedGeometry,
+            );
         }, [
             selectedState,
+            selectedBounds,
+            selectedGeometry,
             projects,
         ]);
 
     /* =====================================================
-       LOADING MAP
+       RESET
+    ===================================================== */
+
+    function resetToIndia() {
+        setSelectedState(
+            null,
+        );
+
+        setSelectedBounds(
+            null,
+        );
+
+        setSelectedGeometry(
+            null,
+        );
+
+        setProjects(
+            [],
+        );
+
+        setLoading(
+            false,
+        );
+
+        setError(
+            null,
+        );
+    }
+
+    /* =====================================================
+       LOADING
     ===================================================== */
 
     if (
-        loadingMap ||
-        !geoJson
+        mapLoading ||
+        !indiaStates
     ) {
         return (
-            <div className="flex h-[620px] items-center justify-center bg-slate-50">
+            <div className="flex h-[600px] items-center justify-center rounded-2xl bg-slate-50">
                 <div className="text-sm text-slate-500">
                     Loading India map...
                 </div>
@@ -781,117 +1342,50 @@ export default function ProjectMap() {
     ===================================================== */
 
     return (
-        <div className="relative w-full">
+        <div className="relative">
             {/* =================================================
-               INFO PANEL
+                SELECTED STATE CARD
             ================================================= */}
 
-            <div className="absolute left-4 top-4 z-[1000] w-[290px] rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
-                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+            <div className="absolute right-4 top-4 z-[1000] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
+                <div className="text-xs text-slate-500">
                     Geographic View
                 </div>
 
-                <div className="mt-1 text-sm font-semibold text-slate-900">
+                <div className="text-lg font-semibold text-slate-900">
                     {selectedState ??
                         "All India"}
                 </div>
 
                 <div className="mt-1 text-xs text-slate-500">
                     {!selectedState
-                        ? "Select a state to view projects."
-                        : loadingProjects
-                          ? "Loading projects..."
-                          : `${projects.length.toLocaleString()} projects`}
+                        ? "Click a state to view projects"
+                        : loading
+                            ? "Loading projects..."
+                            : `${projects.length.toLocaleString()} projects found`}
                 </div>
-
-                {error && (
-                    <div className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-xs leading-4 text-red-600">
-                        {error}
-                    </div>
-                )}
 
                 {selectedState && (
                     <button
                         type="button"
-                        onClick={() => {
-                            setProjects(
-                                [],
-                            );
-
-                            setSelectedState(
-                                null,
-                            );
-
-                            setError(
-                                null,
-                            );
-                        }}
-                        className="mt-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+                        onClick={
+                            resetToIndia
+                        }
+                        className="mt-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
                     >
-                        Reset to India
+                        Back to India
                     </button>
+                )}
+
+                {error && (
+                    <div className="mt-2 max-w-[250px] rounded-lg bg-red-50 px-2 py-1.5 text-xs text-red-600">
+                        {error}
+                    </div>
                 )}
             </div>
 
             {/* =================================================
-               RISK LEGEND
-            ================================================= */}
-
-            <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
-                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
-                    Risk Level
-                </div>
-
-                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600">
-                    {[
-                        [
-                            "CRITICAL",
-                            "#991b1b",
-                        ],
-                        [
-                            "HIGH",
-                            "#dc2626",
-                        ],
-                        [
-                            "MEDIUM",
-                            "#d97706",
-                        ],
-                        [
-                            "LOW",
-                            "#16a34a",
-                        ],
-                    ].map(
-                        ([
-                            label,
-                            color,
-                        ]) => (
-                            <div
-                                key={
-                                    label
-                                }
-                                className="flex items-center gap-2"
-                            >
-                                <span
-                                    className="h-2.5 w-2.5 rounded-full"
-                                    style={{
-                                        backgroundColor:
-                                            color,
-                                    }}
-                                />
-
-                                <span>
-                                    {
-                                        label
-                                    }
-                                </span>
-                            </div>
-                        ),
-                    )}
-                </div>
-            </div>
-
-            {/* =================================================
-               MAP
+                MAP
             ================================================= */}
 
             <MapContainer
@@ -900,382 +1394,394 @@ export default function ProjectMap() {
                 }
                 zoom={5}
                 minZoom={4}
-                maxZoom={10}
-                maxBounds={
-                    INDIA_BOUNDS
-                }
-                maxBoundsViscosity={
-                    1
-                }
+                maxZoom={9}
                 scrollWheelZoom
-                className="h-[620px] w-full"
+                doubleClickZoom={
+                    false
+                }
+                style={{
+                    height: "600px",
+                    width: "100%",
+                    borderRadius:
+                        "16px",
+                }}
             >
+                <MapViewController
+                    selectedState={
+                        selectedState
+                    }
+                    selectedBounds={
+                        selectedBounds
+                    }
+                />
+
+                {/* BASE MAP */}
+
                 <TileLayer
                     attribution="&copy; OpenStreetMap contributors"
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
-                <MapViewportController
-                    selectedState={
-                        selectedState
-                    }
-                />
-
-                {/* =================================================
-                   INDIA STATE POLYGONS
-                ================================================= */}
+                {/* INDIA STATES */}
 
                 <GeoJSON
-                    key={
-                        selectedState ??
-                        "india"
-                    }
                     data={
-                        geoJson as never
+                        indiaStates as never
                     }
                     style={(
                         feature,
-                    ) => {
-                        const stateName =
-                            feature
-                                ? getStateName(
-                                      feature as GeoJsonFeature,
-                                  )
-                                : "";
-
-                        const isSelected =
-                            selectedState !==
-                                null &&
-                            statesMatch(
-                                stateName,
-                                selectedState,
-                            );
-
-                        return {
-                            color:
-                                isSelected
-                                    ? "#0f172a"
-                                    : "#64748b",
-
-                            weight:
-                                isSelected
-                                    ? 2.5
-                                    : 1,
-
-                            fillColor:
-                                isSelected
-                                    ? "#cbd5e1"
-                                    : "#f8fafc",
-
-                            fillOpacity:
-                                isSelected
-                                    ? 0.72
-                                    : 0.48,
-                        };
-                    }}
+                    ) =>
+                        stateStyle(
+                            feature as GeoJSONFeature,
+                        )
+                    }
                     onEachFeature={(
                         feature,
                         layer,
-                    ) => {
-                        const stateName =
-                            getStateName(
-                                feature as GeoJsonFeature,
-                            );
-
-                        layer.bindTooltip(
-                            stateName,
-                            {
-                                sticky: true,
-                                direction:
-                                    "top",
-                            },
-                        );
-
-                        layer.on({
-                            click: () => {
-                                const matchedState =
-                                    Object.keys(
-                                        INDIA_STATE_CENTER,
-                                    ).find(
-                                        (
-                                            knownState,
-                                        ) =>
-                                            statesMatch(
-                                                knownState,
-                                                stateName,
-                                            ),
-                                    );
-
-                                /*
-                                 * If a state has a known
-                                 * center, use canonical
-                                 * state name.
-                                 */
-                                setSelectedState(
-                                    matchedState ??
-                                        stateName,
-                                );
-
-                                setError(
-                                    null,
-                                );
-                            },
-
-                            mouseover: (
-                                event,
-                            ) => {
-                                const target =
-                                    event.target as L.Path;
-
-                                target.setStyle(
-                                    {
-                                        weight: 2.5,
-                                        color: "#334155",
-                                        fillOpacity: 0.72,
-                                    },
-                                );
-                            },
-
-                            mouseout: (
-                                event,
-                            ) => {
-                                const target =
-                                    event.target as L.Path;
-
-                                const isSelected =
-                                    selectedState !==
-                                        null &&
-                                    statesMatch(
-                                        stateName,
-                                        selectedState,
-                                    );
-
-                                target.setStyle(
-                                    {
-                                        weight:
-                                            isSelected
-                                                ? 2.5
-                                                : 1,
-
-                                        color:
-                                            isSelected
-                                                ? "#0f172a"
-                                                : "#64748b",
-
-                                        fillOpacity:
-                                            isSelected
-                                                ? 0.72
-                                                : 0.48,
-                                    },
-                                );
-                            },
-                        });
-                    }}
+                    ) =>
+                        onEachState(
+                            feature as GeoJSONFeature,
+                            layer,
+                        )
+                    }
                 />
 
                 {/* =================================================
-                   PROJECT MARKERS
-
-                   IMPORTANT:
-                   These are rendered ONLY when selectedState
-                   exists.
+                    PROJECT MARKERS
                 ================================================= */}
 
                 {selectedState &&
-                    positionedProjects.map(
-                        ({
+                    projects.map(
+                        (
                             project,
-                            position,
-                        }) => (
-                            <Marker
-                                key={
-                                    project.project_code
-                                }
-                                position={
-                                    position
-                                }
-                                icon={createProjectIcon(
-                                    project.risk_level,
-                                )}
-                                zIndexOffset={
-                                    1000
-                                }
-                                eventHandlers={{
-                                    /*
-                                     * Hover:
-                                     * open popup.
-                                     */
-                                    mouseover: (
-                                        event,
-                                    ) => {
-                                        const marker =
-                                            event.target as L.Marker;
+                            index,
+                        ) => {
+                            const markerPosition =
+                                markerPositions[
+                                index
+                                ];
 
-                                        marker.openPopup();
-                                    },
+                            if (
+                                !markerPosition
+                            ) {
+                                return null;
+                            }
 
-                                    /*
-                                     * Click:
-                                     * also open popup.
-                                     */
-                                    click: (
-                                        event,
-                                    ) => {
-                                        const marker =
-                                            event.target as L.Marker;
-
-                                        marker.openPopup();
-                                    },
-                                }}
-                            >
-                                <Popup
-                                    closeButton
-                                    autoPan
-                                    autoPanPadding={[
-                                        50,
-                                        50,
-                                    ]}
-                                    maxWidth={
-                                        340
+                            return (
+                                <Marker
+                                    key={`${project.project_code}-${index}`}
+                                    position={
+                                        markerPosition
                                     }
+                                    icon={createRiskIcon(
+                                        project.risk_level,
+                                    )}
                                 >
-                                    <div className="min-w-[270px] max-w-[310px]">
-                                        {/* PROJECT NAME */}
-                                        <div className="text-sm font-semibold leading-5 text-slate-900">
-                                            {
-                                                project.project_name
+                                    {/* =================================================
+                                        HOVER TOOLTIP
+
+                                        ONLY:
+                                        Project ID
+                                        Project Name
+                                    ================================================= */}
+
+                                    <Tooltip
+                                        direction="top"
+                                        offset={[
+                                            0,
+                                            -12,
+                                        ]}
+                                        opacity={
+                                            1
+                                        }
+                                        sticky
+                                    >
+                                        <div
+                                            style={{
+                                                minWidth:
+                                                    "180px",
+                                                maxWidth:
+                                                    "280px",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    fontWeight:
+                                                        700,
+                                                    fontSize:
+                                                        "12px",
+                                                    color:
+                                                        "#0f172a",
+                                                }}
+                                            >
+                                                {
+                                                    project.project_code
+                                                }
+                                            </div>
+
+                                            <div
+                                                style={{
+                                                    marginTop:
+                                                        "4px",
+                                                    fontSize:
+                                                        "11px",
+                                                    lineHeight:
+                                                        1.4,
+                                                    color:
+                                                        "#334155",
+                                                }}
+                                            >
+                                                {
+                                                    project.project_name
+                                                }
+                                            </div>
+                                        </div>
+                                    </Tooltip>
+
+                                    {/* =================================================
+                                        CLICK POPUP
+
+                                        Full project information.
+                                    ================================================= */}
+
+                                    <Popup
+                                        maxWidth={
+                                            350
+                                        }
+                                        autoPan
+                                        autoPanPadding={[
+                                            40,
+                                            40,
+                                        ]}
+                                    >
+                                        <ProjectPopup
+                                            project={
+                                                project
                                             }
+                                        />
+                                    </Popup>
+                                </Marker>
+                            );
+                        },
+                    )}
+            </MapContainer>
+
+            {/* =================================================
+                RISK LEGEND
+            ================================================= */}
+
+            <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
+                <div className="mb-2 text-sm font-semibold text-slate-700">
+                    Project Risk
+                </div>
+
+                <div className="space-y-2 text-xs text-slate-600">
+                    <div className="flex items-center gap-2">
+                        <span
+                            className="h-3 w-3 rounded-full"
+                            style={{
+                                backgroundColor:
+                                    "#991b1b",
+                            }}
+                        />
+
+                        Critical Risk
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <span
+                            className="h-3 w-3 rounded-full"
+                            style={{
+                                backgroundColor:
+                                    "#ef4444",
+                            }}
+                        />
+
+                        High Risk
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <span
+                            className="h-3 w-3 rounded-full"
+                            style={{
+                                backgroundColor:
+                                    "#f59e0b",
+                            }}
+                        />
+
+                        Medium Risk
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <span
+                            className="h-3 w-3 rounded-full"
+                            style={{
+                                backgroundColor:
+                                    "#22c55e",
+                            }}
+                        />
+
+                        Low Risk
+                    </div>
+                </div>
+            </div>
+
+            {/* =================================================
+                PROJECT LIST
+            ================================================= */}
+
+            {selectedState && (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-4 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900">
+                                Projects in{" "}
+                                {
+                                    selectedState
+                                }
+                            </h2>
+
+                            <p className="text-sm text-slate-500">
+                                Infrastructure
+                                projects
+                                returned by
+                                PAIMANA AI
+                            </p>
+                        </div>
+
+                        <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
+                            {loading
+                                ? "..."
+                                : projects.length}
+                        </div>
+                    </div>
+
+                    {loading ? (
+                        <div className="py-8 text-center text-sm text-slate-500">
+                            Loading
+                            projects...
+                        </div>
+                    ) : projects.length ===
+                        0 ? (
+                        <div className="py-8 text-center text-sm text-slate-500">
+                            No projects
+                            found.
+                        </div>
+                    ) : (
+                        <div className="max-h-[400px] space-y-2 overflow-y-auto pr-1">
+                            {projects.map(
+                                (
+                                    project,
+                                    index,
+                                ) => (
+                                    <div
+                                        key={`${project.project_code}-${index}`}
+                                        className="rounded-lg border border-slate-200 p-4 transition hover:bg-slate-50"
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <div className="text-xs text-slate-400">
+                                                    Project{" "}
+                                                    {
+                                                        project.project_code
+                                                    }
+                                                </div>
+
+                                                <div className="mt-1 font-medium leading-5 text-slate-900">
+                                                    {
+                                                        project.project_name
+                                                    }
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-white"
+                                                style={{
+                                                    backgroundColor:
+                                                        getRiskColor(
+                                                            project.risk_level,
+                                                        ),
+                                                }}
+                                            >
+                                                {
+                                                    project.risk_level ??
+                                                    "N/A"
+                                                }
+                                            </div>
                                         </div>
 
-                                        {/* PROJECT CODE */}
-                                        <div className="mt-1 text-xs text-slate-500">
-                                            Project
-                                            Code:
-                                            {" "}
-                                            {
-                                                project.project_code
-                                            }
-                                        </div>
-
-                                        {/* RISK */}
-                                        <div className="mt-3 grid grid-cols-2 gap-2">
-                                            <div className="rounded-lg bg-slate-50 p-2.5">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                        <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                                            <div>
+                                                <div className="text-slate-400">
                                                     Risk
                                                     Score
                                                 </div>
 
-                                                <div className="mt-1 text-sm font-bold text-slate-900">
+                                                <div className="mt-1 font-semibold text-slate-800">
                                                     {project.risk_score !==
-                                                    null
-                                                        ? project.risk_score.toFixed(
-                                                              1,
-                                                          )
+                                                        null
+                                                        ? `${project.risk_score.toFixed(
+                                                            1,
+                                                        )}/100`
                                                         : "N/A"}
                                                 </div>
                                             </div>
 
-                                            <div className="rounded-lg bg-slate-50 p-2.5">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                                    Risk
-                                                    Level
-                                                </div>
-
-                                                <div
-                                                    className="mt-1 text-sm font-bold"
-                                                    style={{
-                                                        color: riskColor(
-                                                            project.risk_level,
-                                                        ),
-                                                    }}
-                                                >
-                                                    {
-                                                        project.risk_level ??
-                                                        "N/A"
-                                                    }
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* PROGRESS + DELAY */}
-                                        <div className="mt-2 grid grid-cols-2 gap-2">
-                                            <div className="rounded-lg bg-slate-50 p-2.5">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                            <div>
+                                                <div className="text-slate-400">
                                                     Progress
                                                 </div>
 
-                                                <div className="mt-1 text-sm font-semibold text-slate-900">
+                                                <div className="mt-1 font-semibold text-slate-800">
                                                     {project.physical_progress_pct !==
-                                                    null
+                                                        null
                                                         ? `${project.physical_progress_pct.toFixed(
-                                                              1,
-                                                          )}%`
+                                                            1,
+                                                        )}%`
                                                         : "N/A"}
                                                 </div>
                                             </div>
 
-                                            <div className="rounded-lg bg-slate-50 p-2.5">
-                                                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                            <div>
+                                                <div className="text-slate-400">
                                                     Delay
                                                 </div>
 
-                                                <div className="mt-1 text-sm font-semibold text-slate-900">
+                                                <div className="mt-1 font-semibold text-slate-800">
                                                     {project.delay_days !==
-                                                    null
+                                                        null
                                                         ? `${Math.round(
-                                                              project.delay_days,
-                                                          )} days`
+                                                            project.delay_days,
+                                                        )} days`
+                                                        : "N/A"}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div className="text-slate-400">
+                                                    Cost
+                                                    Overrun
+                                                </div>
+
+                                                <div className="mt-1 font-semibold text-slate-800">
+                                                    {project.cost_overrun_pct !==
+                                                        null
+                                                        ? `${Number(
+                                                            project.cost_overrun_pct,
+                                                        ).toFixed(
+                                                            1,
+                                                        )}%`
                                                         : "N/A"}
                                                 </div>
                                             </div>
                                         </div>
-
-                                        {/* DETAILS */}
-                                        <div className="mt-3 border-t border-slate-100 pt-3">
-                                            <div className="text-xs leading-5 text-slate-500">
-                                                <span className="font-semibold text-slate-700">
-                                                    State:
-                                                </span>{" "}
-                                                {
-                                                    project.state
-                                                }
-                                            </div>
-
-                                            <div className="text-xs leading-5 text-slate-500">
-                                                <span className="font-semibold text-slate-700">
-                                                    Sector:
-                                                </span>{" "}
-                                                {project.sector ??
-                                                    "Not available"}
-                                            </div>
-
-                                            <div className="text-xs leading-5 text-slate-500">
-                                                <span className="font-semibold text-slate-700">
-                                                    Ministry:
-                                                </span>{" "}
-                                                {project.ministry ??
-                                                    "Not available"}
-                                            </div>
-
-                                            <div className="text-xs leading-5 text-slate-500">
-                                                <span className="font-semibold text-slate-700">
-                                                    Cost
-                                                    Overrun:
-                                                </span>{" "}
-                                                {project.cost_overrun_pct !==
-                                                null
-                                                    ? `${project.cost_overrun_pct.toFixed(
-                                                          1,
-                                                      )}%`
-                                                    : "N/A"}
-                                            </div>
-                                        </div>
                                     </div>
-                                </Popup>
-                            </Marker>
-                        ),
+                                ),
+                            )}
+                        </div>
                     )}
-            </MapContainer>
+                </div>
+            )}
         </div>
     );
 }
