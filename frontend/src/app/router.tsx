@@ -7,6 +7,8 @@ import NotificationsPage from "../features/early-warnings/NotificationsPage";
 import RiskAnalysisPage from "../features/risk-analysis/RiskAnalysisPage";
 import CostPredictionPage from "../features/cost-prediction/CostPredictionPage";
 import DelayPredictionPage from "../features/delay-prediction/DelayPredictionPage";
+import ProjectAnalyticsPage from "../features/project-analytics/ProjectAnalyticsPage";
+import GeographicViewPage from "../features/geographic-view/GeographicViewPage";
 
 export const router = createBrowserRouter([
     {
@@ -53,14 +55,11 @@ export const router = createBrowserRouter([
             // Project Analytics
             {
                 path: "project-analytics",
-                element: <div />,
+                element: <ProjectAnalyticsPage />,
             },
 
             // Geographic View
-            {
-                path: "geographic-view",
-                element: <div />,
-            },
+            { path: "geographic-view", element: <GeographicViewPage /> },
 
             // AI Assistant
             {

@@ -4,7 +4,6 @@ import {
     AlertTriangle,
     BarChart3,
     Bell,
-    Building2,
     FileText,
     Gauge,
     Map,
@@ -68,11 +67,6 @@ export const navigationSections: NavigationSection[] = [
                 label: "Project Analytics",
                 path: "/project-analytics",
                 icon: BarChart3,
-            },
-            {
-                label: "Sector / Ministry",
-                path: "/ministry-analytics",
-                icon: Building2,
             },
             {
                 label: "Geographic View",
