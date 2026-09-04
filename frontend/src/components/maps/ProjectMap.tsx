@@ -37,19 +37,19 @@ type GeoJSONGeometry = {
 const getRiskColor = (riskLevel?: string | null) => {
     switch (riskLevel?.toLowerCase()) {
         case "critical":
-            return "#dc2626";
+            return "#7f1d1d"; // Dark Red
 
         case "high":
-            return "#ef4444";
+            return "#ea580c"; // Orange
 
         case "medium":
-            return "#f59e0b";
+            return "#eab308"; // Yellow
 
         case "low":
-            return "#22c55e";
+            return "#16a34a"; // Green
 
         default:
-            return "#3b82f6";
+            return "#64748b"; // Gray
     }
 };
 
@@ -1296,7 +1296,7 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#dc2626",
+                                    "#7f1d1d",
                             }}
                         />
                         Critical Risk
@@ -1307,7 +1307,7 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#ef4444",
+                                    "#ea580c",
                             }}
                         />
                         High Risk
@@ -1318,7 +1318,7 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#f59e0b",
+                                    "#eab308",
                             }}
                         />
                         Medium Risk
@@ -1329,7 +1329,7 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#22c55e",
+                                    "#16a34a",
                             }}
                         />
                         Low Risk
