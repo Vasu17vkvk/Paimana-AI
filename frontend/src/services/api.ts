@@ -1,5 +1,14 @@
+const configuredApiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+
+// Keep production resilient to a stale Vercel environment variable.
+// Local development still uses the local Flask API from .env.
 const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || "/api";
+    configuredApiBaseUrl &&
+    !configuredApiBaseUrl.includes("paimana-ai-xmzp.onrender.com")
+        ? configuredApiBaseUrl
+        : import.meta.env.PROD
+          ? "https://paimana-ai-backend.onrender.com/api"
+          : "/api";
 
 export async function apiRequest<T>(
     endpoint: string,
@@ -17,9 +26,14 @@ export async function apiRequest<T>(
     );
 
     if (!response.ok) {
-        throw new Error(
-            `API request failed: ${response.status}`,
-        );
+        let message = `API request failed: ${response.status}`;
+        try {
+            const body = await response.json();
+            if (body?.error) message = body.error;
+        } catch {
+            // Keep the status-based message when the response is not JSON.
+        }
+        throw new Error(message);
     }
 
     return response.json() as Promise<T>;

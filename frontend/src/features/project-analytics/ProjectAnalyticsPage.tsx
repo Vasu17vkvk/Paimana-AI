@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     AlertTriangle,
     CheckCircle2,
@@ -19,24 +19,12 @@ import PageHeader from "../../components/layout/PageHeader";
 import { apiRequest } from "../../services/api";
 import { formatCrore } from "../../utils/formatNumber";
 
-/* ============================================================
-   TYPES
-============================================================ */
-
 type Filters = {
     sector: string[];
     ministry: string[];
     state: string[];
     risk: string[];
     status: string[];
-};
-
-type FilterOptions = {
-    sectors: string[];
-    ministries: string[];
-    states: string[];
-    risk_levels: string[];
-    schedule_statuses: string[];
 };
 
 type Project = {
@@ -52,7 +40,6 @@ type Project = {
 
 type Detail = {
     project: Record<string, any>;
-
     risk: {
         overall: number | null;
         level: string | null;
@@ -61,78 +48,30 @@ type Detail = {
         stall: number | null;
         predicted_cost_overrun_pct: number | null;
         alert_priority: string | null;
-        early_warning_active?: boolean | null;
     };
-
     reasons: {
         title: string;
         explanation: string;
         solution: string;
     }[];
-
     history: {
-        schedule: {
-            date: string | null;
-            delay_days: number | null;
-            schedule_change_days: number | null;
-            expenditure_cr: number | null;
-            revised_cost_cr: number | null;
-        }[];
-
-        progress: {
-            date: string | null;
-            physical_progress_pct: number | null;
-        }[];
+        schedule: any[];
+        progress: any[];
     };
 };
 
 type Simulation = {
-    baseline: {
-        overall_risk: number;
-        risk_level?: string;
-        delay_probability: number;
-        stall_probability: number;
-        predicted_cost_overrun: number;
-        cost_risk: number;
-    };
-
-    scenario: {
-        overall_risk: number;
-        risk_level: string;
-        delay_probability: number;
-        stall_probability: number;
-        predicted_cost_overrun: number;
-        cost_risk: number;
-    };
+    baseline: Record<string, any>;
+    scenario: Record<string, any>;
 };
 
-type Scenario = {
-    progress_delta: number;
-    delay_delta: number;
-    expenditure_delta: number;
-    revised_cost_delta: number;
-};
-
-const EMPTY_FILTERS: Filters = {
+const emptyFilters: Filters = {
     sector: [],
     ministry: [],
     state: [],
     risk: [],
     status: [],
 };
-
-const EMPTY_OPTIONS: FilterOptions = {
-    sectors: [],
-    ministries: [],
-    states: [],
-    risk_levels: [],
-    schedule_statuses: [],
-};
-
-
-/* ============================================================
-   HELPERS
-============================================================ */
 
 function riskVariant(level: string | null) {
     const value = String(level ?? "").toLowerCase();
@@ -148,44 +87,6 @@ function riskVariant(level: string | null) {
     return "success" as const;
 }
 
-function riskBarClass(value: number | null) {
-    const number = Number(value ?? 0);
-
-    if (number >= 85) {
-        return "bg-red-500";
-    }
-
-    if (number >= 70) {
-        return "bg-orange-500";
-    }
-
-    if (number >= 40) {
-        return "bg-amber-500";
-    }
-
-    return "bg-emerald-500";
-}
-
-function formatValue(
-    value: any,
-    suffix = "",
-) {
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-        return "N/A";
-    }
-
-    return `${value}${suffix}`;
-}
-
-
-/* ============================================================
-   MULTI SELECT
-============================================================ */
-
 function MultiSelect({
     label,
     options,
@@ -199,21 +100,6 @@ function MultiSelect({
 }) {
     const [open, setOpen] = useState(false);
 
-    function toggleOption(option: string) {
-        if (value.includes(option)) {
-            onChange(
-                value.filter(
-                    (item) => item !== option,
-                ),
-            );
-        } else {
-            onChange([
-                ...value,
-                option,
-            ]);
-        }
-    }
-
     return (
         <div className="relative">
             <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -222,60 +108,48 @@ function MultiSelect({
 
             <button
                 type="button"
-                onClick={() => setOpen((current) => !current)}
-                className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-xs text-slate-700 shadow-sm transition hover:border-slate-300"
+                onClick={() => setOpen(!open)}
+                className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-xs text-slate-700 shadow-sm"
             >
                 <span className="truncate">
-                    {value.length
-                        ? value.join(", ")
-                        : "All"}
+                    {value.length ? value.join(", ") : "All"}
                 </span>
 
-                <ChevronDown
-                    size={15}
-                    className={
-                        open
-                            ? "rotate-180 transition"
-                            : "transition"
-                    }
-                />
+                <ChevronDown size={15} />
             </button>
 
             {open && (
                 <>
                     <button
-                        type="button"
-                        className="fixed inset-0 z-20 cursor-default"
-                        aria-label="Close filter"
+                        className="fixed inset-0 z-20"
+                        aria-label="Close"
                         onClick={() => setOpen(false)}
                     />
 
-                    <div className="absolute top-12 z-30 max-h-72 w-full min-w-[220px] overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-                        {options.length === 0 ? (
-                            <div className="px-2 py-4 text-center text-xs text-slate-400">
-                                No options available
-                            </div>
-                        ) : (
-                            options.map((option) => (
-                                <label
-                                    key={option}
-                                    className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 text-xs hover:bg-slate-50"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={value.includes(option)}
-                                        onChange={() =>
-                                            toggleOption(option)
-                                        }
-                                        className="mt-0.5"
-                                    />
+                    <div className="absolute top-16 z-30 max-h-64 w-full min-w-[220px] overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                        {options.map((option) => (
+                            <label
+                                key={option}
+                                className="flex cursor-pointer gap-2 rounded-lg px-2 py-2 text-xs hover:bg-slate-50"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={value.includes(option)}
+                                    onChange={() =>
+                                        onChange(
+                                            value.includes(option)
+                                                ? value.filter(
+                                                      (item) =>
+                                                          item !== option,
+                                                  )
+                                                : [...value, option],
+                                        )
+                                    }
+                                />
 
-                                    <span className="break-words">
-                                        {option}
-                                    </span>
-                                </label>
-                            ))
-                        )}
+                                <span className="truncate">{option}</span>
+                            </label>
+                        ))}
                     </div>
                 </>
             )}
@@ -283,38 +157,25 @@ function MultiSelect({
     );
 }
 
-
-/* ============================================================
-   LINE CHART
-============================================================ */
-
 function LineChart({
     title,
     points,
-    valueKey,
+    keyName,
     suffix = "",
-    prefix = "",
 }: {
     title: string;
     points: any[];
-    valueKey: string;
+    keyName: string;
     suffix?: string;
-    prefix?: string;
 }) {
     const validPoints = points.filter(
-        (point) =>
-            typeof point[valueKey] === "number" &&
-            Number.isFinite(
-                Number(point[valueKey]),
-            ),
+        (item) => typeof item?.[keyName] === "number",
     );
 
     if (!validPoints.length) {
         return (
             <Card>
-                <h3 className="text-sm font-bold text-slate-900">
-                    {title}
-                </h3>
+                <h3 className="text-sm font-bold">{title}</h3>
 
                 <p className="mt-8 text-center text-xs text-slate-400">
                     No history available.
@@ -323,64 +184,44 @@ function LineChart({
         );
     }
 
-    const values = validPoints.map(
-        (point) =>
-            Number(point[valueKey]),
-    );
+    const values = validPoints.map((item) => Number(item[keyName]));
 
     const min = Math.min(...values);
     const max = Math.max(...values);
     const span = max - min || 1;
 
     const width = 720;
-    const height = 240;
-    const padding = 32;
+    const height = 230;
+    const padding = 30;
 
-    const getX = (index: number) =>
-        padding +
-        (index *
-            (width - padding * 2)) /
-            Math.max(
-                validPoints.length - 1,
-                1,
-            );
-
-    const getY = (value: number) =>
-        height -
-        padding -
-        ((value - min) / span) *
-            (height - padding * 2);
-
-    const coordinates = validPoints
+    const coords = validPoints
         .map(
-            (point, index) =>
-                `${getX(index)},${getY(
-                    Number(point[valueKey]),
-                )}`,
+            (item, index) =>
+                `${padding + (index * (width - padding * 2)) / Math.max(validPoints.length - 1, 1)},${
+                    height -
+                    padding -
+                    ((Number(item[keyName]) - min) / span) *
+                        (height - padding * 2)
+                }`,
         )
         .join(" ");
 
-    const latest =
-        values[values.length - 1];
-
     return (
         <Card>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex justify-between">
                 <h3 className="text-sm font-bold text-slate-900">
                     {title}
                 </h3>
 
-                <span className="text-[10px] font-semibold text-slate-400">
-                    Latest {prefix}
-                    {latest.toFixed(1)}
+                <span className="text-[10px] text-slate-400">
+                    Latest {values.at(-1)?.toFixed(1)}
                     {suffix}
                 </span>
             </div>
 
             <svg
                 viewBox={`0 0 ${width} ${height}`}
-                className="mt-4 h-56 w-full"
-                preserveAspectRatio="none"
+                className="mt-3 h-56 w-full"
             >
                 <line
                     x1={padding}
@@ -399,544 +240,344 @@ function LineChart({
                 />
 
                 <polyline
-                    points={coordinates}
+                    points={coords}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="3"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
                     className="text-slate-700"
                 />
 
-                {validPoints.map(
-                    (point, index) => (
+                {validPoints.map((item, index) => {
+                    const cx =
+                        padding +
+                        (index * (width - padding * 2)) /
+                            Math.max(validPoints.length - 1, 1);
+
+                    const cy =
+                        height -
+                        padding -
+                        ((Number(item[keyName]) - min) / span) *
+                            (height - padding * 2);
+
+                    return (
                         <circle
-                            key={`${point.date}-${index}`}
-                            cx={getX(index)}
-                            cy={getY(
-                                Number(
-                                    point[
-                                        valueKey
-                                    ],
-                                ),
-                            )}
-                            r="3.5"
+                            key={index}
+                            cx={cx}
+                            cy={cy}
+                            r="3"
                             className="fill-slate-700"
                         />
-                    ),
-                )}
+                    );
+                })}
             </svg>
 
             <div className="flex justify-between text-[10px] text-slate-400">
                 <span>
-                    {String(
-                        validPoints[0]?.date ??
-                            "",
-                    ).slice(0, 10)}
+                    {String(validPoints[0]?.date ?? "").slice(0, 10)}
                 </span>
 
                 <span>
                     {String(
-                        validPoints[
-                            validPoints.length - 1
-                        ]?.date ?? "",
+                        validPoints.at(-1)?.date ?? "",
                     ).slice(0, 10)}
                 </span>
             </div>
         </Card>
     );
 }
-
-
-/* ============================================================
-   COST + EXPENDITURE CHART
-============================================================ */
-
-function CostTrajectoryChart({
-    points,
-}: {
-    points: Detail["history"]["schedule"];
-}) {
-    const valid = points.filter(
-        (point) =>
-            typeof point.expenditure_cr ===
-                "number" ||
-            typeof point.revised_cost_cr ===
-                "number",
-    );
-
-    if (!valid.length) {
-        return (
-            <Card>
-                <h3 className="text-sm font-bold text-slate-900">
-                    Cost & Expenditure Trajectory
-                </h3>
-
-                <p className="mt-8 text-center text-xs text-slate-400">
-                    No history available.
-                </p>
-            </Card>
-        );
-    }
-
-    const allValues = valid.flatMap(
-        (point) =>
-            [
-                point.expenditure_cr,
-                point.revised_cost_cr,
-            ].filter(
-                (value) =>
-                    typeof value === "number",
-            ) as number[],
-    );
-
-    const min = Math.min(...allValues);
-    const max = Math.max(...allValues);
-    const span = max - min || 1;
-
-    const width = 720;
-    const height = 240;
-    const padding = 32;
-
-    const getX = (index: number) =>
-        padding +
-        (index *
-            (width - padding * 2)) /
-            Math.max(valid.length - 1, 1);
-
-    const getY = (value: number) =>
-        height -
-        padding -
-        ((value - min) / span) *
-            (height - padding * 2);
-
-    const expenditurePoints = valid
-        .map((point, index) => {
-            if (
-                typeof point.expenditure_cr !==
-                "number"
-            ) {
-                return null;
-            }
-
-            return `${getX(index)},${getY(
-                point.expenditure_cr,
-            )}`;
-        })
-        .filter(Boolean)
-        .join(" ");
-
-    const revisedCostPoints = valid
-        .map((point, index) => {
-            if (
-                typeof point.revised_cost_cr !==
-                "number"
-            ) {
-                return null;
-            }
-
-            return `${getX(index)},${getY(
-                point.revised_cost_cr,
-            )}`;
-        })
-        .filter(Boolean)
-        .join(" ");
-
-    return (
-        <Card>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-bold text-slate-900">
-                    Cost & Expenditure Trajectory
-                </h3>
-
-                <div className="flex gap-4 text-[10px] text-slate-400">
-                    <span>● Expenditure</span>
-                    <span>● Revised Cost</span>
-                </div>
-            </div>
-
-            <svg
-                viewBox={`0 0 ${width} ${height}`}
-                className="mt-4 h-56 w-full"
-                preserveAspectRatio="none"
-            >
-                <line
-                    x1={padding}
-                    x2={width - padding}
-                    y1={height - padding}
-                    y2={height - padding}
-                    stroke="#e2e8f0"
-                />
-
-                <line
-                    x1={padding}
-                    x2={padding}
-                    y1={padding}
-                    y2={height - padding}
-                    stroke="#e2e8f0"
-                />
-
-                {expenditurePoints && (
-                    <polyline
-                        points={expenditurePoints}
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                        className="text-slate-700"
-                    />
-                )}
-
-                {revisedCostPoints && (
-                    <polyline
-                        points={revisedCostPoints}
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeDasharray="7 5"
-                        className="text-slate-400"
-                    />
-                )}
-            </svg>
-
-            <div className="flex justify-between text-[10px] text-slate-400">
-                <span>
-                    {String(
-                        valid[0]?.date ?? "",
-                    ).slice(0, 10)}
-                </span>
-
-                <span>
-                    {String(
-                        valid[
-                            valid.length - 1
-                        ]?.date ?? "",
-                    ).slice(0, 10)}
-                </span>
-            </div>
-        </Card>
-    );
-}
-
-
-/* ============================================================
-   MAIN PAGE
-============================================================ */
 
 export default function ProjectAnalyticsPage() {
-    const [options, setOptions] =
-        useState<FilterOptions>(
-            EMPTY_OPTIONS,
-        );
+    const [options, setOptions] = useState<any>({
+        sectors: [],
+        ministries: [],
+        states: [],
+        risk_levels: [],
+        schedule_statuses: [],
+    });
 
     const [filters, setFilters] =
-        useState<Filters>(
-            EMPTY_FILTERS,
-        );
+        useState<Filters>(emptyFilters);
 
-    const [projects, setProjects] =
-        useState<Project[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [selected, setSelected] = useState("");
+    const [detail, setDetail] = useState<Detail | null>(null);
 
-    const [selected, setSelected] =
-        useState("");
+    const [search, setSearch] = useState("");
 
-    const [detail, setDetail] =
-        useState<Detail | null>(null);
-
-    const [search, setSearch] =
-        useState("");
-
-    const [loading, setLoading] =
-        useState(false);
-
+    const [loading, setLoading] = useState(false);
     const [detailLoading, setDetailLoading] =
         useState(false);
 
-    const [error, setError] =
-        useState("");
+    const [error, setError] = useState("");
 
     const [simulation, setSimulation] =
-        useState<Simulation | null>(
-            null,
-        );
+        useState<Simulation | null>(null);
 
     const [simLoading, setSimLoading] =
         useState(false);
 
-    const [scenario, setScenario] =
-        useState<Scenario>({
-            progress_delta: 0,
-            delay_delta: 0,
-            expenditure_delta: 0,
-            revised_cost_delta: 0,
-        });
+    const [scenario, setScenario] = useState({
+        progress_delta: 0,
+        delay_delta: 0,
+        expenditure_delta: 0,
+        revised_cost_delta: 0,
+    });
 
-
-    /* ========================================================
-       LOAD FILTER OPTIONS
-    ======================================================== */
-
+    /*
+     * Load filter options once.
+     */
     useEffect(() => {
         let mounted = true;
 
-        async function loadOptions() {
+        async function loadFilters() {
             try {
-                const data =
-                    await apiRequest<FilterOptions>(
-                        "/analytics/project-filters",
-                    );
+                const data = await apiRequest<any>(
+                    "/analytics/project-filters",
+                );
 
                 if (mounted) {
-                    setOptions(
-                        data ?? EMPTY_OPTIONS,
-                    );
+                    setOptions({
+                        sectors: Array.isArray(data?.sectors)
+                            ? data.sectors
+                            : [],
+
+                        ministries: Array.isArray(
+                            data?.ministries,
+                        )
+                            ? data.ministries
+                            : [],
+
+                        states: Array.isArray(data?.states)
+                            ? data.states
+                            : [],
+
+                        risk_levels: Array.isArray(
+                            data?.risk_levels,
+                        )
+                            ? data.risk_levels
+                            : [],
+
+                        schedule_statuses: Array.isArray(
+                            data?.schedule_statuses,
+                        )
+                            ? data.schedule_statuses
+                            : [],
+                    });
                 }
-            } catch (err) {
+            } catch (e) {
                 if (mounted) {
                     setError(
-                        err instanceof Error
-                            ? err.message
-                            : "Unable to load filter options.",
+                        e instanceof Error
+                            ? e.message
+                            : "Unable to load filter options",
                     );
                 }
             }
         }
 
-        loadOptions();
+        loadFilters();
 
         return () => {
             mounted = false;
         };
     }, []);
 
+    /*
+     * Load project list.
+     *
+     * IMPORTANT:
+     * Backend may return either:
+     *
+     * [
+     *   {...},
+     *   {...}
+     * ]
+     *
+     * OR:
+     *
+     * {
+     *   projects: [...]
+     * }
+     *
+     * Both are handled here.
+     */
+    useEffect(() => {
+        let cancelled = false;
 
-    /* ========================================================
-       BUILD QUERY
-    ======================================================== */
-
-    const buildQuery = useCallback(
-        (currentFilters: Filters) => {
-            const query =
-                new URLSearchParams();
-
-            currentFilters.sector.forEach(
-                (value) =>
-                    query.append(
-                        "sector",
-                        value,
-                    ),
-            );
-
-            currentFilters.ministry.forEach(
-                (value) =>
-                    query.append(
-                        "ministry",
-                        value,
-                    ),
-            );
-
-            currentFilters.state.forEach(
-                (value) =>
-                    query.append(
-                        "state",
-                        value,
-                    ),
-            );
-
-            currentFilters.risk.forEach(
-                (value) =>
-                    query.append(
-                        "risk",
-                        value,
-                    ),
-            );
-
-            currentFilters.status.forEach(
-                (value) =>
-                    query.append(
-                        "status",
-                        value,
-                    ),
-            );
-
-            return query.toString();
-        },
-        [],
-    );
-
-
-    /* ========================================================
-       LOAD PROJECT LIST
-    ======================================================== */
-
-    const loadProjects = useCallback(
-        async (
-            currentFilters: Filters,
-        ) => {
+        async function loadProjects() {
             try {
                 setLoading(true);
                 setError("");
 
-                const query =
-                    buildQuery(
-                        currentFilters,
-                    );
+                const query = new URLSearchParams();
 
-                const endpoint =
-                    query
-                        ? `/analytics/projects?${query}`
-                        : "/analytics/projects";
-
-                const data =
-                    await apiRequest<{
-                        count: number;
-                        projects: Project[];
-                    }>(endpoint);
-
-                setProjects(
-                    data.projects ?? [],
-                );
-
-                setSelected(
-                    (currentSelected) => {
-                        if (
-                            currentSelected &&
-                            data.projects?.some(
-                                (project) =>
-                                    project.project_code ===
-                                    currentSelected,
-                            )
-                        ) {
-                            return currentSelected;
-                        }
-
-                        return "";
+                Object.entries(filters).forEach(
+                    ([key, values]) => {
+                        values.forEach((value) => {
+                            query.append(key, value);
+                        });
                     },
                 );
-            } catch (err) {
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Unable to load projects.",
+
+                const endpoint = query.toString()
+                    ? `/analytics/projects?${query.toString()}`
+                    : "/analytics/projects";
+
+                const response = await apiRequest<any>(
+                    endpoint,
                 );
+
+                if (cancelled) {
+                    return;
+                }
+
+                /*
+                 * FIX:
+                 * Support both response formats.
+                 */
+                const rows: Project[] = Array.isArray(response)
+                    ? response
+                    : Array.isArray(response?.projects)
+                      ? response.projects
+                      : [];
+
+                setProjects(rows);
+
+                /*
+                 * Automatically select first project
+                 * when current project is not present.
+                 */
+                const currentExists =
+                    selected &&
+                    rows.some(
+                        (project) =>
+                            String(project.project_code) ===
+                            String(selected),
+                    );
+
+                const nextSelected = currentExists
+                    ? String(selected)
+                    : rows[0]?.project_code
+                      ? String(rows[0].project_code)
+                      : "";
+
+                setSelected(nextSelected);
+
+                setSimulation(null);
+
+                if (!nextSelected) {
+                    setDetail(null);
+                    return;
+                }
+
+                /*
+                 * Load first/current project's details.
+                 */
+                setDetailLoading(true);
+
+                try {
+                    const projectDetail =
+                        await apiRequest<Detail>(
+                            `/analytics/project/${encodeURIComponent(
+                                nextSelected,
+                            )}`,
+                        );
+
+                    if (!cancelled) {
+                        setDetail(projectDetail);
+                    }
+                } catch (e) {
+                    if (!cancelled) {
+                        setDetail(null);
+                        setError(
+                            e instanceof Error
+                                ? e.message
+                                : "Unable to load project",
+                        );
+                    }
+                } finally {
+                    if (!cancelled) {
+                        setDetailLoading(false);
+                    }
+                }
+            } catch (e) {
+                if (!cancelled) {
+                    setProjects([]);
+                    setSelected("");
+                    setDetail(null);
+
+                    setError(
+                        e instanceof Error
+                            ? e.message
+                            : "Unable to load projects",
+                    );
+                }
             } finally {
-                setLoading(false);
+                if (!cancelled) {
+                    setLoading(false);
+                }
             }
-        },
-        [buildQuery],
-    );
+        }
 
+        loadProjects();
 
-    /* ========================================================
-       LOAD INITIAL PROJECTS
-    ======================================================== */
+        return () => {
+            cancelled = true;
+        };
+    }, [filters]);
 
-    useEffect(() => {
-        loadProjects(
-            EMPTY_FILTERS,
-        );
-    }, [loadProjects]);
+    /*
+     * Analyze manually selected project.
+     */
+    async function analyze(code: string) {
+        setSelected(String(code));
+        setSimulation(null);
+        setDetailLoading(true);
 
-
-    /* ========================================================
-       RELOAD WHEN FILTERS CHANGE
-    ======================================================== */
-
-    useEffect(() => {
-        loadProjects(filters);
-    }, [filters, loadProjects]);
-
-
-    /* ========================================================
-       ANALYZE PROJECT
-    ======================================================== */
-
-    async function analyzeProject(
-        projectCode: string,
-    ) {
         try {
-            setSelected(projectCode);
-            setSimulation(null);
             setError("");
-            setDetailLoading(true);
 
-            const data =
-                await apiRequest<Detail>(
-                    `/analytics/project/${encodeURIComponent(
-                        projectCode,
-                    )}`,
-                );
+            const data = await apiRequest<Detail>(
+                `/analytics/project/${encodeURIComponent(
+                    code,
+                )}`,
+            );
 
             setDetail(data);
-        } catch (err) {
+        } catch (e) {
             setDetail(null);
 
             setError(
-                err instanceof Error
-                    ? err.message
-                    : "Unable to load project analysis.",
+                e instanceof Error
+                    ? e.message
+                    : "Unable to load project",
             );
         } finally {
             setDetailLoading(false);
         }
     }
 
+    /*
+     * Search within currently loaded projects.
+     */
+    const visible = useMemo(() => {
+        const query = search.toLowerCase().trim();
 
-    /* ========================================================
-       SEARCH
-    ======================================================== */
+        if (!query) {
+            return projects;
+        }
 
-    const visibleProjects =
-        useMemo(() => {
-            const query =
-                search
-                    .toLowerCase()
-                    .trim();
-
-            if (!query) {
-                return projects;
-            }
-
-            return projects.filter(
-                (project) =>
-                    `${project.project_code} ${project.project_name}`
-                        .toLowerCase()
-                        .includes(query),
-            );
-        }, [projects, search]);
-
-
-    /* ========================================================
-       ACTIVE FILTER COUNT
-    ======================================================== */
-
-    const activeFilterCount =
-        Object.values(filters).reduce(
-            (total, values) =>
-                total + values.length,
-            0,
+        return projects.filter((project) =>
+            `${project.project_code} ${project.project_name}`
+                .toLowerCase()
+                .includes(query),
         );
+    }, [projects, search]);
 
-
-    /* ========================================================
-       RESET FILTERS
-    ======================================================== */
-
-    function resetFilters() {
-        setFilters(
-            EMPTY_FILTERS,
-        );
-
-        setSearch("");
-    }
-
-
-    /* ========================================================
-       SIMULATION
-    ======================================================== */
-
-    async function runSimulation() {
+    /*
+     * Run What-If simulation.
+     */
+    async function simulateNow() {
         if (!selected) {
             return;
         }
@@ -952,83 +593,64 @@ export default function ProjectAnalyticsPage() {
                     )}/simulate`,
                     {
                         method: "POST",
-                        body: JSON.stringify(
-                            scenario,
-                        ),
+                        body: JSON.stringify(scenario),
                     },
                 );
 
             setSimulation(result);
-        } catch (err) {
+        } catch (e) {
             setError(
-                err instanceof Error
-                    ? err.message
-                    : "Simulation failed.",
+                e instanceof Error
+                    ? e.message
+                    : "Simulation failed",
             );
         } finally {
             setSimLoading(false);
         }
     }
 
-
-    /* ========================================================
-       PAGE
-    ======================================================== */
+    const activeFilters = Object.values(filters).reduce(
+        (total, values) => total + values.length,
+        0,
+    );
 
     return (
         <div>
             <PageHeader
                 eyebrow="ANALYTICS"
                 title="Project Analytics"
-                description="Filter the portfolio, inspect individual projects, understand evidence-based risk indicators and test intervention scenarios."
+                description="Filter the portfolio, inspect a project, understand evidence-based delay indicators and test intervention scenarios using the supplied ML models."
             />
 
-            {/* ERROR */}
             {error && (
-                <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-                    <AlertTriangle
-                        size={15}
-                        className="mt-0.5 shrink-0"
-                    />
-
-                    <span>
-                        {error}
-                    </span>
+                <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {error}
                 </div>
             )}
 
-
-            {/* ==================================================
-                FILTERS
-            ================================================== */}
-
+            {/* FILTERS */}
             <Card className="mb-6">
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                            <Filter
-                                size={16}
-                            />
-
+                        <div className="flex items-center gap-2 text-sm font-bold">
+                            <Filter size={16} />
                             Portfolio Filters
                         </div>
 
                         <p className="mt-1 text-xs text-slate-400">
-                            Use one or multiple filters to narrow the project portfolio.
+                            Filters work without selecting a
+                            project.
                         </p>
                     </div>
 
                     <button
-                        type="button"
-                        onClick={
-                            resetFilters
-                        }
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                        onClick={() => {
+                            setFilters(emptyFilters);
+                            setSearch("");
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"
                     >
-                        <RotateCcw
-                            size={14}
-                        />
-
+                        <RotateCcw size={14} />
                         Reset Filters
                     </button>
                 </div>
@@ -1036,81 +658,49 @@ export default function ProjectAnalyticsPage() {
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     <MultiSelect
                         label="Sector"
-                        options={
-                            options.sectors
-                        }
-                        value={
-                            filters.sector
-                        }
-                        onChange={(
-                            value,
-                        ) =>
-                            setFilters(
-                                (current) => ({
-                                    ...current,
-                                    sector: value,
-                                }),
-                            )
+                        options={options.sectors}
+                        value={filters.sector}
+                        onChange={(value) =>
+                            setFilters((current) => ({
+                                ...current,
+                                sector: value,
+                            }))
                         }
                     />
 
                     <MultiSelect
                         label="Ministry"
-                        options={
-                            options.ministries
-                        }
-                        value={
-                            filters.ministry
-                        }
-                        onChange={(
-                            value,
-                        ) =>
-                            setFilters(
-                                (current) => ({
-                                    ...current,
-                                    ministry: value,
-                                }),
-                            )
+                        options={options.ministries}
+                        value={filters.ministry}
+                        onChange={(value) =>
+                            setFilters((current) => ({
+                                ...current,
+                                ministry: value,
+                            }))
                         }
                     />
 
                     <MultiSelect
                         label="State"
-                        options={
-                            options.states
-                        }
-                        value={
-                            filters.state
-                        }
-                        onChange={(
-                            value,
-                        ) =>
-                            setFilters(
-                                (current) => ({
-                                    ...current,
-                                    state: value,
-                                }),
-                            )
+                        options={options.states}
+                        value={filters.state}
+                        onChange={(value) =>
+                            setFilters((current) => ({
+                                ...current,
+                                state: value,
+                            }))
                         }
                     />
 
                     <MultiSelect
                         label="Risk Level"
-                        options={
-                            options.risk_levels
-                        }
-                        value={
-                            filters.risk
-                        }
-                        onChange={(
-                            value,
-                        ) =>
-                            setFilters(
-                                (current) => ({
-                                    ...current,
-                                    risk: value,
-                                }),
-                            )
+                        options={options.risk_levels}
+                        value={filters.risk}
+                        onChange={(value) =>
+                            setFilters((current) => ({
+                                ...current,
+                                risk: value,
+                            }))
                         }
                     />
 
@@ -1119,54 +709,43 @@ export default function ProjectAnalyticsPage() {
                         options={
                             options.schedule_statuses
                         }
-                        value={
-                            filters.status
-                        }
-                        onChange={(
-                            value,
-                        ) =>
-                            setFilters(
-                                (current) => ({
-                                    ...current,
-                                    status: value,
-                                }),
-                            )
+                        value={filters.status}
+                        onChange={(value) =>
+                            setFilters((current) => ({
+                                ...current,
+                                status: value,
+                            }))
                         }
                     />
                 </div>
 
                 <div className="mt-4 text-[11px] text-slate-400">
-                    <span className="font-bold text-slate-600">
-                        {activeFilterCount} active filters
-                    </span>
+                    <b className="text-slate-600">
+                        {activeFilters} active filters
+                    </b>
 
-                    <span className="mx-2">
-                        ·
-                    </span>
+                    {" · "}
 
                     {loading
-                        ? "Loading..."
+                        ? "Loading…"
                         : `${projects.length.toLocaleString()} matching projects`}
                 </div>
             </Card>
 
-
-            {/* ==================================================
-                PROJECT TABLE
-            ================================================== */}
-
+            {/* PROJECT TABLE */}
             <Card
                 padding="none"
                 className="mb-6 overflow-hidden"
             >
-                <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:justify-between">
                     <div>
-                        <h2 className="text-sm font-bold text-slate-900">
+                        <h2 className="text-sm font-bold">
                             Matching Projects
                         </h2>
 
                         <p className="mt-1 text-xs text-slate-400">
-                            Search by project code or project name and open detailed analysis.
+                            Search by code or name and open
+                            detailed analysis.
                         </p>
                     </div>
 
@@ -1177,170 +756,127 @@ export default function ProjectAnalyticsPage() {
                         />
 
                         <input
-                            value={
-                                search
-                            }
-                            onChange={(
-                                event,
-                            ) =>
+                            value={search}
+                            onChange={(event) =>
                                 setSearch(
                                     event.target.value,
                                 )
                             }
-                            placeholder="Search code or project name..."
-                            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs outline-none transition focus:border-slate-400 focus:bg-white"
+                            placeholder="Search code or project name…"
+                            className="h-9 w-full rounded-lg border bg-slate-50 pl-9 pr-3 text-xs outline-none"
                         />
                     </div>
                 </div>
 
-                <div className="max-h-[480px] overflow-auto">
-                    <table className="min-w-[1050px] w-full text-left text-xs">
-                        <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
+                <div className="max-h-[430px] overflow-auto">
+                    <table className="min-w-[1000px] w-full text-left text-xs">
+                        <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase text-slate-400">
                             <tr>
-                                <th className="px-4 py-3">
-                                    Project Code
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Project Name
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Risk
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Score
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Sector
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Ministry
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    State
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Status
-                                </th>
-
-                                <th className="px-4 py-3">
-                                    Action
-                                </th>
+                                {[
+                                    "Project Code",
+                                    "Project Name",
+                                    "Risk",
+                                    "Score",
+                                    "Sector",
+                                    "Ministry",
+                                    "State",
+                                    "Status",
+                                    "",
+                                ].map((heading) => (
+                                    <th
+                                        key={heading}
+                                        className="px-4 py-3"
+                                    >
+                                        {heading}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
 
-                        <tbody className="divide-y divide-slate-100">
-                            {visibleProjects.map(
-                                (project) => (
-                                    <tr
-                                        key={
+                        <tbody className="divide-y">
+                            {visible.map((project) => (
+                                <tr
+                                    key={
+                                        project.project_code
+                                    }
+                                    className="hover:bg-slate-50"
+                                >
+                                    <td className="px-4 py-3 font-semibold">
+                                        {
                                             project.project_code
                                         }
-                                        className={
-                                            selected ===
-                                            project.project_code
-                                                ? "bg-slate-50"
-                                                : "hover:bg-slate-50"
+                                    </td>
+
+                                    <td className="px-4 py-3 font-medium">
+                                        {
+                                            project.project_name
                                         }
-                                    >
-                                        <td className="px-4 py-3 font-semibold text-slate-800">
-                                            {
-                                                project.project_code
+                                    </td>
+
+                                    <td className="px-4 py-3">
+                                        <Badge
+                                            variant={riskVariant(
+                                                project.risk_level,
+                                            )}
+                                        >
+                                            {project.risk_level ??
+                                                "N/A"}
+                                        </Badge>
+                                    </td>
+
+                                    <td className="px-4 py-3 font-semibold">
+                                        {project.overall_risk_score ==
+                                        null
+                                            ? "N/A"
+                                            : Number(
+                                                  project.overall_risk_score,
+                                              ).toFixed(1)}
+                                    </td>
+
+                                    <td className="px-4 py-3 text-slate-500">
+                                        {project.sector ??
+                                            "N/A"}
+                                    </td>
+
+                                    <td className="px-4 py-3 text-slate-500">
+                                        {project.ministry ??
+                                            "N/A"}
+                                    </td>
+
+                                    <td className="px-4 py-3 text-slate-500">
+                                        {project.state ??
+                                            "N/A"}
+                                    </td>
+
+                                    <td className="px-4 py-3 text-slate-500">
+                                        {project.schedule_status ??
+                                            "N/A"}
+                                    </td>
+
+                                    <td className="px-4 py-3">
+                                        <button
+                                            onClick={() =>
+                                                analyze(
+                                                    project.project_code,
+                                                )
                                             }
-                                        </td>
+                                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white"
+                                        >
+                                            Analyze
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
 
-                                        <td className="max-w-[280px] px-4 py-3 font-medium text-slate-800">
-                                            <div className="truncate">
-                                                {
-                                                    project.project_name
-                                                }
-                                            </div>
-                                        </td>
-
-                                        <td className="px-4 py-3">
-                                            <Badge
-                                                variant={riskVariant(
-                                                    project.risk_level,
-                                                )}
-                                            >
-                                                {
-                                                    project.risk_level ??
-                                                    "N/A"
-                                                }
-                                            </Badge>
-                                        </td>
-
-                                        <td className="px-4 py-3 font-semibold">
-                                            {project.overall_risk_score ==
-                                            null
-                                                ? "N/A"
-                                                : Number(
-                                                      project.overall_risk_score,
-                                                  ).toFixed(
-                                                      1,
-                                                  )}
-                                        </td>
-
-                                        <td className="px-4 py-3 text-slate-500">
-                                            {
-                                                project.sector ??
-                                                "N/A"
-                                            }
-                                        </td>
-
-                                        <td className="px-4 py-3 text-slate-500">
-                                            {
-                                                project.ministry ??
-                                                "N/A"
-                                            }
-                                        </td>
-
-                                        <td className="px-4 py-3 text-slate-500">
-                                            {
-                                                project.state ??
-                                                "N/A"
-                                            }
-                                        </td>
-
-                                        <td className="px-4 py-3 text-slate-500">
-                                            {
-                                                project.schedule_status ??
-                                                "N/A"
-                                            }
-                                        </td>
-
-                                        <td className="px-4 py-3">
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    analyzeProject(
-                                                        project.project_code,
-                                                    )
-                                                }
-                                                className="rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-bold text-white transition hover:bg-slate-700"
-                                            >
-                                                Analyze
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ),
-                            )}
-
-                            {!visibleProjects.length && (
+                            {!visible.length && (
                                 <tr>
                                     <td
-                                        colSpan={
-                                            9
-                                        }
-                                        className="px-4 py-14 text-center text-xs text-slate-400"
+                                        colSpan={9}
+                                        className="px-4 py-12 text-center text-xs text-slate-400"
                                     >
-                                        No projects match the current filters.
+                                        {loading
+                                            ? "Loading projects…"
+                                            : "No projects match the current filters."}
                                     </td>
                                 </tr>
                             )}
@@ -1349,35 +885,25 @@ export default function ProjectAnalyticsPage() {
                 </div>
             </Card>
 
-
-            {/* ==================================================
-                DETAIL LOADING
-            ================================================== */}
-
-            {detailLoading && (
+            {/* SELECTED PROJECT */}
+            {detailLoading && !detail && (
                 <Card className="mb-6">
-                    <div className="py-10 text-center text-sm text-slate-400">
-                        Loading project analysis...
+                    <div className="py-10 text-center text-xs text-slate-400">
+                        Loading project analysis…
                     </div>
                 </Card>
             )}
 
-
-            {/* ==================================================
-                PROJECT DETAIL
-            ================================================== */}
-
-            {detail && !detailLoading && (
+            {detail && (
                 <div className="space-y-6">
-
-                    {/* PROJECT HEADER */}
-                    <div className="flex flex-wrap items-end justify-between gap-4">
+                    {/* HEADER */}
+                    <div className="flex items-end justify-between">
                         <div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            <div className="text-[10px] font-bold uppercase text-slate-400">
                                 Selected Project
                             </div>
 
-                            <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+                            <h2 className="mt-1 text-2xl font-bold">
                                 {
                                     detail.project
                                         .project_name
@@ -1399,107 +925,58 @@ export default function ProjectAnalyticsPage() {
                             )}
                             dot
                         >
-                            {
-                                detail.risk.level ??
-                                "N/A"
-                            }{" "}
-                            Risk
+                            {detail.risk.level ?? "N/A"} Risk
                         </Badge>
                     </div>
 
-
                     {/* KPI CARDS */}
                     <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Risk Score
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {formatValue(
-                                    detail.risk.overall ==
-                                        null
-                                        ? null
-                                        : Number(
-                                              detail.risk.overall,
-                                          ).toFixed(
-                                              1,
-                                          ),
-                                    detail.risk.overall ==
-                                        null
-                                        ? ""
-                                        : "/100",
-                                )}
-                            </div>
-                        </Card>
-
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Risk Level
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {
-                                    detail.risk
-                                        .level ??
-                                    "N/A"
-                                }
-                            </div>
-                        </Card>
-
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Delay
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {formatValue(
-                                    detail.project
-                                        .delay_days ==
-                                        null
-                                        ? null
-                                        : Number(
-                                              detail
-                                                  .project
-                                                  .delay_days,
-                                          ).toFixed(
-                                              0,
-                                          ),
-                                    " days",
-                                )}
-                            </div>
-                        </Card>
-
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Physical Progress
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {formatValue(
-                                    detail.project
-                                        .flash_latest_physical_progress ==
-                                        null
-                                        ? null
-                                        : Number(
-                                              detail
-                                                  .project
-                                                  .flash_latest_physical_progress,
-                                          ).toFixed(
-                                              1,
-                                          ),
-                                    "%",
-                                )}
-                            </div>
-                        </Card>
-
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Original Cost
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {detail.project
+                        {[
+                            [
+                                "Risk Score",
+                                detail.risk.overall ==
+                                null
+                                    ? "N/A"
+                                    : `${Number(
+                                          detail.risk
+                                              .overall,
+                                      ).toFixed(
+                                          1,
+                                      )}/100`,
+                            ],
+                            [
+                                "Risk Level",
+                                detail.risk.level,
+                            ],
+                            [
+                                "Delay",
+                                detail.project
+                                    .delay_days ==
+                                null
+                                    ? "N/A"
+                                    : `${Number(
+                                          detail.project
+                                              .delay_days,
+                                      ).toFixed(
+                                          0,
+                                      )} days`,
+                            ],
+                            [
+                                "Physical Progress",
+                                detail.project
+                                    .flash_latest_physical_progress ==
+                                null
+                                    ? "N/A"
+                                    : `${Number(
+                                          detail.project
+                                              .flash_latest_physical_progress,
+                                      ).toFixed(
+                                          1,
+                                      )}%`,
+                            ],
+                            [
+                                "Original Cost",
+                                detail.project
                                     .original_cost_cr ==
                                 null
                                     ? "N/A"
@@ -1509,17 +986,11 @@ export default function ProjectAnalyticsPage() {
                                                   .project
                                                   .original_cost_cr,
                                           ),
-                                      )}
-                            </div>
-                        </Card>
-
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Expenditure
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {detail.project
+                                      ),
+                            ],
+                            [
+                                "Expenditure",
+                                detail.project
                                     .expenditure_cr ==
                                 null
                                     ? "N/A"
@@ -1529,41 +1000,36 @@ export default function ProjectAnalyticsPage() {
                                                   .project
                                                   .expenditure_cr,
                                           ),
-                                      )}
-                            </div>
-                        </Card>
+                                      ),
+                            ],
+                            [
+                                "Alert Priority",
+                                detail.risk
+                                    .alert_priority,
+                            ],
+                        ].map(([key, value]) => (
+                            <Card
+                                key={String(key)}
+                                padding="sm"
+                            >
+                                <div className="text-[9px] font-bold uppercase text-slate-400">
+                                    {key}
+                                </div>
 
-                        <Card padding="sm">
-                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                Alert Priority
-                            </div>
-
-                            <div className="mt-2 text-lg font-bold text-slate-900">
-                                {
-                                    detail.risk
-                                        .alert_priority ??
-                                    "NONE"
-                                }
-                            </div>
-                        </Card>
+                                <div className="mt-2 text-lg font-bold">
+                                    {value ?? "N/A"}
+                                </div>
+                            </Card>
+                        ))}
                     </div>
 
-
-                    {/* ==================================================
-                        RISK + PROJECT INFO
-                    ================================================== */}
-
+                    {/* RISK + PROJECT INFORMATION */}
                     <div className="grid gap-6 lg:grid-cols-2">
-
-                        {/* RISK BREAKDOWN */}
                         <Card>
-                            <div className="mb-5 flex items-center gap-2">
-                                <ShieldAlert
-                                    size={17}
-                                    className="text-slate-700"
-                                />
+                            <div className="mb-4 flex gap-2">
+                                <ShieldAlert size={16} />
 
-                                <h3 className="text-sm font-bold text-slate-900">
+                                <h3 className="text-sm font-bold">
                                     Risk Breakdown
                                 </h3>
                             </div>
@@ -1581,923 +1047,455 @@ export default function ProjectAnalyticsPage() {
                                     "Progress Stall",
                                     detail.risk.stall,
                                 ],
-                            ].map(
-                                ([
-                                    label,
-                                    value,
-                                ]) => (
-                                    <div
-                                        key={
-                                            label
-                                        }
-                                        className="mb-5 last:mb-0"
-                                    >
-                                        <div className="mb-1.5 flex justify-between gap-3 text-xs">
-                                            <span className="font-medium text-slate-600">
-                                                {
-                                                    label
-                                                }
-                                            </span>
+                            ].map(([key, value]) => (
+                                <div
+                                    key={String(key)}
+                                    className="mb-4"
+                                >
+                                    <div className="mb-1 flex justify-between text-xs">
+                                        <span>{key}</span>
 
-                                            <b className="text-slate-900">
-                                                {value ==
-                                                null
-                                                    ? "N/A"
-                                                    : `${Number(
-                                                          value,
-                                                      ).toFixed(
-                                                          1,
-                                                      )}%`}
-                                            </b>
-                                        </div>
-
-                                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                                            <div
-                                                className={`h-full rounded-full transition-all ${riskBarClass(
-                                                    typeof value === "number" ? value : null,
-                                                )}`}
-                                                style={{
-                                                    width: `${Math.min(
-                                                        100,
-                                                        Math.max(
-                                                            0,
-                                                            Number(
-                                                                value ??
-                                                                    0,
-                                                            ),
-                                                        ),
-                                                    )}%`,
-                                                }}
-                                            />
-                                        </div>
+                                        <b>
+                                            {value == null
+                                                ? "N/A"
+                                                : `${Number(
+                                                      value,
+                                                  ).toFixed(
+                                                      1,
+                                                  )}%`}
+                                        </b>
                                     </div>
-                                ),
-                            )}
 
-                            <div className="mt-6 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-                                <b className="text-slate-700">
-                                    Predicted cost overrun:
-                                </b>{" "}
-                                {detail.risk
-                                    .predicted_cost_overrun_pct ==
-                                null
-                                    ? "N/A"
-                                    : `${Number(
-                                          detail
-                                              .risk
-                                              .predicted_cost_overrun_pct,
-                                      ).toFixed(
-                                          2,
-                                      )}%`}
-                            </div>
+                                    <div className="h-2 rounded-full bg-slate-100">
+                                        <div
+                                            className="h-2 rounded-full bg-slate-700"
+                                            style={{
+                                                width: `${Math.min(
+                                                    100,
+                                                    Math.max(
+                                                        0,
+                                                        Number(
+                                                            value ??
+                                                                0,
+                                                        ),
+                                                    ),
+                                                )}%`,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            ))}
                         </Card>
 
-
-                        {/* PROJECT INFORMATION */}
                         <Card>
-                            <h3 className="mb-5 text-sm font-bold text-slate-900">
+                            <h3 className="mb-4 text-sm font-bold">
                                 Project Information
                             </h3>
 
-                            <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="grid gap-3 sm:grid-cols-2">
                                 {[
                                     [
                                         "Ministry",
-                                        detail
-                                            .project
+                                        detail.project
                                             .ministry,
                                     ],
                                     [
                                         "Sector",
-                                        detail
-                                            .project
+                                        detail.project
                                             .sector,
                                     ],
                                     [
                                         "State",
-                                        detail
-                                            .project
+                                        detail.project
                                             .flash_state,
                                     ],
                                     [
                                         "Implementing Agency",
-                                        detail
-                                            .project
+                                        detail.project
                                             .flash_implementing_agency,
                                     ],
                                     [
                                         "Schedule Status",
-                                        detail
-                                            .project
+                                        detail.project
                                             .schedule_status,
                                     ],
                                     [
                                         "Cost Status",
-                                        detail
-                                            .project
+                                        detail.project
                                             .cost_status,
                                     ],
                                     [
                                         "Original Completion",
-                                        detail
-                                            .project
+                                        detail.project
                                             .original_end_date,
                                     ],
                                     [
                                         "Revised Completion",
-                                        detail
-                                            .project
+                                        detail.project
                                             .revised_end_date,
                                     ],
                                     [
                                         "Data Quality",
-                                        detail
-                                            .project
+                                        detail.project
                                             .data_quality_flag,
                                     ],
-                                    [
-                                        "Schedule Change",
-                                        detail
-                                            .project
-                                            .schedule_change_days ==
-                                        null
-                                            ? null
-                                            : `${Number(
-                                                  detail
-                                                      .project
-                                                      .schedule_change_days,
-                                              ).toFixed(
-                                                  0,
-                                              )} days`,
-                                    ],
-                                ].map(
-                                    ([
-                                        label,
-                                        value,
-                                    ]) => (
-                                        <div
-                                            key={
-                                                label
-                                            }
-                                        >
-                                            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                                {
-                                                    label
-                                                }
-                                            </div>
-
-                                            <div className="mt-1 text-xs font-semibold text-slate-800">
-                                                {value ??
-                                                    "N/A"}
-                                            </div>
+                                ].map(([key, value]) => (
+                                    <div key={String(key)}>
+                                        <div className="text-[9px] font-bold uppercase text-slate-400">
+                                            {key}
                                         </div>
-                                    ),
-                                )}
+
+                                        <div className="mt-1 text-xs font-semibold">
+                                            {value ?? "N/A"}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </Card>
                     </div>
 
-
-                    {/* ==================================================
-                        TRAJECTORY CHARTS
-                    ================================================== */}
-
+                    {/* HISTORY */}
                     <div className="grid gap-6 lg:grid-cols-2">
                         <LineChart
                             title="Schedule Trajectory — Delay"
                             points={
-                                detail.history
-                                    .schedule
+                                detail.history.schedule
                             }
-                            valueKey="delay_days"
+                            keyName="delay_days"
                             suffix=" days"
                         />
 
-                        <CostTrajectoryChart
+                        <LineChart
+                            title="Expenditure Trajectory"
                             points={
-                                detail.history
-                                    .schedule
+                                detail.history.schedule
                             }
+                            keyName="expenditure_cr"
+                            suffix=" Cr"
                         />
                     </div>
 
                     <LineChart
                         title="Physical Progress Trajectory"
                         points={
-                            detail.history
-                                .progress
+                            detail.history.progress
                         }
-                        valueKey="physical_progress_pct"
+                        keyName="physical_progress_pct"
                         suffix="%"
                     />
 
-
-                    {/* ==================================================
-                        REASONS + SOLUTIONS
-                    ================================================== */}
-
+                    {/* REASONS */}
                     <Card>
-                        <div className="mb-5 flex items-center gap-2">
-                            <AlertTriangle
-                                size={17}
-                                className="text-slate-700"
-                            />
+                        <div className="mb-4 flex items-center gap-2">
+                            <AlertTriangle size={17} />
 
-                            <h3 className="text-sm font-bold text-slate-900">
-                                Reasons for Delay & Recommended Solutions
+                            <h3 className="text-sm font-bold">
+                                Reasons for Delay &
+                                Recommended Solutions
                             </h3>
                         </div>
 
-                        <div className="space-y-3">
-                            {detail.reasons.map(
-                                (reason) => (
-                                    <div
-                                        key={
-                                            reason.title
-                                        }
-                                        className="rounded-xl border border-slate-200 p-4"
-                                    >
-                                        <div className="flex gap-3">
-                                            <AlertTriangle
-                                                size={
-                                                    15
-                                                }
-                                                className="mt-0.5 shrink-0 text-red-500"
+                        {detail.reasons.map((reason) => (
+                            <div
+                                key={reason.title}
+                                className="mb-3 rounded-xl border p-4"
+                            >
+                                <div className="flex gap-3">
+                                    <AlertTriangle
+                                        size={15}
+                                        className="mt-0.5 text-red-600"
+                                    />
+
+                                    <div>
+                                        <b className="text-xs">
+                                            {
+                                                reason.title
+                                            }
+                                        </b>
+
+                                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                                            {
+                                                reason.explanation
+                                            }
+                                        </p>
+
+                                        <p className="mt-2 flex gap-2 text-xs leading-5 text-slate-600">
+                                            <CheckCircle2
+                                                size={14}
+                                                className="mt-0.5 text-emerald-600"
                                             />
 
-                                            <div className="min-w-0">
-                                                <b className="text-xs text-slate-900">
-                                                    {
-                                                        reason.title
-                                                    }
-                                                </b>
-
-                                                <p className="mt-1 text-xs leading-5 text-slate-500">
-                                                    {
-                                                        reason.explanation
-                                                    }
-                                                </p>
-
-                                                <div className="mt-3 flex gap-2 text-xs leading-5 text-slate-600">
-                                                    <CheckCircle2
-                                                        size={
-                                                            14
-                                                        }
-                                                        className="mt-0.5 shrink-0 text-emerald-600"
-                                                    />
-
-                                                    <span>
-                                                        <b>
-                                                            Recommended solution:
-                                                        </b>{" "}
-                                                        {
-                                                            reason.solution
-                                                        }
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
+                                            <span>
+                                                <b>
+                                                    Recommended
+                                                    solution:
+                                                </b>{" "}
+                                                {
+                                                    reason.solution
+                                                }
+                                            </span>
+                                        </p>
                                     </div>
-                                ),
-                            )}
-                        </div>
+                                </div>
+                            </div>
+                        ))}
                     </Card>
 
-
-                    {/* ==================================================
-                        WHAT IF SIMULATOR
-                    ================================================== */}
-
+                    {/* WHAT-IF SIMULATOR */}
                     <Card>
-                        <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                                 <div className="flex items-center gap-2">
                                     <SlidersHorizontal
                                         size={17}
-                                        className="text-slate-700"
                                     />
 
-                                    <h3 className="text-sm font-bold text-slate-900">
+                                    <h3 className="text-sm font-bold">
                                         What-If Risk Simulator
                                     </h3>
                                 </div>
 
-                                <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">
-                                    Test how changes in project conditions affect the trained ML risk assessment.
+                                <p className="mt-1 text-xs text-slate-400">
+                                    Re-runs the supplied
+                                    trained models on the
+                                    latest project snapshot
+                                    with your scenario changes.
                                 </p>
                             </div>
 
                             <Button
-                                onClick={
-                                    runSimulation
-                                }
-                                disabled={
-                                    simLoading
-                                }
+                                onClick={simulateNow}
+                                disabled={simLoading}
                             >
                                 {simLoading
-                                    ? "Running..."
+                                    ? "Running…"
                                     : "Run Simulation"}
                             </Button>
                         </div>
 
-
                         {/* SLIDERS */}
                         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            {(
+                                [
+                                    [
+                                        "progress_delta",
+                                        "Physical progress change",
+                                        -30,
+                                        30,
+                                        1,
+                                    ],
+                                    [
+                                        "delay_delta",
+                                        "Additional delay (days)",
+                                        -365,
+                                        365,
+                                        5,
+                                    ],
+                                    [
+                                        "expenditure_delta",
+                                        "Monthly expenditure change (₹ Cr)",
+                                        -200,
+                                        200,
+                                        5,
+                                    ],
+                                    [
+                                        "revised_cost_delta",
+                                        "Revised-cost change (₹ Cr)",
+                                        -500,
+                                        500,
+                                        10,
+                                    ],
+                                ] as const
+                            ).map(
+                                ([
+                                    key,
+                                    label,
+                                    min,
+                                    max,
+                                    step,
+                                ]) => (
+                                    <label
+                                        key={key}
+                                        className="rounded-xl border bg-slate-50 p-4"
+                                    >
+                                        <span className="text-[10px] font-bold uppercase text-slate-400">
+                                            {label}
+                                        </span>
 
-                            {/* PROGRESS */}
-                            <label className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    Physical Progress Change
-                                </span>
+                                        <div className="mt-2 text-lg font-bold">
+                                            {scenario[key]}
+                                        </div>
 
-                                <div className="mt-2 text-lg font-bold text-slate-900">
-                                    {scenario.progress_delta >
-                                    0
-                                        ? "+"
-                                        : ""}
-                                    {
-                                        scenario.progress_delta
-                                    }
-                                    %
-                                </div>
-
-                                <input
-                                    className="mt-4 w-full accent-slate-700"
-                                    type="range"
-                                    min="-30"
-                                    max="30"
-                                    step="1"
-                                    value={
-                                        scenario.progress_delta
-                                    }
-                                    onChange={(
-                                        event,
-                                    ) =>
-                                        setScenario(
-                                            (
-                                                current,
-                                            ) => ({
-                                                ...current,
-                                                progress_delta:
-                                                    Number(
-                                                        event
-                                                            .target
-                                                            .value,
-                                                    ),
-                                            }),
-                                        )
-                                    }
-                                />
-                            </label>
-
-
-                            {/* DELAY */}
-                            <label className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    Additional Schedule Delay
-                                </span>
-
-                                <div className="mt-2 text-lg font-bold text-slate-900">
-                                    {scenario.delay_delta >
-                                    0
-                                        ? "+"
-                                        : ""}
-                                    {
-                                        scenario.delay_delta
-                                    }{" "}
-                                    days
-                                </div>
-
-                                <input
-                                    className="mt-4 w-full accent-slate-700"
-                                    type="range"
-                                    min="-365"
-                                    max="365"
-                                    step="5"
-                                    value={
-                                        scenario.delay_delta
-                                    }
-                                    onChange={(
-                                        event,
-                                    ) =>
-                                        setScenario(
-                                            (
-                                                current,
-                                            ) => ({
-                                                ...current,
-                                                delay_delta:
-                                                    Number(
-                                                        event
-                                                            .target
-                                                            .value,
-                                                    ),
-                                            }),
-                                        )
-                                    }
-                                />
-                            </label>
-
-
-                            {/* EXPENDITURE */}
-                            <label className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    Monthly Expenditure Change
-                                </span>
-
-                                <div className="mt-2 text-lg font-bold text-slate-900">
-                                    {scenario.expenditure_delta >
-                                    0
-                                        ? "+"
-                                        : ""}
-                                    ₹
-                                    {
-                                        scenario.expenditure_delta
-                                    }{" "}
-                                    Cr
-                                </div>
-
-                                <input
-                                    className="mt-4 w-full accent-slate-700"
-                                    type="range"
-                                    min="-200"
-                                    max="200"
-                                    step="5"
-                                    value={
-                                        scenario.expenditure_delta
-                                    }
-                                    onChange={(
-                                        event,
-                                    ) =>
-                                        setScenario(
-                                            (
-                                                current,
-                                            ) => ({
-                                                ...current,
-                                                expenditure_delta:
-                                                    Number(
-                                                        event
-                                                            .target
-                                                            .value,
-                                                    ),
-                                            }),
-                                        )
-                                    }
-                                />
-                            </label>
-
-
-                            {/* REVISED COST */}
-                            <label className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    Revised-Cost Change
-                                </span>
-
-                                <div className="mt-2 text-lg font-bold text-slate-900">
-                                    {scenario.revised_cost_delta >
-                                    0
-                                        ? "+"
-                                        : ""}
-                                    ₹
-                                    {
-                                        scenario.revised_cost_delta
-                                    }{" "}
-                                    Cr
-                                </div>
-
-                                <input
-                                    className="mt-4 w-full accent-slate-700"
-                                    type="range"
-                                    min="-500"
-                                    max="500"
-                                    step="10"
-                                    value={
-                                        scenario.revised_cost_delta
-                                    }
-                                    onChange={(
-                                        event,
-                                    ) =>
-                                        setScenario(
-                                            (
-                                                current,
-                                            ) => ({
-                                                ...current,
-                                                revised_cost_delta:
-                                                    Number(
-                                                        event
-                                                            .target
-                                                            .value,
-                                                    ),
-                                            }),
-                                        )
-                                    }
-                                />
-                            </label>
+                                        <input
+                                            className="mt-3 w-full"
+                                            type="range"
+                                            min={min}
+                                            max={max}
+                                            step={step}
+                                            value={
+                                                scenario[key]
+                                            }
+                                            onChange={(event) =>
+                                                setScenario(
+                                                    (
+                                                        current,
+                                                    ) => ({
+                                                        ...current,
+                                                        [key]: Number(
+                                                            event
+                                                                .target
+                                                                .value,
+                                                        ),
+                                                    }),
+                                                )
+                                            }
+                                        />
+                                    </label>
+                                ),
+                            )}
                         </div>
 
-
-                        {/* ==================================================
-                            SIMULATION RESULTS
-                        ================================================== */}
-
+                        {/* SIMULATION RESULT */}
                         {simulation && (
-                            <div className="mt-6 border-t border-slate-200 pt-6">
+                            <div className="mt-6">
+                                <div className="grid gap-4 md:grid-cols-3">
+                                    {[
+                                        [
+                                            "Overall Risk Score",
+                                            "overall_risk",
+                                            false,
+                                        ],
+                                        [
+                                            "Future Delay",
+                                            "delay_probability",
+                                            true,
+                                        ],
+                                        [
+                                            "Progress Stall",
+                                            "stall_probability",
+                                            true,
+                                        ],
+                                    ].map(
+                                        ([
+                                            label,
+                                            key,
+                                            isProbability,
+                                        ]) => {
+                                            const baseline =
+                                                Number(
+                                                    simulation
+                                                        .baseline[
+                                                        key
+                                                    ],
+                                                );
 
-                                <div className="mb-4">
-                                    <h4 className="text-sm font-bold text-slate-900">
-                                        Baseline vs Simulated Result
-                                    </h4>
+                                            const scenarioValue =
+                                                Number(
+                                                    simulation
+                                                        .scenario[
+                                                        key
+                                                    ],
+                                                );
 
-                                    <p className="mt-1 text-xs text-slate-400">
-                                        The scenario is calculated from the selected project's latest ML snapshot.
-                                    </p>
+                                            const multiplier =
+                                                isProbability
+                                                    ? 100
+                                                    : 1;
+
+                                            return (
+                                                <Card
+                                                    key={String(
+                                                        label,
+                                                    )}
+                                                    padding="sm"
+                                                >
+                                                    <div className="text-[9px] font-bold uppercase text-slate-400">
+                                                        {label}
+                                                    </div>
+
+                                                    <div className="mt-2 flex justify-between">
+                                                        <div>
+                                                            <div className="text-xl font-bold">
+                                                                {(
+                                                                    scenarioValue *
+                                                                    multiplier
+                                                                ).toFixed(
+                                                                    1,
+                                                                )}
+                                                                {isProbability
+                                                                    ? "%"
+                                                                    : "/100"}
+                                                            </div>
+
+                                                            <div className="text-[10px] text-slate-400">
+                                                                Baseline{" "}
+                                                                {(
+                                                                    baseline *
+                                                                    multiplier
+                                                                ).toFixed(
+                                                                    1,
+                                                                )}
+                                                                {isProbability
+                                                                    ? "%"
+                                                                    : "/100"}
+                                                            </div>
+                                                        </div>
+
+                                                        {scenarioValue >
+                                                        baseline ? (
+                                                            <TrendingUp
+                                                                className="text-red-500"
+                                                                size={
+                                                                    18
+                                                                }
+                                                            />
+                                                        ) : scenarioValue <
+                                                          baseline ? (
+                                                            <TrendingDown
+                                                                className="text-emerald-500"
+                                                                size={
+                                                                    18
+                                                                }
+                                                            />
+                                                        ) : null}
+                                                    </div>
+                                                </Card>
+                                            );
+                                        },
+                                    )}
                                 </div>
 
-                                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-
-                                    {/* OVERALL */}
-                                    <Card padding="sm">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Overall Risk Score
-                                        </div>
-
-                                        <div className="mt-2 flex items-center justify-between gap-3">
-                                            <div>
-                                                <div className="text-xl font-bold text-slate-900">
-                                                    {Number(
-                                                        simulation
-                                                            .scenario
-                                                            .overall_risk,
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    /100
-                                                </div>
-
-                                                <div className="mt-1 text-[10px] text-slate-400">
-                                                    Baseline{" "}
-                                                    {Number(
-                                                        simulation
-                                                            .baseline
-                                                            .overall_risk,
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    /100
-                                                </div>
-                                            </div>
-
-                                            {Number(
+                                <div className="mt-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
+                                    Scenario risk level:{" "}
+                                    <b>
+                                        {
+                                            simulation
+                                                .scenario
+                                                .risk_level
+                                        }
+                                    </b>
+                                    .{" "}
+                                    {Number(
+                                        simulation.scenario
+                                            .overall_risk,
+                                    ) >
+                                    Number(
+                                        simulation.baseline
+                                            .overall_risk,
+                                    )
+                                        ? "Risk increases under this scenario."
+                                        : Number(
                                                 simulation
                                                     .scenario
                                                     .overall_risk,
-                                            ) >
-                                            Number(
-                                                simulation
-                                                    .baseline
-                                                    .overall_risk,
-                                            ) ? (
-                                                <TrendingUp
-                                                    size={
-                                                        18
-                                                    }
-                                                    className="text-red-500"
-                                                />
-                                            ) : (
-                                                <TrendingDown
-                                                    size={
-                                                        18
-                                                    }
-                                                    className="text-emerald-500"
-                                                />
-                                            )}
-                                        </div>
-                                    </Card>
-
-
-                                    {/* DELAY */}
-                                    <Card padding="sm">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Future Delay
-                                        </div>
-
-                                        <div className="mt-2 flex items-center justify-between gap-3">
-                                            <div>
-                                                <div className="text-xl font-bold text-slate-900">
-                                                    {(
-                                                        Number(
-                                                            simulation
-                                                                .scenario
-                                                                .delay_probability,
-                                                        ) *
-                                                        100
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    %
-                                                </div>
-
-                                                <div className="mt-1 text-[10px] text-slate-400">
-                                                    Baseline{" "}
-                                                    {(
-                                                        Number(
-                                                            simulation
-                                                                .baseline
-                                                                .delay_probability,
-                                                        ) *
-                                                        100
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    %
-                                                </div>
-                                            </div>
-
-                                            {Number(
-                                                simulation
-                                                    .scenario
-                                                    .delay_probability,
-                                            ) >
-                                            Number(
-                                                simulation
-                                                    .baseline
-                                                    .delay_probability,
-                                            ) ? (
-                                                <TrendingUp
-                                                    size={
-                                                        18
-                                                    }
-                                                    className="text-red-500"
-                                                />
-                                            ) : (
-                                                <TrendingDown
-                                                    size={
-                                                        18
-                                                    }
-                                                    className="text-emerald-500"
-                                                />
-                                            )}
-                                        </div>
-                                    </Card>
-
-
-                                    {/* STALL */}
-                                    <Card padding="sm">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Progress Stall
-                                        </div>
-
-                                        <div className="mt-2 flex items-center justify-between gap-3">
-                                            <div>
-                                                <div className="text-xl font-bold text-slate-900">
-                                                    {(
-                                                        Number(
-                                                            simulation
-                                                                .scenario
-                                                                .stall_probability,
-                                                        ) *
-                                                        100
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    %
-                                                </div>
-
-                                                <div className="mt-1 text-[10px] text-slate-400">
-                                                    Baseline{" "}
-                                                    {(
-                                                        Number(
-                                                            simulation
-                                                                .baseline
-                                                                .stall_probability,
-                                                        ) *
-                                                        100
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    %
-                                                </div>
-                                            </div>
-
-                                            {Number(
-                                                simulation
-                                                    .scenario
-                                                    .stall_probability,
-                                            ) >
-                                            Number(
-                                                simulation
-                                                    .baseline
-                                                    .stall_probability,
-                                            ) ? (
-                                                <TrendingUp
-                                                    size={
-                                                        18
-                                                    }
-                                                    className="text-red-500"
-                                                />
-                                            ) : (
-                                                <TrendingDown
-                                                    size={
-                                                        18
-                                                    }
-                                                    className="text-emerald-500"
-                                                />
-                                            )}
-                                        </div>
-                                    </Card>
-                                </div>
-
-
-                                {/* SCENARIO SUMMARY */}
-                                <div className="mt-4 grid gap-4 md:grid-cols-2">
-
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Scenario Risk Level
-                                        </div>
-
-                                        <div className="mt-2 flex items-center gap-3">
-                                            <Badge
-                                                variant={riskVariant(
-                                                    simulation
-                                                        .scenario
-                                                        .risk_level,
-                                                )}
-                                                dot
-                                            >
-                                                {
-                                                    simulation
-                                                        .scenario
-                                                        .risk_level
-                                                }
-                                            </Badge>
-                                        </div>
-                                    </div>
-
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Scenario Message
-                                        </div>
-
-                                        <p className="mt-2 text-xs leading-5 text-slate-600">
-                                            {Number(
-                                                simulation
-                                                    .scenario
-                                                    .overall_risk,
-                                            ) >
+                                            ) <
                                             Number(
                                                 simulation
                                                     .baseline
                                                     .overall_risk,
                                             )
-                                                ? "Risk increases under this scenario. The intervention should be reviewed before implementation."
-                                                : Number(
-                                                      simulation
-                                                          .scenario
-                                                          .overall_risk,
-                                                  ) <
-                                                  Number(
-                                                      simulation
-                                                          .baseline
-                                                          .overall_risk,
-                                                  )
-                                                ? "Risk decreases under this scenario, indicating a potentially improved project condition."
-                                                : "Risk remains unchanged under this scenario."}
-                                        </p>
-                                    </div>
-                                </div>
-
-
-                                {/* COST RESULTS */}
-                                <div className="mt-4 grid gap-4 md:grid-cols-2">
-
-                                    <div className="rounded-xl border border-slate-200 p-4">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Predicted Cost Overrun
-                                        </div>
-
-                                        <div className="mt-2 flex items-end justify-between gap-3">
-                                            <div>
-                                                <div className="text-lg font-bold text-slate-900">
-                                                    {Number(
-                                                        simulation
-                                                            .scenario
-                                                            .predicted_cost_overrun,
-                                                    ).toFixed(
-                                                        2,
-                                                    )}
-                                                    %
-                                                </div>
-
-                                                <div className="mt-1 text-[10px] text-slate-400">
-                                                    Baseline{" "}
-                                                    {Number(
-                                                        simulation
-                                                            .baseline
-                                                            .predicted_cost_overrun,
-                                                    ).toFixed(
-                                                        2,
-                                                    )}
-                                                    %
-                                                </div>
-                                            </div>
-
-                                            <div className="text-right">
-                                                <div className="text-[9px] uppercase text-slate-400">
-                                                    Cost Risk
-                                                </div>
-
-                                                <div className="text-sm font-bold text-slate-800">
-                                                    {Number(
-                                                        simulation
-                                                            .scenario
-                                                            .cost_risk,
-                                                    ).toFixed(
-                                                        1,
-                                                    )}
-                                                    /100
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="rounded-xl border border-slate-200 p-4">
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                            Scenario Inputs
-                                        </div>
-
-                                        <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                                            <div>
-                                                <span className="text-slate-400">
-                                                    Progress
-                                                </span>
-
-                                                <div className="font-semibold">
-                                                    {scenario.progress_delta >
-                                                    0
-                                                        ? "+"
-                                                        : ""}
-                                                    {
-                                                        scenario.progress_delta
-                                                    }
-                                                    %
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <span className="text-slate-400">
-                                                    Delay
-                                                </span>
-
-                                                <div className="font-semibold">
-                                                    {scenario.delay_delta >
-                                                    0
-                                                        ? "+"
-                                                        : ""}
-                                                    {
-                                                        scenario.delay_delta
-                                                    }{" "}
-                                                    days
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <span className="text-slate-400">
-                                                    Expenditure
-                                                </span>
-
-                                                <div className="font-semibold">
-                                                    {scenario.expenditure_delta >
-                                                    0
-                                                        ? "+"
-                                                        : ""}
-                                                    ₹
-                                                    {
-                                                        scenario.expenditure_delta
-                                                    }{" "}
-                                                    Cr
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <span className="text-slate-400">
-                                                    Revised Cost
-                                                </span>
-
-                                                <div className="font-semibold">
-                                                    {scenario.revised_cost_delta >
-                                                    0
-                                                        ? "+"
-                                                        : ""}
-                                                    ₹
-                                                    {
-                                                        scenario.revised_cost_delta
-                                                    }{" "}
-                                                    Cr
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
+                                          ? "Risk decreases under this scenario."
+                                          : "Risk remains unchanged."}
                                 </div>
                             </div>
                         )}

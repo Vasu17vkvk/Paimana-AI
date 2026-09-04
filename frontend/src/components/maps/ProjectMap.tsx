@@ -23,9 +23,8 @@ type Project = {
     physical_progress_pct: number | null;
     delay_days: number | null;
     cost_overrun_pct: number | null;
-    risk_score: number | null;
-    risk_level: string | null;
-    risk_source?: "ML" | "FALLBACK";
+    risk_score?: number | null;
+    risk_level?: string | null;
 };
 
 type Coordinate = [number, number];
@@ -35,224 +34,38 @@ type GeoJSONGeometry = {
     coordinates: any;
 };
 
-/* =======================================================
-   RISK HELPERS
-======================================================= */
-
-const getRiskColor = (
-    riskLevel?: string | null,
-    riskScore?: number | null
-) => {
-    /*
-     * ML risk score has highest priority.
-     *
-     * LOW      < 40
-     * MEDIUM   40 - <70
-     * HIGH     70 - <85
-     * CRITICAL >=85
-     */
-
-    if (
-        typeof riskScore === "number" &&
-        Number.isFinite(riskScore)
-    ) {
-        if (riskScore >= 85) {
-            return "#ef2b1f";
-        }
-
-        if (riskScore >= 70) {
-            return "#ff8c00";
-        }
-
-        if (riskScore >= 40) {
-            return "#ffc107";
-        }
-
-        return "#16a34a";
-    }
-
-    switch (
-        riskLevel?.trim().toLowerCase()
-    ) {
+const getRiskColor = (riskLevel?: string | null) => {
+    switch (riskLevel?.toLowerCase()) {
         case "critical":
-        case "critical risk":
-            return "#ef2b1f";
+            return "#dc2626";
 
         case "high":
-        case "high risk":
-            return "#ff8c00";
+            return "#ef4444";
 
         case "medium":
-        case "medium risk":
-            return "#ffc107";
+            return "#f59e0b";
 
         case "low":
-        case "low risk":
-            return "#16a34a";
+            return "#22c55e";
 
         default:
-            /*
-             * This should almost never happen
-             * because fallback risk is applied.
-             */
-            return "#16a34a";
+            return "#3b82f6";
     }
 };
 
-/* =======================================================
-   FALLBACK RISK CALCULATION
-======================================================= */
-
-/*
- * Some projects are not present in the current ML
- * prediction snapshot.
- *
- * For those projects we calculate a deterministic
- * portfolio-risk score from already available project
- * metrics:
- *
- * - delay_days
- * - cost_overrun_pct
- *
- * ML prediction always takes priority whenever available.
- */
-
-const calculateFallbackRisk = (
-    delayDays: number | null,
-    costOverrunPct: number | null
-) => {
-    const delay =
-        Number.isFinite(
-            Number(delayDays)
-        )
-            ? Math.max(
-                  0,
-                  Number(delayDays)
-              )
-            : 0;
-
-    const cost =
-        Number.isFinite(
-            Number(costOverrunPct)
-        )
-            ? Math.max(
-                  0,
-                  Number(costOverrunPct)
-              )
-            : 0;
-
-    /*
-     * Delay component:
-     *
-     * 0 days      -> 0
-     * 365 days    -> ~50
-     * 730+ days   -> 100
-     */
-
-    const delayScore = Math.min(
-        100,
-        (delay / 730) * 100
-    );
-
-    /*
-     * Cost component:
-     *
-     * 0%      -> 0
-     * 25%     -> ~50
-     * 50%+    -> 100
-     */
-
-    const costScore = Math.min(
-        100,
-        (cost / 50) * 100
-    );
-
-    /*
-     * Delay is slightly more important
-     * than cost for project risk.
-     */
-
-    const score =
-        delayScore * 0.6 +
-        costScore * 0.4;
-
-    return Number(
-        Math.max(
-            0,
-            Math.min(
-                100,
-                score
-            )
-        ).toFixed(1)
-    );
-};
-
-const getRiskLevelFromScore = (
-    score: number
-) => {
-    if (score >= 85) {
-        return "CRITICAL";
-    }
-
-    if (score >= 70) {
-        return "HIGH";
-    }
-
-    if (score >= 40) {
-        return "MEDIUM";
-    }
-
-    return "LOW";
-};
-
-const getRiskLabel = (
-    riskLevel: string | null | undefined,
-    riskScore: number | null | undefined
-) => {
-    if (
-        riskLevel &&
-        riskLevel.trim()
-    ) {
-        return riskLevel.toUpperCase();
-    }
-
-    if (
-        typeof riskScore === "number" &&
-        Number.isFinite(riskScore)
-    ) {
-        return getRiskLevelFromScore(
-            riskScore
-        );
-    }
-
-    return "LOW";
-};
-
-/* =======================================================
-   CREATE RISK MARKER
-======================================================= */
-
-const createRiskIcon = (
-    riskLevel?: string | null,
-    riskScore?: number | null
-) => {
-    const color =
-        getRiskColor(
-            riskLevel,
-            riskScore
-        );
+const createRiskIcon = (riskLevel?: string | null) => {
+    const color = getRiskColor(riskLevel);
 
     return L.divIcon({
-        className:
-            "custom-risk-marker",
+        className: "custom-risk-marker",
 
         html: `
             <div
                 style="
                     width: 18px;
                     height: 18px;
-                    background-color: ${color};
-                    border: 3px solid #ffffff;
+                    background: ${color};
+                    border: 3px solid white;
                     border-radius: 50%;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.45);
                 "
@@ -265,9 +78,9 @@ const createRiskIcon = (
     });
 };
 
-/* =======================================================
+/* -------------------------------------------------------
    MAP VIEW CONTROLLER
-======================================================= */
+------------------------------------------------------- */
 
 function MapViewController({
     selectedState,
@@ -278,71 +91,32 @@ function MapViewController({
 }) {
     const map = useMap();
 
-    const lastStateRef =
-        useRef<string | null>(null);
+    const lastStateRef = useRef<string | null>(null);
 
     useEffect(() => {
-        if (
-            !selectedState ||
-            !selectedBounds
-        ) {
-            if (
-                lastStateRef.current !==
-                null
-            ) {
-                lastStateRef.current =
-                    null;
-
-                map.setView(
-                    [
-                        22.9734,
-                        78.6569,
-                    ],
-                    5,
-                    {
-                        animate: true,
-                    }
-                );
-            }
-
+        if (!selectedState || !selectedBounds) {
             return;
         }
 
-        if (
-            lastStateRef.current ===
-            selectedState
-        ) {
+        if (lastStateRef.current === selectedState) {
             return;
         }
 
-        lastStateRef.current =
-            selectedState;
+        lastStateRef.current = selectedState;
 
-        map.fitBounds(
-            selectedBounds.pad(
-                0.08
-            ),
-            {
-                padding: [
-                    50,
-                    50,
-                ],
-                maxZoom: 7,
-                animate: true,
-            }
-        );
-    }, [
-        map,
-        selectedState,
-        selectedBounds,
-    ]);
+        map.fitBounds(selectedBounds.pad(0.08), {
+            padding: [50, 50],
+            maxZoom: 7,
+            animate: true,
+        });
+    }, [map, selectedState, selectedBounds]);
 
     return null;
 }
 
-/* =======================================================
+/* -------------------------------------------------------
    POINT IN RING
-======================================================= */
+------------------------------------------------------- */
 
 const pointInRing = (
     point: Coordinate,
@@ -353,30 +127,20 @@ const pointInRing = (
     let inside = false;
 
     for (
-        let i = 0,
-            j =
-                ring.length - 1;
+        let i = 0, j = ring.length - 1;
         i < ring.length;
         j = i++
     ) {
-        const xi =
-            ring[i][0];
+        const xi = ring[i][0];
+        const yi = ring[i][1];
 
-        const yi =
-            ring[i][1];
-
-        const xj =
-            ring[j][0];
-
-        const yj =
-            ring[j][1];
+        const xj = ring[j][0];
+        const yj = ring[j][1];
 
         const intersects =
-            yi > y !==
-                yj > y &&
+            yi > y !== yj > y &&
             x <
-                ((xj - xi) *
-                    (y - yi)) /
+                ((xj - xi) * (y - yi)) /
                     (yj - yi) +
                     xi;
 
@@ -388,44 +152,30 @@ const pointInRing = (
     return inside;
 };
 
-/* =======================================================
+/* -------------------------------------------------------
    POINT IN POLYGON
-======================================================= */
+   Handles polygon holes.
+------------------------------------------------------- */
 
 const pointInPolygon = (
     point: Coordinate,
     polygon: Coordinate[][]
 ) => {
-    if (
-        polygon.length === 0
-    ) {
+    if (polygon.length === 0) {
         return false;
     }
 
-    if (
-        !pointInRing(
-            point,
-            polygon[0]
-        )
-    ) {
+    const insideOuterRing = pointInRing(
+        point,
+        polygon[0]
+    );
+
+    if (!insideOuterRing) {
         return false;
     }
 
-    /*
-     * Polygon holes.
-     */
-
-    for (
-        let i = 1;
-        i < polygon.length;
-        i++
-    ) {
-        if (
-            pointInRing(
-                point,
-                polygon[i]
-            )
-        ) {
+    for (let i = 1; i < polygon.length; i++) {
+        if (pointInRing(point, polygon[i])) {
             return false;
         }
     }
@@ -433,32 +183,24 @@ const pointInPolygon = (
     return true;
 };
 
-/* =======================================================
-   POINT INSIDE GEOJSON
-======================================================= */
+/* -------------------------------------------------------
+   POINT IN MULTIPOLYGON
+------------------------------------------------------- */
 
 const pointInsideGeometry = (
     point: Coordinate,
     geometry: GeoJSONGeometry
 ) => {
-    if (
-        geometry.type ===
-        "Polygon"
-    ) {
+    if (geometry.type === "Polygon") {
         return pointInPolygon(
             point,
             geometry.coordinates
         );
     }
 
-    if (
-        geometry.type ===
-        "MultiPolygon"
-    ) {
+    if (geometry.type === "MultiPolygon") {
         return geometry.coordinates.some(
-            (
-                polygon: Coordinate[][]
-            ) =>
+            (polygon: Coordinate[][]) =>
                 pointInPolygon(
                     point,
                     polygon
@@ -469,40 +211,35 @@ const pointInsideGeometry = (
     return false;
 };
 
-/* =======================================================
-   CREATE CANDIDATE POINTS
-======================================================= */
+/* -------------------------------------------------------
+   CREATE CANDIDATE POINTS INSIDE ACTUAL STATE
+------------------------------------------------------- */
 
 const getInsideCandidates = (
     bounds: L.LatLngBounds,
     geometry: GeoJSONGeometry
 ): Coordinate[] => {
-    const south =
-        bounds.getSouth();
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
 
-    const north =
-        bounds.getNorth();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
 
-    const west =
-        bounds.getWest();
-
-    const east =
-        bounds.getEast();
+    /*
+     * Dense grid.
+     *
+     * This gives us enough candidate points even
+     * for small or narrow states such as Uttarakhand.
+     */
 
     const gridSize = 60;
 
-    const candidates: Coordinate[] =
-        [];
+    const candidates: Coordinate[] = [];
 
-    for (
-        let row = 0;
-        row < gridSize;
-        row++
-    ) {
+    for (let row = 0; row < gridSize; row++) {
         const lat =
             south +
-            ((north - south) *
-                (row + 0.5)) /
+            ((north - south) * (row + 0.5)) /
                 gridSize;
 
         for (
@@ -516,12 +253,13 @@ const getInsideCandidates = (
                     (column + 0.5)) /
                     gridSize;
 
-            if (
+            const inside =
                 pointInsideGeometry(
                     [lng, lat],
                     geometry
-                )
-            ) {
+                );
+
+            if (inside) {
                 candidates.push([
                     lat,
                     lng,
@@ -533,31 +271,26 @@ const getInsideCandidates = (
     return candidates;
 };
 
-/* =======================================================
-   POINT DISTANCE
-======================================================= */
+/* -------------------------------------------------------
+   DISTANCE BETWEEN TWO MAP POINTS
+------------------------------------------------------- */
 
 const pointDistance = (
     a: Coordinate,
     b: Coordinate
 ) => {
-    const latDifference =
-        a[0] - b[0];
-
-    const lngDifference =
-        a[1] - b[1];
+    const latDifference = a[0] - b[0];
+    const lngDifference = a[1] - b[1];
 
     return (
-        latDifference *
-            latDifference +
-        lngDifference *
-            lngDifference
+        latDifference * latDifference +
+        lngDifference * lngDifference
     );
 };
 
-/* =======================================================
-   EVENLY DISTRIBUTE MARKERS
-======================================================= */
+/* -------------------------------------------------------
+   EVENLY DISTRIBUTE MARKERS INSIDE STATE
+------------------------------------------------------- */
 
 const getMarkerPositions = (
     total: number,
@@ -568,26 +301,24 @@ const getMarkerPositions = (
         return [];
     }
 
-    const candidates =
-        getInsideCandidates(
-            bounds,
-            geometry
-        );
+    const candidates = getInsideCandidates(
+        bounds,
+        geometry
+    );
 
-    if (
-        candidates.length === 0
-    ) {
+    if (candidates.length === 0) {
         return [];
     }
 
-    if (
-        candidates.length <= total
-    ) {
+    if (candidates.length <= total) {
         return candidates;
     }
 
-    const selected: Coordinate[] =
-        [];
+    const selected: Coordinate[] = [];
+
+    /*
+     * Start from the center-most candidate.
+     */
 
     const center: Coordinate = [
         bounds.getCenter().lat,
@@ -595,30 +326,19 @@ const getMarkerPositions = (
     ];
 
     let firstIndex = 0;
-
-    let firstDistance =
-        Infinity;
+    let firstDistance = Infinity;
 
     candidates.forEach(
-        (
-            candidate,
-            index
-        ) => {
+        (candidate, index) => {
             const distance =
                 pointDistance(
                     candidate,
                     center
                 );
 
-            if (
-                distance <
-                firstDistance
-            ) {
-                firstDistance =
-                    distance;
-
-                firstIndex =
-                    index;
+            if (distance < firstDistance) {
+                firstDistance = distance;
+                firstIndex = index;
             }
         }
     );
@@ -627,9 +347,17 @@ const getMarkerPositions = (
         candidates[firstIndex]
     );
 
+    /*
+     * Farthest-point sampling.
+     *
+     * Every next marker is chosen as far as
+     * possible from the markers already placed.
+     *
+     * This avoids a dense cluster.
+     */
+
     while (
-        selected.length <
-        total
+        selected.length < total
     ) {
         let bestCandidate:
             | Coordinate
@@ -637,34 +365,24 @@ const getMarkerPositions = (
 
         let bestDistance = -1;
 
-        for (
-            const candidate of
-            candidates
-        ) {
+        for (const candidate of candidates) {
             const alreadySelected =
                 selected.some(
-                    (
-                        point
-                    ) =>
+                    (point) =>
                         point[0] ===
                             candidate[0] &&
                         point[1] ===
                             candidate[1]
                 );
 
-            if (
-                alreadySelected
-            ) {
+            if (alreadySelected) {
                 continue;
             }
 
             let minimumDistance =
                 Infinity;
 
-            for (
-                const point of
-                selected
-            ) {
+            for (const point of selected) {
                 const distance =
                     pointDistance(
                         candidate,
@@ -692,9 +410,7 @@ const getMarkerPositions = (
             }
         }
 
-        if (
-            !bestCandidate
-        ) {
+        if (!bestCandidate) {
             break;
         }
 
@@ -706,28 +422,9 @@ const getMarkerPositions = (
     return selected;
 };
 
-/* =======================================================
-   STATE NORMALIZATION
-======================================================= */
-
-const normalizeState = (
-    value: unknown
-) =>
-    String(value ?? "")
-        .trim()
-        .toLowerCase()
-        .replace(
-            /&/g,
-            "and"
-        )
-        .replace(
-            /\s+/g,
-            " "
-        );
-
-/* =======================================================
+/* -------------------------------------------------------
    MAIN COMPONENT
-======================================================= */
+------------------------------------------------------- */
 
 export default function ProjectMap() {
     const [
@@ -738,602 +435,259 @@ export default function ProjectMap() {
     const [
         selectedState,
         setSelectedState,
-    ] =
-        useState<string | null>(
-            null
-        );
+    ] = useState<string | null>(
+        null
+    );
 
     const [
         selectedBounds,
         setSelectedBounds,
-    ] =
-        useState<L.LatLngBounds | null>(
-            null
-        );
+    ] = useState<L.LatLngBounds | null>(
+        null
+    );
+
+    const [
+        ,
+        setSelectedGeometry,
+    ] = useState<GeoJSONGeometry | null>(
+        null
+    );
 
     const [
         projects,
         setProjects,
-    ] = useState<Project[]>(
-        []
-    );
+    ] = useState<Project[]>([]);
 
     const [
         loading,
         setLoading,
     ] = useState(false);
 
-    /* ===================================================
+    /* ---------------------------------------------------
        LOAD INDIA STATES
-    =================================================== */
+    --------------------------------------------------- */
 
     useEffect(() => {
-        fetch(
-            "/india-states.geojson"
-        )
-            .then(
-                (
-                    response
-                ) => {
-                    if (
-                        !response.ok
-                    ) {
-                        throw new Error(
-                            "GeoJSON file could not be loaded"
-                        );
-                    }
+        fetch("/india-states.geojson")
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(
+                        "GeoJSON file could not be loaded"
+                    );
+                }
 
-                    return response.json();
-                }
-            )
-            .then(
-                (data) => {
-                    setIndiaStates(
-                        data
-                    );
-                }
-            )
-            .catch(
-                (error) => {
-                    console.error(
-                        "GeoJSON Error:",
-                        error
-                    );
-                }
-            );
+                return response.json();
+            })
+            .then((data) => {
+                setIndiaStates(data);
+            })
+            .catch((error) => {
+                console.error(
+                    "GeoJSON Error:",
+                    error
+                );
+            });
     }, []);
 
-    /* ===================================================
-       LOAD PROJECTS + ML RISK
-    =================================================== */
+    /* ---------------------------------------------------
+       LOAD ALL PROJECTS + RISK SCORES
+       Projects are loaded for the whole of India.
+       State selection only filters/zooms the view.
+    --------------------------------------------------- */
 
     useEffect(() => {
         let cancelled = false;
-
         setLoading(true);
 
-        const projectsRequest =
-            apiRequest<any>(
-                "/projects"
-            );
-
-        const riskRequest =
-            apiRequest<{
-                total_projects?: number;
-
-                predictions?: Array<{
-                    project_code:
-                        | string
-                        | number;
-
-                    overall_risk_score:
-                        | number
-                        | null;
-
-                    risk_level:
-                        | string
-                        | null;
-                }>;
-            }>("/ml/risk");
-
-        Promise.allSettled([
-            projectsRequest,
-            riskRequest,
-        ])
-            .then(
-                ([
-                    projectResult,
-                    riskResult,
-                ]) => {
-                    if (
-                        cancelled
-                    ) {
-                        return;
-                    }
-
-                    /* ===================================
-                       PROJECT MASTER
-                    =================================== */
-
-                    let normalizedProjects: Project[] =
-                        [];
-
-                    if (
-                        projectResult.status ===
-                        "fulfilled"
-                    ) {
-                        const projectResponse =
-                            projectResult.value;
-
-                        const allProjectRows =
-                            Array.isArray(
-                                projectResponse
-                            )
-                                ? projectResponse
-                                : Array.isArray(
-                                      projectResponse?.projects
-                                  )
-                                ? projectResponse.projects
-                                : [];
-
-                        normalizedProjects =
-                            allProjectRows
-                                .map(
-                                    (
-                                        project: any
-                                    ) => ({
-                                        project_code:
-                                            String(
-                                                project?.project_code ??
-                                                    ""
-                                            ),
-
-                                        project_name:
-                                            project?.project_name ??
-                                            "Unnamed Project",
-
-                                        state:
-                                            project?.flash_state ??
-                                            project?.state ??
-                                            "",
-
-                                        sector:
-                                            project?.sector ??
-                                            "-",
-
-                                        ministry:
-                                            project?.ministry ??
-                                            "-",
-
-                                        physical_progress_pct:
-                                            project?.flash_latest_physical_progress ??
-                                            project?.physical_progress_pct ??
-                                            null,
-
-                                        delay_days:
-                                            project?.delay_days ??
-                                            null,
-
-                                        cost_overrun_pct:
-                                            project?.cost_overrun_pct ??
-                                            null,
-
-                                        risk_score:
-                                            null,
-
-                                        risk_level:
-                                            null,
-
-                                        risk_source:
-                                            undefined,
-                                    })
-                                )
-                                .filter(
-                                    (
-                                        project: Project
-                                    ) =>
-                                        Boolean(
-                                            project.project_code
-                                        )
-                                );
-
-                        console.log(
-                            "Geographic View: loaded projects =",
-                            normalizedProjects.length
-                        );
-                    } else {
-                        console.error(
-                            "Projects API Error:",
-                            projectResult.reason
-                        );
-                    }
-
-                    /* ===================================
-                       ML RISK
-                    =================================== */
-
-                    if (
-                        riskResult.status ===
-                        "fulfilled"
-                    ) {
-                        const riskResponse =
-                            riskResult.value;
-
-                        const riskPredictions =
-                            Array.isArray(
-                                riskResponse?.predictions
-                            )
-                                ? riskResponse.predictions
-                                : [];
-
-                        console.log(
-                            "ML RISK COUNT:",
-                            riskPredictions.length
-                        );
-
-                        /*
-                         * project_code -> ML prediction
-                         */
-
-                        const riskMap =
-                            new Map<
-                                string,
-                                {
-                                    overall_risk_score:
-                                        | number
-                                        | null;
-
-                                    risk_level:
-                                        | string
-                                        | null;
-                                }
-                            >();
-
-                        riskPredictions.forEach(
-                            (
-                                prediction
-                            ) => {
-                                const code =
-                                    String(
-                                        prediction.project_code
-                                    ).trim();
-
-                                if (
-                                    !code
-                                ) {
-                                    return;
-                                }
-
-                                riskMap.set(
-                                    code,
-                                    {
-                                        overall_risk_score:
-                                            typeof prediction.overall_risk_score ===
-                                            "number"
-                                                ? prediction.overall_risk_score
-                                                : null,
-
-                                        risk_level:
-                                            prediction.risk_level ??
-                                            null,
-                                    }
-                                );
-                            }
-                        );
-
-                        let mlMatched =
-                            0;
-
-                        let fallbackUsed =
-                            0;
-
-                        /*
-                         * Attach ML risk where available.
-                         *
-                         * For projects not present in ML
-                         * snapshot, calculate deterministic
-                         * fallback risk.
-                         */
-
-                        normalizedProjects =
-                            normalizedProjects.map(
-                                (
-                                    project
-                                ) => {
-                                    const risk =
-                                        riskMap.get(
-                                            String(
-                                                project.project_code
-                                            ).trim()
-                                        );
-
-                                    /* =========================
-                                       ML RISK AVAILABLE
-                                    ========================= */
-
-                                    if (
-                                        risk &&
-                                        typeof risk.overall_risk_score ===
-                                            "number"
-                                    ) {
-                                        mlMatched++;
-
-                                        const score =
-                                            Number(
-                                                risk.overall_risk_score
-                                            );
-
-                                        return {
-                                            ...project,
-
-                                            risk_score:
-                                                score,
-
-                                            risk_level:
-                                                risk.risk_level ??
-                                                getRiskLevelFromScore(
-                                                    score
-                                                ),
-
-                                            risk_source:
-                                                "ML",
-                                        };
-                                    }
-
-                                    /* =========================
-                                       FALLBACK RISK
-                                    ========================= */
-
-                                    const fallbackScore =
-                                        calculateFallbackRisk(
-                                            project.delay_days,
-                                            project.cost_overrun_pct
-                                        );
-
-                                    const fallbackLevel =
-                                        getRiskLevelFromScore(
-                                            fallbackScore
-                                        );
-
-                                    fallbackUsed++;
-
-                                    return {
-                                        ...project,
-
-                                        risk_score:
-                                            fallbackScore,
-
-                                        risk_level:
-                                            fallbackLevel,
-
-                                        risk_source:
-                                            "FALLBACK",
-                                    };
-                                }
-                            );
-
-                        console.log(
-                            "ML RISK MATCHED:",
-                            mlMatched
-                        );
-
-                        console.log(
-                            "FALLBACK RISK USED:",
-                            fallbackUsed
-                        );
-
-                        console.log(
-                            "TOTAL PROJECTS WITH RISK:",
-                            normalizedProjects.filter(
-                                (
-                                    project
-                                ) =>
-                                    typeof project.risk_score ===
-                                    "number"
-                            ).length
-                        );
-
-                        console.log(
-                            "SAMPLE PROJECT WITH RISK:",
-                            normalizedProjects.find(
-                                (
-                                    project
-                                ) =>
-                                    project.risk_source ===
-                                    "ML"
-                            )
-                        );
-
-                        console.log(
-                            "SAMPLE FALLBACK PROJECT:",
-                            normalizedProjects.find(
-                                (
-                                    project
-                                ) =>
-                                    project.risk_source ===
-                                    "FALLBACK"
-                            )
-                        );
-                    } else {
-                        /*
-                         * ML API unavailable.
-                         *
-                         * Still give every project a
-                         * deterministic fallback risk.
-                         */
-
-                        console.warn(
-                            "ML Risk API unavailable. Using fallback risk for all projects."
-                        );
-
-                        normalizedProjects =
-                            normalizedProjects.map(
-                                (
-                                    project
-                                ) => {
-                                    const fallbackScore =
-                                        calculateFallbackRisk(
-                                            project.delay_days,
-                                            project.cost_overrun_pct
-                                        );
-
-                                    return {
-                                        ...project,
-
-                                        risk_score:
-                                            fallbackScore,
-
-                                        risk_level:
-                                            getRiskLevelFromScore(
-                                                fallbackScore
-                                            ),
-
-                                        risk_source:
-                                            "FALLBACK",
-                                    };
-                                }
-                            );
-                    }
-
-                    setProjects(
-                        normalizedProjects
-                    );
-
-                    setLoading(
-                        false
-                    );
-                }
-            )
-            .catch(
-                (error) => {
-                    if (
-                        cancelled
-                    ) {
-                        return;
-                    }
-
-                    console.error(
-                        "Geographic View API Error:",
-                        error
-                    );
-
-                    setProjects(
-                        []
-                    );
-
-                    setLoading(
-                        false
-                    );
-                }
-            );
+        // Load projects independently so a slow/failing ML endpoint
+        // never prevents the project markers/list from rendering.
+        apiRequest<any>("/projects")
+            .then((projectResponse) => {
+                if (cancelled) return;
+
+                const allProjectRows = Array.isArray(projectResponse)
+                    ? projectResponse
+                    : Array.isArray(projectResponse?.projects)
+                      ? projectResponse.projects
+                      : [];
+
+                const normalizedProjects: Project[] = allProjectRows
+                    .map((project: any) => ({
+                        project_code: String(project?.project_code ?? ""),
+                        project_name:
+                            project?.project_name ?? "Unnamed Project",
+                        state:
+                            project?.flash_state ??
+                            project?.state ??
+                            "",
+                        sector: project?.sector ?? "-",
+                        ministry: project?.ministry ?? "-",
+                        physical_progress_pct:
+                            project?.flash_latest_physical_progress ??
+                            project?.physical_progress_pct ??
+                            null,
+                        delay_days: project?.delay_days ?? null,
+                        cost_overrun_pct:
+                            project?.cost_overrun_pct ?? null,
+                        risk_score: null,
+                        risk_level: null,
+                    }))
+                    .filter((project: Project) => project.project_code);
+
+                setProjects(normalizedProjects);
+                setLoading(false);
+
+                console.log(
+                    `Geographic View: loaded ${normalizedProjects.length} projects across India`
+                );
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                console.error("Geographic View Projects API Error:", error);
+                setProjects([]);
+                setLoading(false);
+            });
+
+        // Risk scoring is optional for map rendering. If this endpoint is
+        // slow/unavailable, projects still remain visible on the map.
+        apiRequest<{
+            total_projects: number;
+            predictions: Array<{
+                project_code: string | number;
+                overall_risk_score: number;
+                risk_level: string;
+            }>;
+        }>("/ml/risk")
+            .then((riskResponse) => {
+                if (cancelled) return;
+
+                const riskPredictions = Array.isArray(riskResponse?.predictions)
+                    ? riskResponse.predictions
+                    : [];
+
+                const riskMap = new Map(
+                    riskPredictions.map((prediction) => [
+                        String(prediction.project_code),
+                        prediction,
+                    ])
+                );
+
+                setProjects((currentProjects) =>
+                    currentProjects.map((project) => {
+                        const risk = riskMap.get(project.project_code);
+                        return risk
+                            ? {
+                                  ...project,
+                                  risk_score: risk.overall_risk_score,
+                                  risk_level: risk.risk_level,
+                              }
+                            : project;
+                    })
+                );
+            })
+            .catch((error) => {
+                console.warn(
+                    "Geographic View Risk API unavailable; showing projects without risk scores.",
+                    error
+                );
+            });
 
         return () => {
             cancelled = true;
         };
     }, []);
 
-    /* ===================================================
+    /* ---------------------------------------------------
        GET STATE NAME
-    =================================================== */
+    --------------------------------------------------- */
 
     const getStateName = (
         feature: any
     ) => {
         return (
-            feature?.properties
-                ?.ST_NM ||
-            feature?.properties
-                ?.state ||
-            feature?.properties
-                ?.NAME_1 ||
+            feature?.properties?.ST_NM ||
+            feature?.properties?.state ||
+            feature?.properties?.NAME_1 ||
             "Unknown State"
         );
     };
 
-    /* ===================================================
+    /* ---------------------------------------------------
        STATE STYLE
-    =================================================== */
+    --------------------------------------------------- */
 
     const stateStyle = (
         feature: any
     ) => {
         const stateName =
-            getStateName(
-                feature
-            );
-
-        const isSelected =
-            selectedState ===
-            stateName;
+            getStateName(feature);
 
         return {
-            color: isSelected
-                ? "#1d4ed8"
-                : "#64748b",
+            color:
+                selectedState === stateName
+                    ? "#1d4ed8"
+                    : "#64748b",
 
-            weight: isSelected
-                ? 2.5
-                : 1.1,
+            weight:
+                selectedState === stateName
+                    ? 2.5
+                    : 1.1,
 
-            fillColor: isSelected
-                ? "#60a5fa"
-                : "#dbeafe",
+            fillColor:
+                selectedState === stateName
+                    ? "#60a5fa"
+                    : "#dbeafe",
 
-            fillOpacity: isSelected
-                ? 0.45
-                : 0.22,
+            fillOpacity:
+                selectedState === stateName
+                    ? 0.45
+                    : 0.22,
         };
     };
 
-    /* ===================================================
+    /* ---------------------------------------------------
        STATE INTERACTION
-    =================================================== */
+    --------------------------------------------------- */
 
     const onEachState = (
         feature: any,
         layer: any
     ) => {
         const stateName =
-            getStateName(
-                feature
-            );
+            getStateName(feature);
 
-        layer.bindTooltip(
-            stateName,
-            {
-                sticky: true,
-            }
-        );
+        layer.bindTooltip(stateName, {
+            sticky: true,
+        });
 
         layer.on({
             mouseover: (
                 event: any
             ) => {
-                event.target.setStyle(
-                    {
-                        weight: 2,
-                        color: "#2563eb",
-                        fillColor:
-                            "#93c5fd",
-                        fillOpacity:
-                            0.5,
-                    }
-                );
+                event.target.setStyle({
+                    weight: 2,
+                    color: "#2563eb",
+                    fillColor: "#93c5fd",
+                    fillOpacity: 0.5,
+                });
             },
 
             mouseout: (
                 event: any
             ) => {
                 event.target.setStyle(
-                    stateStyle(
-                        feature
-                    )
+                    stateStyle(feature)
                 );
             },
 
             click: (
                 event: any
             ) => {
+                /*
+                 * Same state click:
+                 * do not reset anything.
+                 */
+
                 if (
                     selectedState ===
                     stateName
@@ -1344,8 +698,21 @@ export default function ProjectMap() {
                 const bounds =
                     event.target.getBounds();
 
+                /*
+                 * Save actual GeoJSON geometry.
+                 *
+                 * This is the important final improvement.
+                 */
+
+                const geometry =
+                    feature?.geometry;
+
                 setSelectedBounds(
                     bounds
+                );
+
+                setSelectedGeometry(
+                    geometry
                 );
 
                 setSelectedState(
@@ -1360,223 +727,123 @@ export default function ProjectMap() {
         });
     };
 
-    /* ===================================================
-       FILTER PROJECTS BY STATE
-    =================================================== */
+    /* ---------------------------------------------------
+       CALCULATE MARKER POSITIONS
+    --------------------------------------------------- */
 
-    const visibleProjects =
-        useMemo(() => {
-            if (
-                !selectedState
-            ) {
-                return projects;
-            }
+    const normalizeState = (value: unknown) =>
+        String(value ?? "")
+            .trim()
+            .toLowerCase()
+            .replace(/&/g, "and")
+            .replace(/\s+/g, " ");
 
-            const selectedStateKey =
-                normalizeState(
-                    selectedState
-                );
+    const visibleProjects = useMemo(() => {
+        if (!selectedState) {
+            return projects;
+        }
 
-            return projects.filter(
-                (
-                    project
-                ) =>
-                    normalizeState(
-                        project.state
-                    ) ===
-                    selectedStateKey
-            );
-        }, [
-            projects,
-            selectedState,
-        ]);
+        const selectedStateKey = normalizeState(selectedState);
 
-    /* ===================================================
-       GENERATE MARKER POSITIONS
-    =================================================== */
+        return projects.filter(
+            (project) =>
+                normalizeState(project.state) ===
+                selectedStateKey
+        );
+    }, [projects, selectedState]);
 
-    const markerPositionMap =
-        useMemo(() => {
-            const positionMap =
-                new Map<
-                    string,
-                    Coordinate
-                >();
+    /*
+     * Generate a stable marker position for every project using the
+     * geometry of its state. The dataset has no project latitude/longitude,
+     * so these are visual state-contained representations, not exact sites.
+     */
+    const markerPositionMap = useMemo(() => {
+        const positionMap = new Map<string, Coordinate>();
 
-            if (
-                !indiaStates?.features
-                    ?.length ||
-                !projects.length
-            ) {
-                return positionMap;
-            }
-
-            const stateGeometryMap =
-                new Map<
-                    string,
-                    {
-                        geometry: GeoJSONGeometry;
-                        bounds: L.LatLngBounds;
-                    }
-                >();
-
-            /* ==========================================
-               BUILD STATE GEOMETRY MAP
-            ========================================== */
-
-            for (
-                const feature of
-                indiaStates.features
-            ) {
-                const stateName =
-                    getStateName(
-                        feature
-                    );
-
-                const geometry =
-                    feature?.geometry as
-                        | GeoJSONGeometry
-                        | undefined;
-
-                if (!geometry) {
-                    continue;
-                }
-
-                try {
-                    const bounds =
-                        L.geoJSON(
-                            feature as any
-                        ).getBounds();
-
-                    if (
-                        bounds.isValid()
-                    ) {
-                        stateGeometryMap.set(
-                            normalizeState(
-                                stateName
-                            ),
-                            {
-                                geometry,
-                                bounds,
-                            }
-                        );
-                    }
-                } catch (
-                    error
-                ) {
-                    console.warn(
-                        `Could not calculate bounds for ${stateName}`,
-                        error
-                    );
-                }
-            }
-
-            /* ==========================================
-               GROUP PROJECTS BY STATE
-            ========================================== */
-
-            const projectsByState =
-                new Map<
-                    string,
-                    Project[]
-                >();
-
-            for (
-                const project of
-                projects
-            ) {
-                const key =
-                    normalizeState(
-                        project.state
-                    );
-
-                if (!key) {
-                    continue;
-                }
-
-                const group =
-                    projectsByState.get(
-                        key
-                    ) ?? [];
-
-                group.push(
-                    project
-                );
-
-                projectsByState.set(
-                    key,
-                    group
-                );
-            }
-
-            /* ==========================================
-               GENERATE STATE-CONTAINED POSITIONS
-            ========================================== */
-
-            for (
-                const [
-                    stateKey,
-                    stateProjects,
-                ] of projectsByState
-            ) {
-                const stateInfo =
-                    stateGeometryMap.get(
-                        stateKey
-                    );
-
-                if (!stateInfo) {
-                    continue;
-                }
-
-                const positions =
-                    getMarkerPositions(
-                        stateProjects.length,
-                        stateInfo.bounds,
-                        stateInfo.geometry
-                    );
-
-                stateProjects.forEach(
-                    (
-                        project,
-                        index
-                    ) => {
-                        const position =
-                            positions[
-                                index
-                            ];
-
-                        if (
-                            position
-                        ) {
-                            positionMap.set(
-                                project.project_code,
-                                position
-                            );
-                        }
-                    }
-                );
-            }
-
+        if (!indiaStates?.features?.length || !projects.length) {
             return positionMap;
-        }, [
-            indiaStates,
-            projects,
-        ]);
+        }
 
-    /* ===================================================
-       RENDER
-    =================================================== */
+        const stateGeometryMap = new Map<
+            string,
+            {
+                geometry: GeoJSONGeometry;
+                bounds: L.LatLngBounds;
+            }
+        >();
+
+        for (const feature of indiaStates.features) {
+            const stateName = getStateName(feature);
+            const geometry = feature?.geometry as GeoJSONGeometry | undefined;
+
+            if (!geometry) {
+                continue;
+            }
+
+            try {
+                const bounds = L.geoJSON(feature as any).getBounds();
+
+                if (bounds.isValid()) {
+                    stateGeometryMap.set(normalizeState(stateName), {
+                        geometry,
+                        bounds,
+                    });
+                }
+            } catch (error) {
+                console.warn(
+                    `Could not calculate bounds for ${stateName}`,
+                    error
+                );
+            }
+        }
+
+        const projectsByState = new Map<string, Project[]>();
+
+        for (const project of projects) {
+            const key = normalizeState(project.state);
+
+            if (!key) {
+                continue;
+            }
+
+            const group = projectsByState.get(key) ?? [];
+            group.push(project);
+            projectsByState.set(key, group);
+        }
+
+        for (const [stateKey, stateProjects] of projectsByState) {
+            const stateInfo = stateGeometryMap.get(stateKey);
+
+            if (!stateInfo) {
+                continue;
+            }
+
+            const positions = getMarkerPositions(
+                stateProjects.length,
+                stateInfo.bounds,
+                stateInfo.geometry
+            );
+
+            stateProjects.forEach((project, index) => {
+                const position = positions[index];
+
+                if (position) {
+                    positionMap.set(project.project_code, position);
+                }
+            });
+        }
+
+        return positionMap;
+    }, [indiaStates, projects]);
 
     return (
         <div className="relative">
-
-            {/* =================================================
+            {/* -------------------------------------------
                 SELECTED STATE CARD
-            ================================================= */}
+            -------------------------------------------- */}
 
             {selectedState && (
                 <div className="absolute right-4 top-4 z-[1000] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
-
                     <div className="text-xs text-slate-500">
                         Selected State
                     </div>
@@ -1590,28 +857,12 @@ export default function ProjectMap() {
                             ? "Loading projects..."
                             : `${visibleProjects.length} projects found`}
                     </div>
-
-                    <button
-                        type="button"
-                        className="mt-2 text-xs font-semibold text-red-600 hover:text-red-700"
-                        onClick={() => {
-                            setSelectedState(
-                                null
-                            );
-
-                            setSelectedBounds(
-                                null
-                            );
-                        }}
-                    >
-                        Clear selection
-                    </button>
                 </div>
             )}
 
-            {/* =================================================
+            {/* -------------------------------------------
                 MAP
-            ================================================= */}
+            -------------------------------------------- */}
 
             <MapContainer
                 center={[
@@ -1621,20 +872,14 @@ export default function ProjectMap() {
                 zoom={5}
                 minZoom={4}
                 maxZoom={9}
-                scrollWheelZoom={
-                    true
-                }
-                doubleClickZoom={
-                    false
-                }
+                scrollWheelZoom={true}
+                doubleClickZoom={false}
                 style={{
                     height: "600px",
                     width: "100%",
-                    borderRadius:
-                        "16px",
+                    borderRadius: "16px",
                 }}
             >
-
                 <MapViewController
                     selectedState={
                         selectedState
@@ -1655,24 +900,20 @@ export default function ProjectMap() {
 
                 {indiaStates && (
                     <GeoJSON
-                        data={
-                            indiaStates
-                        }
-                        style={
-                            stateStyle
-                        }
+                        data={indiaStates}
+                        style={stateStyle}
                         onEachFeature={
                             onEachState
                         }
                     />
                 )}
 
-                {/* =================================================
+                {/* ---------------------------------------
                     PROJECT MARKERS
-                ================================================= */}
+                ---------------------------------------- */}
 
                 {selectedState &&
-                    visibleProjects.map(
+                    projects.map(
                         (
                             project,
                             index
@@ -1682,23 +923,15 @@ export default function ProjectMap() {
                                     project.project_code
                                 );
 
+                            /*
+                             * Safety check.
+                             */
+
                             if (
                                 !markerPosition
                             ) {
                                 return null;
                             }
-
-                            const markerColor =
-                                getRiskColor(
-                                    project.risk_level,
-                                    project.risk_score
-                                );
-
-                            const riskLabel =
-                                getRiskLabel(
-                                    project.risk_level,
-                                    project.risk_score
-                                );
 
                             return (
                                 <Marker
@@ -1707,14 +940,10 @@ export default function ProjectMap() {
                                         markerPosition
                                     }
                                     icon={createRiskIcon(
-                                        project.risk_level,
-                                        project.risk_score
+                                        project.risk_level
                                     )}
                                 >
-
-                                    {/* =================================================
-                                        HOVER TOOLTIP
-                                    ================================================= */}
+                                    {/* HOVER TOOLTIP */}
 
                                     <Tooltip
                                         direction="top"
@@ -1722,17 +951,14 @@ export default function ProjectMap() {
                                             0,
                                             -12,
                                         ]}
-                                        opacity={
-                                            1
-                                        }
+                                        opacity={1}
                                     >
                                         <div
                                             style={{
                                                 minWidth:
-                                                    "190px",
+                                                    "180px",
                                             }}
                                         >
-
                                             <div
                                                 style={{
                                                     fontWeight:
@@ -1758,31 +984,10 @@ export default function ProjectMap() {
                                                     project.project_name
                                                 }
                                             </div>
-
-                                            <div
-                                                style={{
-                                                    marginTop:
-                                                        "5px",
-                                                    fontSize:
-                                                        "11px",
-                                                    fontWeight:
-                                                        700,
-                                                    color:
-                                                        markerColor,
-                                                }}
-                                            >
-                                                {
-                                                    riskLabel
-                                                }{" "}
-                                                Risk
-                                            </div>
-
                                         </div>
                                     </Tooltip>
 
-                                    {/* =================================================
-                                        PROJECT POPUP
-                                    ================================================= */}
+                                    {/* PROJECT POPUP */}
 
                                     <Popup>
                                         <div
@@ -1791,7 +996,6 @@ export default function ProjectMap() {
                                                     "270px",
                                             }}
                                         >
-
                                             <div
                                                 style={{
                                                     fontSize:
@@ -1823,8 +1027,6 @@ export default function ProjectMap() {
                                                 }
                                             </div>
 
-                                            {/* RISK BOX */}
-
                                             <div
                                                 style={{
                                                     marginTop:
@@ -1839,7 +1041,6 @@ export default function ProjectMap() {
                                                         "#f8fafc",
                                                 }}
                                             >
-
                                                 <div
                                                     style={{
                                                         display:
@@ -1852,18 +1053,11 @@ export default function ProjectMap() {
                                                         Risk Score
                                                     </span>
 
-                                                    <strong
-                                                        style={{
-                                                            color:
-                                                                markerColor,
-                                                        }}
-                                                    >
-                                                        {typeof project.risk_score ===
-                                                        "number"
-                                                            ? project.risk_score.toFixed(
-                                                                  1
-                                                              )
-                                                            : "0.0"}
+                                                    <strong>
+                                                        {
+                                                            project.risk_score ??
+                                                            0
+                                                        }
                                                         /100
                                                     </strong>
                                                 </div>
@@ -1885,34 +1079,18 @@ export default function ProjectMap() {
                                                     <strong
                                                         style={{
                                                             color:
-                                                                markerColor,
+                                                                getRiskColor(
+                                                                    project.risk_level
+                                                                ),
                                                         }}
                                                     >
                                                         {
-                                                            riskLabel
+                                                            project.risk_level ||
+                                                            "Unknown"
                                                         }
                                                     </strong>
                                                 </div>
-
-                                                <div
-                                                    style={{
-                                                        marginTop:
-                                                            "8px",
-                                                        fontSize:
-                                                            "10px",
-                                                        color:
-                                                            "#94a3b8",
-                                                    }}
-                                                >
-                                                    {project.risk_source ===
-                                                    "ML"
-                                                        ? "ML Prediction"
-                                                        : "Portfolio Risk Estimate"}
-                                                </div>
-
                                             </div>
-
-                                            {/* PROJECT METRICS */}
 
                                             <div
                                                 style={{
@@ -1922,7 +1100,6 @@ export default function ProjectMap() {
                                                         1.8,
                                                 }}
                                             >
-
                                                 <div>
                                                     <strong>
                                                         Progress:
@@ -1930,9 +1107,7 @@ export default function ProjectMap() {
                                                     {Number(
                                                         project.physical_progress_pct ??
                                                             0
-                                                    ).toFixed(
-                                                        1
-                                                    )}
+                                                    ).toFixed(1)}
                                                     %
                                                 </div>
 
@@ -1943,9 +1118,7 @@ export default function ProjectMap() {
                                                     {Number(
                                                         project.delay_days ??
                                                             0
-                                                    ).toFixed(
-                                                        0
-                                                    )}{" "}
+                                                    ).toFixed(0)}{" "}
                                                     days
                                                 </div>
 
@@ -1961,10 +1134,7 @@ export default function ProjectMap() {
                                                     )}
                                                     %
                                                 </div>
-
                                             </div>
-
-                                            {/* SECTOR */}
 
                                             <div
                                                 style={{
@@ -1985,8 +1155,6 @@ export default function ProjectMap() {
                                                 }
                                             </div>
 
-                                            {/* MINISTRY */}
-
                                             <div
                                                 style={{
                                                     marginTop:
@@ -2005,34 +1173,30 @@ export default function ProjectMap() {
                                                     "-"
                                                 }
                                             </div>
-
                                         </div>
                                     </Popup>
-
                                 </Marker>
                             );
                         }
                     )}
             </MapContainer>
 
-            {/* =================================================
+            {/* -------------------------------------------
                 RISK LEGEND
-            ================================================= */}
+            -------------------------------------------- */}
 
             <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
-
                 <div className="mb-2 text-sm font-semibold text-slate-700">
                     Project Risk
                 </div>
 
                 <div className="space-y-2 text-xs text-slate-600">
-
                     <div className="flex items-center gap-2">
                         <span
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#ef2b1f",
+                                    "#dc2626",
                             }}
                         />
 
@@ -2044,7 +1208,7 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#ff8c00",
+                                    "#ef4444",
                             }}
                         />
 
@@ -2056,7 +1220,7 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#ffc107",
+                                    "#f59e0b",
                             }}
                         />
 
@@ -2068,83 +1232,63 @@ export default function ProjectMap() {
                             className="h-3 w-3 rounded-full"
                             style={{
                                 backgroundColor:
-                                    "#16a34a",
+                                    "#22c55e",
                             }}
                         />
 
                         Low Risk
                     </div>
-
                 </div>
             </div>
 
-            {/* =================================================
+            {/* -------------------------------------------
                 PROJECT LIST
-            ================================================= */}
+            -------------------------------------------- */}
 
             <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-4 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900">
+                                Projects in{" "}
+                                {selectedState || "India"}
+                            </h2>
 
-                <div className="mb-4 flex items-center justify-between">
+                            <p className="text-sm text-slate-500">
+                                Infrastructure
+                                projects
+                                returned by
+                                PAIMANA AI
+                            </p>
+                        </div>
 
-                    <div>
-                        <h2 className="text-lg font-semibold text-slate-900">
-                            Projects in{" "}
-                            {selectedState ||
-                                "India"}
-                        </h2>
-
-                        <p className="text-sm text-slate-500">
-                            Infrastructure
-                            projects returned
-                            by PAIMANA AI
-                        </p>
+                        <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold">
+                            {loading
+                                ? "..."
+                                : visibleProjects.length}
+                        </div>
                     </div>
 
-                    <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold">
-                        {loading
-                            ? "..."
-                            : visibleProjects.length}
-                    </div>
-
-                </div>
-
-                {loading ? (
-                    <div className="py-8 text-center text-sm text-slate-500">
-                        Loading projects...
-                    </div>
-                ) : visibleProjects.length ===
-                  0 ? (
-                    <div className="py-8 text-center text-sm text-slate-500">
-                        No projects found.
-                    </div>
-                ) : (
-                    <div className="max-h-[400px] space-y-2 overflow-y-auto">
-
-                        {visibleProjects.map(
-                            (
-                                project,
-                                index
-                            ) => {
-                                const projectColor =
-                                    getRiskColor(
-                                        project.risk_level,
-                                        project.risk_score
-                                    );
-
-                                const projectRisk =
-                                    getRiskLabel(
-                                        project.risk_level,
-                                        project.risk_score
-                                    );
-
-                                return (
+                    {loading ? (
+                        <div className="py-8 text-center text-sm text-slate-500">
+                            Loading projects...
+                        </div>
+                    ) : visibleProjects.length ===
+                      0 ? (
+                        <div className="py-8 text-center text-sm text-slate-500">
+                            No projects found.
+                        </div>
+                    ) : (
+                        <div className="max-h-[400px] space-y-2 overflow-y-auto">
+                            {visibleProjects.map(
+                                (
+                                    project,
+                                    index
+                                ) => (
                                     <div
                                         key={`${project.project_code}-${index}`}
                                         className="rounded-lg border border-slate-200 p-4 hover:bg-slate-50"
                                     >
-
                                         <div className="flex items-start justify-between gap-4">
-
                                             <div>
                                                 <div className="text-xs text-slate-400">
                                                     Project{" "}
@@ -2164,43 +1308,32 @@ export default function ProjectMap() {
                                                 className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-white"
                                                 style={{
                                                     backgroundColor:
-                                                        projectColor,
+                                                        getRiskColor(
+                                                            project.risk_level
+                                                        ),
                                                 }}
                                             >
                                                 {
-                                                    projectRisk
+                                                    project.risk_level ||
+                                                    "Unknown"
                                                 }
                                             </div>
-
                                         </div>
 
                                         <div className="mt-4 grid grid-cols-4 gap-3 text-xs">
-
-                                            {/* RISK */}
-
                                             <div>
                                                 <div className="text-slate-400">
                                                     Risk Score
                                                 </div>
 
-                                                <div
-                                                    className="mt-1 font-semibold"
-                                                    style={{
-                                                        color:
-                                                            projectColor,
-                                                    }}
-                                                >
-                                                    {typeof project.risk_score ===
-                                                    "number"
-                                                        ? project.risk_score.toFixed(
-                                                              1
-                                                          )
-                                                        : "0.0"}
+                                                <div className="mt-1 font-semibold">
+                                                    {
+                                                        project.risk_score ??
+                                                        0
+                                                    }
                                                     /100
                                                 </div>
                                             </div>
-
-                                            {/* PROGRESS */}
 
                                             <div>
                                                 <div className="text-slate-400">
@@ -2211,14 +1344,10 @@ export default function ProjectMap() {
                                                     {Number(
                                                         project.physical_progress_pct ??
                                                             0
-                                                    ).toFixed(
-                                                        1
-                                                    )}
+                                                    ).toFixed(1)}
                                                     %
                                                 </div>
                                             </div>
-
-                                            {/* DELAY */}
 
                                             <div>
                                                 <div className="text-slate-400">
@@ -2229,14 +1358,10 @@ export default function ProjectMap() {
                                                     {Number(
                                                         project.delay_days ??
                                                             0
-                                                    ).toFixed(
-                                                        0
-                                                    )}{" "}
+                                                    ).toFixed(0)}{" "}
                                                     days
                                                 </div>
                                             </div>
-
-                                            {/* COST */}
 
                                             <div>
                                                 <div className="text-slate-400">
@@ -2254,19 +1379,13 @@ export default function ProjectMap() {
                                                     %
                                                 </div>
                                             </div>
-
                                         </div>
-
                                     </div>
-                                );
-                            }
-                        )}
-
-                    </div>
-                )}
-
-            </div>
-
+                                )
+                            )}
+                        </div>
+                    )}
+                </div>
         </div>
     );
 }
