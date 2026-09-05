@@ -2,10 +2,9 @@ import {
   ProjectsBySectorChart,
   ProjectsRankingChart,
   CostVsExpenditureChart,
-  HealthDistributionChart,
+  RiskDistributionChart,
   DelayAnalysisChart,
   TopCostOverrunChart,
-  PerformanceSummaryChart,
   MonthlyTrendChart,
 } from "../../components/charts/SectorMinistryCharts";
 
@@ -71,16 +70,16 @@ function formatMonths(
   return `${safeNumber(value).toFixed(1)} mo`;
 }
 
-function healthClass(value: number): string {
-  if (value >= 75) {
+function riskClass(value: number): string {
+  if (value >= 85) {
     return "text-red-600";
   }
 
-  if (value >= 50) {
+  if (value >= 70) {
     return "text-orange-600";
   }
 
-  if (value >= 25) {
+  if (value >= 40) {
     return "text-yellow-600";
   }
 
@@ -160,8 +159,7 @@ export default function SectorMinistryAnalyticsPage() {
             </h1>
 
             <p className="mt-1 text-sm text-slate-500">
-              Descriptive, diagnostic and rule-based infrastructure
-              portfolio analytics.
+              Descriptive, diagnostic and ML-driven infrastructure portfolio analytics.
             </p>
           </div>
 
@@ -597,20 +595,20 @@ export default function SectorMinistryAnalyticsPage() {
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-2">
                   <div className="text-sm font-semibold text-slate-800">
-                    Project Health by{" "}
+                    ML Risk Distribution by{" "}
                     {viewBy === "sector" ? "Sector" : "Ministry"}
                   </div>
 
                   <div className="text-xs text-slate-400">
-                    Rule-based V1 health distribution; not the ML risk model.
+                    PAIMANA ML overall-risk distribution across the selected portfolio.
                   </div>
                 </div>
 
-                <HealthDistributionChart
+                <RiskDistributionChart
                   data={
                     viewBy === "sector"
-                      ? data.health_analysis.sector
-                      : data.health_analysis.ministry
+                      ? data.risk_analysis.sector
+                      : data.risk_analysis.ministry
                   }
                 />
               </div>
@@ -641,15 +639,13 @@ export default function SectorMinistryAnalyticsPage() {
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-2">
                   <div className="text-sm font-semibold text-slate-800">
-                    Top{" "}
-                    {viewBy === "sector"
-                      ? "Sectors"
-                      : "Ministries"}{" "}
+                    Top 5{" "}
+                    {viewBy === "sector" ? "Sectors" : "Ministries"}{" "}
                     by Cost Overrun
                   </div>
 
                   <div className="text-xs text-slate-400">
-                    Average observed cost-overrun percentage.
+                    Highest average observed cost-overrun percentages.
                   </div>
                 </div>
 
@@ -659,23 +655,33 @@ export default function SectorMinistryAnalyticsPage() {
                       ? data.cost_analysis.sector
                       : data.cost_analysis.ministry
                   }
+                  limit={5}
+                  offset={0}
                 />
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-2">
                   <div className="text-sm font-semibold text-slate-800">
-                    {viewBy === "sector"
-                      ? "Sector Performance Summary"
-                      : "Ministry Performance Summary"}
+                    Next 5{" "}
+                    {viewBy === "sector" ? "Sectors" : "Ministries"}{" "}
+                    by Cost Overrun
                   </div>
 
                   <div className="text-xs text-slate-400">
-                    Relative progress, expenditure and data-quality indicators.
+                    Remaining high-overrun groups in the selected portfolio.
                   </div>
                 </div>
 
-                <PerformanceSummaryChart data={summaryRows} />
+                <TopCostOverrunChart
+                  data={
+                    viewBy === "sector"
+                      ? data.cost_analysis.sector
+                      : data.cost_analysis.ministry
+                  }
+                  limit={5}
+                  offset={5}
+                />
               </div>
             </div>
 
@@ -758,8 +764,8 @@ export default function SectorMinistryAnalyticsPage() {
                         <td className="px-4 py-3 text-xs font-medium text-slate-700">
                           {row.total_cost_change_exposure_cr != null
                             ? formatCrore(
-                                row.total_cost_change_exposure_cr,
-                              )
+                              row.total_cost_change_exposure_cr,
+                            )
                             : "—"}
                         </td>
                       </tr>
@@ -831,82 +837,10 @@ export default function SectorMinistryAnalyticsPage() {
 
                   {data.early_warnings.length === 0 && (
                     <div className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-700">
-                      No rule-based warnings for the selected portfolio.
+                      No active ML-generated warnings for the selected portfolio.
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
-
-            {/* Health analysis */}
-            <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-100 px-4 py-3">
-                <div className="text-sm font-semibold text-slate-800">
-                  V1 Project Health Distribution
-                </div>
-
-                <div className="mt-0.5 text-xs text-slate-400">
-                  Rule-based health score; not the ML risk model.
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[800px] text-left">
-                  <thead className="border-b border-slate-100 bg-slate-50">
-                    <tr>
-                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        Group
-                      </th>
-
-                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
-                        Low
-                      </th>
-
-                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-yellow-600">
-                        Moderate
-                      </th>
-
-                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-orange-600">
-                        High
-                      </th>
-
-                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-red-600">
-                        Very High
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100">
-                    {(viewBy === "sector"
-                      ? data.health_analysis.sector
-                      : data.health_analysis.ministry
-                    )
-                      .slice(0, 12)
-                      .map((row) => (
-                        <tr key={row.sector ?? row.ministry ?? "unknown"}>
-                          <td className="px-4 py-3 text-xs font-medium text-slate-800">
-                            {row.sector ?? row.ministry ?? "Unknown"}
-                          </td>
-
-                          <td className="px-4 py-3 text-xs font-semibold text-emerald-600">
-                            {formatPct(row["Low Risk"])}
-                          </td>
-
-                          <td className="px-4 py-3 text-xs font-semibold text-yellow-600">
-                            {formatPct(row["Moderate Risk"])}
-                          </td>
-
-                          <td className="px-4 py-3 text-xs font-semibold text-orange-600">
-                            {formatPct(row["High Risk"])}
-                          </td>
-
-                          <td className="px-4 py-3 text-xs font-semibold text-red-600">
-                            {formatPct(row["Very High Risk"])}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
               </div>
             </div>
 
@@ -918,7 +852,7 @@ export default function SectorMinistryAnalyticsPage() {
                 </div>
 
                 <div className="mt-0.5 text-xs text-slate-400">
-                  Highest V1 health-score exposure in the selected portfolio.
+                  Highest PAIMANA ML overall-risk exposure in the selected portfolio.
                 </div>
               </div>
 
@@ -939,7 +873,7 @@ export default function SectorMinistryAnalyticsPage() {
                       </th>
 
                       <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        Health
+                        ML Risk
                       </th>
 
                       <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -978,15 +912,17 @@ export default function SectorMinistryAnalyticsPage() {
 
                         <td className="px-4 py-3">
                           <div
-                            className={`text-sm font-semibold ${healthClass(
-                              project.health_score_v1,
+                            className={`text-sm font-semibold ${riskClass(
+                              project.overall_risk_score,
                             )}`}
                           >
-                            {project.health_score_v1}
+                            {Number(
+                              project.overall_risk_score,
+                            ).toFixed(1)}
                           </div>
 
                           <div className="text-[10px] text-slate-400">
-                            {project.health_band_v1}
+                            {project.risk_level}
                           </div>
                         </td>
 

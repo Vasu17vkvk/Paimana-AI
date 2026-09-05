@@ -1,8 +1,7 @@
-"""PAIMANA AI Sector / Ministry Analytics V1 service.
+"""PAIMANA AI Sector / Ministry Analytics production service.
 
-The V7 Colab notebook is the business-rule reference. This production module
-implements those rules as reusable backend functions; it never executes the
-notebook and never imports the V2 ML engine.
+Uses PostgreSQL project and monitoring data together with the existing
+production PAIMANA ML engine for predictive risk analytics.
 """
 from __future__ import annotations
 
@@ -16,6 +15,12 @@ import pandas as pd
 from sqlalchemy import text
 
 from app.extensions import db
+
+from app.ml import engine
+
+ML_RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+ML_WARNING_PRIORITIES = ["NONE", "HIGH", "IMMEDIATE"]
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 MASTER_FILE = "01_PROJECT_MASTER_CLEANED.csv"
@@ -35,16 +40,7 @@ REQUIRED_MONTHLY_COLUMNS = {
     "expenditure_cr", "delay_days", "cost_overrun_pct",
 }
 REQUIRED_FLASH_COLUMNS = {"project_code", "snapshot_month", "physical_progress_pct"}
-HEALTH_BANDS = ["Low Risk", "Moderate Risk", "High Risk", "Very High Risk"]
-HEALTH_WEIGHTS = {
-    "is_delayed": 30,
-    "has_cost_overrun": 25,
-    "extreme_schedule_change_flag": 10,
-    "extreme_cost_overrun_flag": 10,
-    "flash_progress_stagnation_flag": 10,
-    "flash_low_progress_flag": 10,
-    "data_quality_issue": 5,
-}
+
 
 
 def _require_columns(df: pd.DataFrame, required: set[str], source: str) -> None:
@@ -59,7 +55,12 @@ def _read_csv(path: Path) -> pd.DataFrame:
 
 def load_data(
     data_dir: Optional[str | Path] = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     """
     Load Sector / Ministry Analytics data from PostgreSQL.
 
@@ -67,6 +68,7 @@ def load_data(
         project_master
         paimana_monthly_history
         flash_modern_history
+        paimana_ml_ready
 
     The data_dir argument is retained for compatibility with
     the existing function signature, but production data is
@@ -111,7 +113,14 @@ def load_data(
         "flash_modern_history"
     )
 
+    ml_ready = load_table(
+        "paimana_ml_ready"
+    )
+
+    # ------------------------------------------------------------------
     # Validate required columns
+    # ------------------------------------------------------------------
+
     _require_columns(
         master,
         REQUIRED_MASTER_COLUMNS,
@@ -130,7 +139,20 @@ def load_data(
         "flash_modern_history",
     )
 
+    _require_columns(
+        ml_ready,
+        {
+            "project_code",
+            "snapshot_year",
+            "snapshot_month_num",
+        },
+        "paimana_ml_ready",
+    )
+
+    # ------------------------------------------------------------------
     # Date conversions
+    # ------------------------------------------------------------------
+
     for col in [
         "original_end_date",
         "revised_end_date",
@@ -153,7 +175,10 @@ def load_data(
         errors="coerce",
     )
 
+    # ------------------------------------------------------------------
     # Numeric conversions for master
+    # ------------------------------------------------------------------
+
     master_numeric = [
         "original_cost_cr",
         "revised_cost_cr",
@@ -177,7 +202,10 @@ def load_data(
                 errors="coerce",
             )
 
-    # Integer flags
+    # ------------------------------------------------------------------
+    # Integer flags for master
+    # ------------------------------------------------------------------
+
     for col in [
         "is_delayed",
         "has_cost_overrun",
@@ -196,7 +224,10 @@ def load_data(
                 .astype(int)
             )
 
+    # ------------------------------------------------------------------
     # Monthly numeric columns
+    # ------------------------------------------------------------------
+
     for col in [
         "revised_cost_cr",
         "expenditure_cr",
@@ -212,7 +243,10 @@ def load_data(
                 errors="coerce",
             )
 
+    # ------------------------------------------------------------------
     # FLASH numeric columns
+    # ------------------------------------------------------------------
+
     for col in [
         "physical_progress_pct",
         "expenditure_change_cr",
@@ -225,27 +259,53 @@ def load_data(
                 errors="coerce",
             )
 
-    # Derived columns
-    master["analytics_cost_cr"] = (
-        master["revised_cost_analytical_cr"]
-        .fillna(master["original_cost_cr"])
-    )
+    # ------------------------------------------------------------------
+    # ML-ready numeric columns
+    # ------------------------------------------------------------------
 
-    monthly["delay_flag"] = (
-        monthly["delay_days"]
-        .fillna(0)
-        .gt(0)
-        .astype(int)
-    )
+    ml_numeric = [
+        "original_cost_cr",
+        "revised_cost_cr",
+        "expenditure_cr",
+        "cost_overrun_cr",
+        "cost_overrun_pct",
+        "delay_days",
+        "schedule_change_days",
+        "expenditure_change_cr_paimana",
+        "revision_cost_change_cr",
+        "original_cost",
+        "revised_cost",
+        "cumulative_expenditure",
+        "physical_progress_pct",
+        "expenditure_change_cr_flash",
+        "progress_change_pct",
+        "previous_expenditure_cr",
+        "previous_progress_pct",
+        "flash_history_count",
+        "future_delay_flag",
+        "snapshot_year",
+        "snapshot_month_num",
+        "original_end_year",
+        "original_end_month",
+        "revised_end_year",
+        "revised_end_month",
+        "sector_freq",
+        "ministry_freq",
+        "state_freq",
+        "implementing_agency_freq",
+    ]
 
-    monthly["cost_overrun_flag"] = (
-        monthly["cost_overrun_pct"]
-        .fillna(0)
-        .gt(0)
-        .astype(int)
-    )
+    for col in ml_numeric:
+        if col in ml_ready.columns:
+            ml_ready[col] = pd.to_numeric(
+                ml_ready[col],
+                errors="coerce",
+            )
 
+    # ------------------------------------------------------------------
     # Clean invalid records
+    # ------------------------------------------------------------------
+
     monthly = monthly.dropna(
         subset=[
             "project_code",
@@ -260,23 +320,41 @@ def load_data(
         ]
     ).copy()
 
+    ml_ready = ml_ready.dropna(
+        subset=[
+            "project_code",
+        ]
+    ).copy()
+
+    # ------------------------------------------------------------------
     # Normalize project codes
+    # ------------------------------------------------------------------
+
     master["project_code"] = (
         master["project_code"]
         .astype(str)
+        .str.strip()
     )
 
     monthly["project_code"] = (
         monthly["project_code"]
         .astype(str)
+        .str.strip()
     )
 
     flash["project_code"] = (
         flash["project_code"]
         .astype(str)
+        .str.strip()
     )
 
-    return master, monthly, flash
+    ml_ready["project_code"] = (
+        ml_ready["project_code"]
+        .astype(str)
+        .str.strip()
+    )
+
+    return master, monthly, flash, ml_ready
 
 def get_filter_options(
     data_dir: Optional[str | Path] = None,
@@ -288,7 +366,7 @@ def get_filter_options(
     selected filters so dropdowns do not disappear after filtering.
     """
 
-    master, monthly, _flash = load_data(data_dir)
+    master, monthly, _flash, _ml_ready = load_data(data_dir)
 
     def clean_values(
         series: pd.Series,
@@ -388,49 +466,6 @@ def _normalize_filter(value: Optional[str], all_value: str) -> Optional[str]:
     value = str(value).strip()
     return None if not value or value == all_value else value
 
-
-def calculate_project_health_v1(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
-    r = row if isinstance(row, dict) else row.to_dict()
-
-    def flag(name: str) -> int:
-        try:
-            return int(float(r.get(name, 0) or 0))
-        except (TypeError, ValueError):
-            return 0
-
-    data_issue = 0 if str(r.get("data_quality_flag", "OK")) == "OK" else 1
-    score = min(100, max(0, sum(flag(k) * v for k, v in HEALTH_WEIGHTS.items() if k != "data_quality_issue") + data_issue * 5))
-    if score < 25:
-        band = "Low Risk"
-    elif score < 50:
-        band = "Moderate Risk"
-    elif score < 75:
-        band = "High Risk"
-    else:
-        band = "Very High Risk"
-
-    drivers = []
-    for field, label in [
-        ("is_delayed", "Delayed"), ("has_cost_overrun", "Cost overrun"),
-        ("extreme_schedule_change_flag", "Extreme schedule change"),
-        ("extreme_cost_overrun_flag", "Extreme cost overrun"),
-        ("flash_progress_stagnation_flag", "Progress stagnation"),
-        ("flash_low_progress_flag", "Low physical progress"),
-    ]:
-        if flag(field):
-            drivers.append(label)
-    if data_issue:
-        drivers.append("Data quality issue")
-    return {"health_score": int(score), "health_band": band, "drivers": drivers}
-
-
-def _add_health(master: pd.DataFrame) -> pd.DataFrame:
-    result = master.copy()
-    values = result.apply(calculate_project_health_v1, axis=1)
-    result["health_score_v1"] = values.apply(lambda x: x["health_score"])
-    result["health_band_v1"] = values.apply(lambda x: x["health_band"])
-    result["health_drivers_v1"] = values.apply(lambda x: x["drivers"])
-    return result
 
 
 def _master_membership(master, monthly, *, ministry, sector, state, snapshot_month, financial_year_filter):
@@ -534,74 +569,442 @@ def safe_divide(numerator, denominator) -> float:
 
 
 def _portfolio_kpis(metrics_df: pd.DataFrame) -> dict[str, Any]:
-    n = int(metrics_df["project_code"].nunique()) if not metrics_df.empty else 0
-    delayed = int(metrics_df["is_delayed"].fillna(0).sum()) if not metrics_df.empty else 0
-    overrun = int(metrics_df["has_cost_overrun"].fillna(0).sum()) if not metrics_df.empty else 0
-    data_issues = int(metrics_df["data_quality_flag"].fillna("OK").ne("OK").sum()) if not metrics_df.empty else 0
+    if metrics_df.empty:
+        return {
+            "total_projects": 0,
+            "total_original_cost_cr": 0.0,
+            "total_revised_cost_cr": 0.0,
+            "total_analytical_cost_cr": 0.0,
+            "total_expenditure_cr": 0.0,
+            "total_cost_change_exposure_cr": 0.0,
+            "total_cost_increase_cr": 0.0,
+            "cost_overrun_projects": 0,
+            "projects_with_cost_overrun": 0,
+            "cost_overrun_rate_pct": 0.0,
+            "avg_cost_overrun_pct": 0.0,
+            "delayed_projects": 0,
+            "delay_rate_pct": 0.0,
+            "avg_delay_months": 0.0,
+            "data_quality": {
+                "projects_flagged": 0,
+                "rate_pct": 0.0,
+                "definition": (
+                    "Projects where master data_quality_flag is non-OK; "
+                    "this is not a count of all missing fields."
+                ),
+            },
+        }
 
-    def sum_col(name):
-        return float(metrics_df[name].sum(min_count=1)) if not metrics_df.empty else 0.0
-    def mean_col(name):
-        return float(metrics_df[name].mean()) if not metrics_df.empty else 0.0
+    metrics_df = metrics_df.copy()
 
-    exposure = validated_cost_change_exposure(metrics_df)
+    # ------------------------------------------------------------
+    # Descriptive portfolio fields
+    # ------------------------------------------------------------
+
+    if "analytics_cost_cr" not in metrics_df.columns:
+        if "revised_cost_analytical_cr" in metrics_df.columns:
+            analytical = pd.to_numeric(
+                metrics_df["revised_cost_analytical_cr"],
+                errors="coerce",
+            )
+        else:
+            analytical = pd.Series(
+                np.nan,
+                index=metrics_df.index,
+            )
+
+        if "original_cost_cr" in metrics_df.columns:
+            original = pd.to_numeric(
+                metrics_df["original_cost_cr"],
+                errors="coerce",
+            )
+        else:
+            original = pd.Series(
+                np.nan,
+                index=metrics_df.index,
+            )
+
+        metrics_df["analytics_cost_cr"] = (
+            analytical.fillna(original)
+        )
+
+    if "final_expenditure_cr" not in metrics_df.columns:
+        if "expenditure_cr" in metrics_df.columns:
+            metrics_df["final_expenditure_cr"] = pd.to_numeric(
+                metrics_df["expenditure_cr"],
+                errors="coerce",
+            )
+        else:
+            metrics_df["final_expenditure_cr"] = 0.0
+
+    for column in [
+        "original_cost_cr",
+        "revised_cost_cr",
+        "analytics_cost_cr",
+        "final_expenditure_cr",
+        "cost_overrun_pct",
+        "delay_months",
+        "is_delayed",
+        "has_cost_overrun",
+    ]:
+        if column not in metrics_df.columns:
+            metrics_df[column] = 0.0
+
+        metrics_df[column] = pd.to_numeric(
+            metrics_df[column],
+            errors="coerce",
+        )
+
+    if "data_quality_flag" not in metrics_df.columns:
+        metrics_df["data_quality_flag"] = "OK"
+
+    n = int(
+        metrics_df["project_code"].nunique()
+    )
+
+    delayed = int(
+        metrics_df["is_delayed"]
+        .fillna(0)
+        .sum()
+    )
+
+    overrun = int(
+        metrics_df["has_cost_overrun"]
+        .fillna(0)
+        .sum()
+    )
+
+    data_issues = int(
+        metrics_df["data_quality_flag"]
+        .fillna("OK")
+        .ne("OK")
+        .sum()
+    )
+
+    def sum_col(name: str) -> float:
+        return float(
+            metrics_df[name].sum(
+                min_count=1
+            )
+        )
+
+    def mean_col(name: str) -> float:
+        value = metrics_df[name].mean()
+
+        return (
+            float(value)
+            if pd.notna(value)
+            else 0.0
+        )
+
+    exposure = validated_cost_change_exposure(
+        metrics_df
+    )
+
     return {
         "total_projects": n,
-        "total_original_cost_cr": round(sum_col("original_cost_cr"), 2),
-        "total_revised_cost_cr": round(sum_col("revised_cost_cr"), 2),
-        "total_analytical_cost_cr": round(sum_col("analytics_cost_cr"), 2),
-        "total_expenditure_cr": round(sum_col("final_expenditure_cr"), 2),
-        "total_cost_change_exposure_cr": round(exposure, 2),
-        "total_cost_increase_cr": round(exposure, 2),
+        "total_original_cost_cr": round(
+            sum_col("original_cost_cr"),
+            2,
+        ),
+        "total_revised_cost_cr": round(
+            sum_col("revised_cost_cr"),
+            2,
+        ),
+        "total_analytical_cost_cr": round(
+            sum_col("analytics_cost_cr"),
+            2,
+        ),
+        "total_expenditure_cr": round(
+            sum_col("final_expenditure_cr"),
+            2,
+        ),
+        "total_cost_change_exposure_cr": round(
+            exposure,
+            2,
+        ),
+        "total_cost_increase_cr": round(
+            exposure,
+            2,
+        ),
         "cost_overrun_projects": overrun,
         "projects_with_cost_overrun": overrun,
-        "cost_overrun_rate_pct": round(safe_divide(overrun, n) * 100, 2),
-        "avg_cost_overrun_pct": round(mean_col("cost_overrun_pct"), 2),
+        "cost_overrun_rate_pct": round(
+            safe_divide(
+                overrun,
+                n,
+            )
+            * 100,
+            2,
+        ),
+        "avg_cost_overrun_pct": round(
+            mean_col("cost_overrun_pct"),
+            2,
+        ),
         "delayed_projects": delayed,
-        "delay_rate_pct": round(safe_divide(delayed, n) * 100, 2),
-        "avg_delay_months": round(mean_col("delay_months"), 2),
+        "delay_rate_pct": round(
+            safe_divide(
+                delayed,
+                n,
+            )
+            * 100,
+            2,
+        ),
+        "avg_delay_months": round(
+            mean_col("delay_months"),
+            2,
+        ),
         "data_quality": {
             "projects_flagged": data_issues,
-            "rate_pct": round(safe_divide(data_issues, n) * 100, 2),
-            "definition": "Projects where master data_quality_flag is non-OK; this is not a count of all missing fields.",
+            "rate_pct": round(
+                safe_divide(
+                    data_issues,
+                    n,
+                )
+                * 100,
+                2,
+            ),
+            "definition": (
+                "Projects where master data_quality_flag "
+                "is non-OK; this is not a count of all "
+                "missing fields."
+            ),
         },
     }
 
 
-def _portfolio_summary(df: pd.DataFrame, group_column: str, temporal: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-    metrics_df = _temporal_metrics_frame(df, temporal) if temporal is not None else df.copy()
-    cols = [group_column, "total_projects", "total_original_cost_cr", "total_revised_cost_cr", "total_analytical_cost_cr", "total_expenditure_cr", "delayed_projects", "cost_overrun_projects", "avg_delay_months", "avg_delay_days", "avg_cost_overrun_pct", "data_quality_flagged_projects", "avg_health_score_v1", "delay_rate_pct", "cost_overrun_rate_pct", "data_quality_rate_pct", "total_cost_change_exposure_cr", "total_cost_increase_cr", "expenditure_to_analytical_cost_pct"]
+def _portfolio_summary(
+    df: pd.DataFrame,
+    group_column: str,
+    temporal: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    metrics_df = (
+        _temporal_metrics_frame(df, temporal)
+        if temporal is not None
+        else df.copy()
+    )
+
+    cols = [
+        group_column,
+        "total_projects",
+        "total_original_cost_cr",
+        "total_revised_cost_cr",
+        "total_analytical_cost_cr",
+        "total_expenditure_cr",
+        "delayed_projects",
+        "cost_overrun_projects",
+        "avg_delay_months",
+        "avg_delay_days",
+        "avg_cost_overrun_pct",
+        "data_quality_flagged_projects",
+        "delay_rate_pct",
+        "cost_overrun_rate_pct",
+        "data_quality_rate_pct",
+        "total_cost_change_exposure_cr",
+        "total_cost_increase_cr",
+        "expenditure_to_analytical_cost_pct",
+    ]
+
     if metrics_df.empty:
         return pd.DataFrame(columns=cols)
 
     metrics_df = metrics_df.copy()
-    original = pd.to_numeric(metrics_df["original_cost_cr"], errors="coerce")
-    revised = pd.to_numeric(metrics_df["revised_cost_cr"], errors="coerce")
-    valid = original.notna() & revised.notna() & (original > 0) & (revised > 0) & (revised >= original)
-    metrics_df["_cost_change_exposure_cr"] = 0.0
-    metrics_df.loc[valid, "_cost_change_exposure_cr"] = revised[valid] - original[valid]
 
-    summary = metrics_df.groupby(group_column, dropna=False).agg(
-        total_projects=("project_code", "nunique"),
-        total_original_cost_cr=("original_cost_cr", "sum"),
-        total_revised_cost_cr=("revised_cost_cr", "sum"),
-        total_analytical_cost_cr=("analytics_cost_cr", "sum"),
-        total_expenditure_cr=("final_expenditure_cr", "sum"),
-        delayed_projects=("is_delayed", "sum"),
-        cost_overrun_projects=("has_cost_overrun", "sum"),
-        avg_delay_months=("delay_months", "mean"),
-        avg_delay_days=("delay_days", "mean"),
-        avg_cost_overrun_pct=("cost_overrun_pct", "mean"),
-        data_quality_flagged_projects=("data_quality_flag", lambda x: x.fillna("OK").ne("OK").sum()),
-        avg_health_score_v1=("health_score_v1", "mean"),
-        total_cost_change_exposure_cr=("_cost_change_exposure_cr", "sum"),
-    ).reset_index()
-    summary["delay_rate_pct"] = np.where(summary["total_projects"] > 0, summary["delayed_projects"] / summary["total_projects"] * 100, 0)
-    summary["cost_overrun_rate_pct"] = np.where(summary["total_projects"] > 0, summary["cost_overrun_projects"] / summary["total_projects"] * 100, 0)
-    summary["data_quality_rate_pct"] = np.where(summary["total_projects"] > 0, summary["data_quality_flagged_projects"] / summary["total_projects"] * 100, 0)
-    summary["total_cost_increase_cr"] = summary["total_cost_change_exposure_cr"]
-    summary["expenditure_to_analytical_cost_pct"] = np.where(summary["total_analytical_cost_cr"] > 0, summary["total_expenditure_cr"] / summary["total_analytical_cost_cr"] * 100, 0.0)
-    return summary.sort_values("total_projects", ascending=False).reset_index(drop=True)
+    # ------------------------------------------------------------
+    # Normalize required descriptive fields.
+    # These are descriptive portfolio metrics, not ML risk rules.
+    # ------------------------------------------------------------
+
+    if "analytics_cost_cr" not in metrics_df.columns:
+        analytical = pd.to_numeric(
+            metrics_df.get("revised_cost_analytical_cr"),
+            errors="coerce",
+        )
+
+        original = pd.to_numeric(
+            metrics_df.get("original_cost_cr"),
+            errors="coerce",
+        )
+
+        metrics_df["analytics_cost_cr"] = (
+            analytical
+            if analytical is not None
+            else original
+        )
+
+        if (
+            "revised_cost_analytical_cr" in metrics_df.columns
+        ):
+            metrics_df["analytics_cost_cr"] = (
+                analytical.fillna(original)
+            )
+        else:
+            metrics_df["analytics_cost_cr"] = original
+
+    if "final_expenditure_cr" not in metrics_df.columns:
+        if "expenditure_cr" in metrics_df.columns:
+            metrics_df["final_expenditure_cr"] = pd.to_numeric(
+                metrics_df["expenditure_cr"],
+                errors="coerce",
+            )
+        else:
+            metrics_df["final_expenditure_cr"] = 0.0
+
+    for column in [
+        "original_cost_cr",
+        "revised_cost_cr",
+        "analytics_cost_cr",
+        "final_expenditure_cr",
+        "is_delayed",
+        "has_cost_overrun",
+        "delay_months",
+        "delay_days",
+        "cost_overrun_pct",
+    ]:
+        if column in metrics_df.columns:
+            metrics_df[column] = pd.to_numeric(
+                metrics_df[column],
+                errors="coerce",
+            )
+
+    if "data_quality_flag" not in metrics_df.columns:
+        metrics_df["data_quality_flag"] = "OK"
+
+    original = pd.to_numeric(
+        metrics_df["original_cost_cr"],
+        errors="coerce",
+    )
+
+    revised = pd.to_numeric(
+        metrics_df["revised_cost_cr"],
+        errors="coerce",
+    )
+
+    valid = (
+        original.notna()
+        & revised.notna()
+        & (original > 0)
+        & (revised > 0)
+        & (revised >= original)
+    )
+
+    metrics_df["_cost_change_exposure_cr"] = 0.0
+
+    metrics_df.loc[
+        valid,
+        "_cost_change_exposure_cr",
+    ] = (
+        revised.loc[valid]
+        - original.loc[valid]
+    )
+
+    summary = (
+        metrics_df
+        .groupby(
+            group_column,
+            dropna=False,
+        )
+        .agg(
+            total_projects=(
+                "project_code",
+                "nunique",
+            ),
+            total_original_cost_cr=(
+                "original_cost_cr",
+                "sum",
+            ),
+            total_revised_cost_cr=(
+                "revised_cost_cr",
+                "sum",
+            ),
+            total_analytical_cost_cr=(
+                "analytics_cost_cr",
+                "sum",
+            ),
+            total_expenditure_cr=(
+                "final_expenditure_cr",
+                "sum",
+            ),
+            delayed_projects=(
+                "is_delayed",
+                "sum",
+            ),
+            cost_overrun_projects=(
+                "has_cost_overrun",
+                "sum",
+            ),
+            avg_delay_months=(
+                "delay_months",
+                "mean",
+            ),
+            avg_delay_days=(
+                "delay_days",
+                "mean",
+            ),
+            avg_cost_overrun_pct=(
+                "cost_overrun_pct",
+                "mean",
+            ),
+            data_quality_flagged_projects=(
+                "data_quality_flag",
+                lambda x: (
+                    x.fillna("OK")
+                    .ne("OK")
+                    .sum()
+                ),
+            ),
+            total_cost_change_exposure_cr=(
+                "_cost_change_exposure_cr",
+                "sum",
+            ),
+        )
+        .reset_index()
+    )
+
+    summary["delay_rate_pct"] = np.where(
+        summary["total_projects"] > 0,
+        summary["delayed_projects"]
+        / summary["total_projects"]
+        * 100,
+        0.0,
+    )
+
+    summary["cost_overrun_rate_pct"] = np.where(
+        summary["total_projects"] > 0,
+        summary["cost_overrun_projects"]
+        / summary["total_projects"]
+        * 100,
+        0.0,
+    )
+
+    summary["data_quality_rate_pct"] = np.where(
+        summary["total_projects"] > 0,
+        summary["data_quality_flagged_projects"]
+        / summary["total_projects"]
+        * 100,
+        0.0,
+    )
+
+    summary["total_cost_increase_cr"] = (
+        summary["total_cost_change_exposure_cr"]
+    )
+
+    summary["expenditure_to_analytical_cost_pct"] = np.where(
+        summary["total_analytical_cost_cr"] > 0,
+        summary["total_expenditure_cr"]
+        / summary["total_analytical_cost_cr"]
+        * 100,
+        0.0,
+    )
+
+    return (
+        summary
+        .sort_values(
+            "total_projects",
+            ascending=False,
+        )
+        .reset_index(drop=True)
+    )
 
 
 def _delay_analysis(summary, group_column):
@@ -612,14 +1015,75 @@ def _cost_analysis(summary, group_column):
     return summary[[group_column, "total_projects", "cost_overrun_projects", "cost_overrun_rate_pct", "avg_cost_overrun_pct", "total_cost_change_exposure_cr"]].sort_values("cost_overrun_rate_pct", ascending=False).reset_index(drop=True)
 
 
-def _health_analysis(df, group_column):
-    if df.empty:
-        return pd.DataFrame(columns=[group_column] + HEALTH_BANDS)
-    result = (pd.crosstab(df[group_column], df["health_band_v1"], normalize="index") * 100).reset_index()
-    for band in HEALTH_BANDS:
-        if band not in result.columns:
-            result[band] = 0.0
-    return result[[group_column] + HEALTH_BANDS]
+def _ml_risk_analysis(df: pd.DataFrame, group_column: str) -> pd.DataFrame:
+    """
+    Aggregate canonical ML risk levels by sector/ministry.
+
+    Expected ML columns:
+        overall_risk_score
+        risk_level
+
+    Risk levels come directly from the existing PAIMANA ML engine.
+    No V1 health score or hand-written risk thresholds are used here.
+    """
+
+    levels = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+    if df is None or df.empty:
+        return pd.DataFrame(
+            columns=[group_column] + levels
+        )
+
+    required = {
+        group_column,
+        "risk_level",
+    }
+
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            "ML risk analysis missing columns: "
+            + ", ".join(sorted(missing))
+        )
+
+    work = df[
+        [group_column, "risk_level"]
+    ].copy()
+
+    work[group_column] = (
+        work[group_column]
+        .fillna("Unknown")
+        .astype(str)
+        .str.strip()
+    )
+
+    work["risk_level"] = (
+        work["risk_level"]
+        .fillna("LOW")
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
+
+    result = (
+        pd.crosstab(
+            work[group_column],
+            work["risk_level"],
+            normalize="index",
+        )
+        * 100.0
+    ).reset_index()
+
+    for level in levels:
+        if level not in result.columns:
+            result[level] = 0.0
+
+    return result[
+        [group_column] + levels
+    ].sort_values(
+        levels,
+        ascending=False,
+    ).reset_index(drop=True)
 
 
 def _monthly_trends(monthly, *, ministry, sector, state_projects, financial_year_filter, snapshot_month):
@@ -705,20 +1169,99 @@ def _records(value):
     return _json_safe(value)
 
 
-def _priority_projects(df, limit=20):
-    if df.empty:
-        return []
-    cols = [
-        "project_code", "project_name", "sector", "ministry", "flash_state",
-        "analytics_cost_cr", "final_expenditure_cr", "delay_days", "delay_months",
-        "final_cost_overrun_pct", "cost_overrun_pct", "flash_latest_physical_progress",
-        "health_score_v1", "health_band_v1", "health_drivers_v1",
+def _priority_projects(
+    df: pd.DataFrame,
+    limit: int = 20,
+) -> pd.DataFrame:
+    """
+    Return highest-risk projects using the canonical ML outputs.
+
+    Priority is based on:
+        overall_risk_score DESC
+        cost_risk_score DESC
+        project_code ASC
+
+    No V1 health score is used.
+    """
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    columns = [
+        "project_code",
+        "project_name",
+        "sector",
+        "ministry",
+        "flash_state",
+        "analytics_cost_cr",
+        "final_expenditure_cr",
+        "delay_days",
+        "delay_months",
+        "cost_overrun_pct",
+        "final_cost_overrun_pct",
+        "flash_latest_physical_progress",
+        "future_delay_probability",
+        "future_progress_stall_probability",
+        "predicted_cost_overrun_pct",
+        "cost_risk_score",
+        "overall_risk_score",
+        "risk_level",
+        "early_warning_active",
+        "warning_priority",
     ]
-    cols = [c for c in cols if c in df.columns]
-    result = df.sort_values(["health_score_v1", "analytics_cost_cr"], ascending=[False, False]).head(limit)[cols].copy()
+
+    available_columns = [
+        column
+        for column in columns
+        if column in df.columns
+    ]
+
+    if "overall_risk_score" not in available_columns:
+        raise ValueError(
+            "ML priority analysis requires 'overall_risk_score'."
+        )
+
+    result = df[
+        available_columns
+    ].copy()
+
+    result["overall_risk_score"] = pd.to_numeric(
+        result["overall_risk_score"],
+        errors="coerce",
+    ).fillna(0.0)
+
+    if "cost_risk_score" in result.columns:
+        result["cost_risk_score"] = pd.to_numeric(
+            result["cost_risk_score"],
+            errors="coerce",
+        ).fillna(0.0)
+
+    sort_columns = ["overall_risk_score"]
+
+    ascending = [False]
+
+    if "cost_risk_score" in result.columns:
+        sort_columns.append("cost_risk_score")
+        ascending.append(False)
+
+    result = (
+        result
+        .sort_values(
+            sort_columns,
+            ascending=ascending,
+            kind="stable",
+        )
+        .head(limit)
+        .copy()
+    )
+
     if "flash_state" in result.columns:
         result["state"] = result["flash_state"]
-        result.drop(columns=["flash_state"], inplace=True)
+        result.drop(
+            columns=["flash_state"],
+            inplace=True,
+        )
+
     return result
 
 
@@ -741,63 +1284,229 @@ def generate_key_insights(selected_df, selected_summary, group_column):
     return insights
 
 
-def _warning_severity(value):
-    try: v = float(value)
-    except (TypeError, ValueError): return "moderate"
-    if v >= 75: return "immediate"
-    if v >= 50: return "high"
-    if v >= 25: return "moderate"
-    return "low"
+def _ml_early_warnings(
+    df: pd.DataFrame,
+    group_column: str,
+) -> list[dict[str, Any]]:
+    """
+    Aggregate canonical ML early-warning outputs.
 
+    The production ML engine is the source of truth for:
+        early_warning_active
+        early_warning_priority
+        early_warning_reasons
+        overall_risk_score
+    """
 
-def _make_warning(title, severity, message, metric, value, affected_projects, source_field):
-    return {"title": title, "severity": severity, "message": message, "metric": metric, "value": _json_safe(value), "affected_projects": int(affected_projects), "source_field": source_field, "reason": source_field}
-
-
-def generate_early_warnings(selected_df):
-    if selected_df.empty:
+    if df is None or df.empty:
         return []
-    warnings = []
-    n = int(selected_df["project_code"].nunique())
-    delayed = selected_df["is_delayed"].fillna(0).astype(int)
-    delay_rate = safe_divide(delayed.sum(), n) * 100
-    if delayed.sum():
-        warnings.append(_make_warning("High delay exposure", _warning_severity(delay_rate), f"{int(delayed.sum()):,} selected projects are delayed ({delay_rate:.2f}% of the selected portfolio).", "delay_rate_pct", round(delay_rate, 2), delayed.sum(), "is_delayed / delay_days"))
-    overrun = selected_df["has_cost_overrun"].fillna(0).astype(int)
-    overrun_rate = safe_divide(overrun.sum(), n) * 100
-    if overrun.sum():
-        warnings.append(_make_warning("Cost-overrun exposure", _warning_severity(overrun_rate), f"{int(overrun.sum()):,} selected projects have a cost overrun ({overrun_rate:.2f}% of the selected portfolio).", "cost_overrun_rate_pct", round(overrun_rate, 2), overrun.sum(), "has_cost_overrun / cost_overrun_pct"))
 
-    for field, title, metric in [
-        ("flash_progress_stagnation_flag", "Progress stagnation", "progress_stagnation_projects"),
-        ("flash_low_progress_flag", "Low physical progress", "low_progress_projects"),
-        ("extreme_schedule_change_flag", "Extreme schedule change", "extreme_schedule_change_projects"),
-        ("extreme_cost_overrun_flag", "Extreme cost overrun", "extreme_cost_overrun_projects"),
-    ]:
-        affected = int(pd.to_numeric(selected_df[field], errors="coerce").fillna(0).sum())
-        if affected:
-            warnings.append(_make_warning(title, "high", f"{affected:,} selected projects are flagged for {title.lower()}.", metric, affected, affected, field))
+    required = {
+        "project_code",
+        group_column,
+        "early_warning_active",
+        "early_warning_priority",
+        "early_warning_reasons",
+        "overall_risk_score",
+    }
 
-    if "expenditure_pct" in selected_df.columns and "flash_latest_physical_progress" in selected_df.columns:
-        exp_pct = pd.to_numeric(selected_df["expenditure_pct"], errors="coerce")
-        phys_pct = pd.to_numeric(selected_df["flash_latest_physical_progress"], errors="coerce")
-        gap = exp_pct - phys_pct
-        mask = exp_pct.notna() & phys_pct.notna() & (gap >= 25)
-        affected = int(mask.sum())
-        if affected:
-            warnings.append(_make_warning("Financial/physical divergence", "high", f"{affected:,} selected projects have expenditure percentage at least 25 percentage points ahead of physical progress.", "financial_physical_gap_pct_points", round(float(gap[mask].max()), 2), affected, "expenditure_pct - flash_latest_physical_progress"))
+    missing = required - set(df.columns)
 
-    data_issue = selected_df["data_quality_flag"].fillna("OK").ne("OK")
-    affected = int(data_issue.sum())
-    if affected:
-        rate = safe_divide(affected, n) * 100
-        warnings.append(_make_warning("Data quality concern", _warning_severity(rate), f"{affected:,} selected projects have a non-OK data-quality flag ({rate:.2f}%).", "data_quality_rate_pct", round(rate, 2), affected, "data_quality_flag"))
+    if missing:
+        raise ValueError(
+            "ML early-warning analysis missing columns: "
+            + ", ".join(sorted(missing))
+        )
 
-    high_health = pd.to_numeric(selected_df["health_score_v1"], errors="coerce") >= 75
-    affected = int(high_health.sum())
-    if affected:
-        warnings.append(_make_warning("High V1 health score exposure", "immediate", f"{affected:,} selected projects have a V1 Project Health Score of at least 75.", "health_score_v1", 75, affected, "health_score_v1"))
+    work = df.copy()
+
+    work["early_warning_active"] = (
+        work["early_warning_active"]
+        .fillna(False)
+        .astype(bool)
+    )
+
+    active = work[
+        work["early_warning_active"]
+    ].copy()
+
+    if active.empty:
+        return []
+
+    def normalize_priority(value: Any) -> str:
+        if pd.isna(value):
+            return "NONE"
+
+        return str(value).strip().upper()
+
+    def normalize_reasons(value: Any) -> list[str]:
+        if value is None:
+            return []
+
+        if isinstance(value, list):
+            return [
+                str(item).strip()
+                for item in value
+                if str(item).strip()
+            ]
+
+        if isinstance(value, tuple):
+            return [
+                str(item).strip()
+                for item in value
+                if str(item).strip()
+            ]
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                return []
+
+            return [value]
+
+        return [str(value).strip()]
+
+    active["early_warning_priority"] = (
+        active["early_warning_priority"]
+        .apply(normalize_priority)
+    )
+
+    active["early_warning_reasons"] = (
+        active["early_warning_reasons"]
+        .apply(normalize_reasons)
+    )
+
+    warnings: list[dict[str, Any]] = []
+
+    for group, group_df in active.groupby(
+        group_column,
+        dropna=False,
+    ):
+        project_count = int(
+            group_df["project_code"].nunique()
+        )
+
+        max_risk_value = pd.to_numeric(
+            group_df["overall_risk_score"],
+            errors="coerce",
+        ).max()
+
+        max_risk = (
+            float(max_risk_value)
+            if pd.notna(max_risk_value)
+            else 0.0
+        )
+
+        priority_counts = (
+            group_df["early_warning_priority"]
+            .value_counts()
+            .to_dict()
+        )
+
+        # Use the highest priority actually emitted by the ML engine.
+        priority = "NONE"
+
+        for candidate in (
+            "IMMEDIATE",
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "NONE",
+        ):
+            if int(
+                priority_counts.get(
+                    candidate,
+                    0,
+                )
+            ) > 0:
+                priority = candidate
+                break
+
+        priority_label = {
+            "IMMEDIATE": "Immediate",
+            "HIGH": "High",
+            "MEDIUM": "Medium",
+            "LOW": "Low",
+            "NONE": "None",
+        }.get(
+            priority,
+            priority.title(),
+        )
+
+        severity = {
+            "IMMEDIATE": "immediate",
+            "HIGH": "high",
+            "MEDIUM": "moderate",
+            "LOW": "low",
+            "NONE": "low",
+        }.get(
+            priority,
+            "low",
+        )
+
+        # Combine the actual ML reason outputs for the group.
+        reasons: list[str] = []
+
+        for reason_list in group_df[
+            "early_warning_reasons"
+        ]:
+            for reason in reason_list:
+                if reason not in reasons:
+                    reasons.append(reason)
+
+        reason_text = (
+            ", ".join(reasons)
+            if reasons
+            else "canonical_ml_early_warning"
+        )
+
+        warnings.append(
+            {
+                "title": (
+                    f"{priority_label} ML early warning"
+                ),
+                "severity": severity,
+                "message": (
+                    f"{project_count:,} projects in "
+                    f"{group} have an active ML early warning "
+                    f"(maximum risk score {max_risk:.2f})."
+                ),
+                "metric": "early_warning_active",
+                "value": project_count,
+                "affected_projects": project_count,
+                "source_field": "early_warning_active",
+                "reason": reason_text,
+                "group": str(group),
+                "priority": priority,
+            }
+        )
+
+    priority_order = {
+        "IMMEDIATE": 0,
+        "HIGH": 1,
+        "MEDIUM": 2,
+        "LOW": 3,
+        "NONE": 4,
+    }
+
+    warnings.sort(
+        key=lambda item: (
+            priority_order.get(
+                item.get("priority", "NONE"),
+                9,
+            ),
+            -float(
+                item.get(
+                    "value",
+                    0,
+                )
+            ),
+        )
+    )
+
     return warnings
+
 
 
 def generate_analytics(*, view_by="sector", ministry=None, sector=None, state=None, financial_year_filter=None, snapshot_month=None, data_dir=None):
@@ -810,13 +1519,197 @@ def generate_analytics(*, view_by="sector", ministry=None, sector=None, state=No
     if financial_year_filter in {None, "", "All Years"}: financial_year_filter = None
     if snapshot_month in {None, "", "All Months"}: snapshot_month = None
 
-    master, monthly, flash = load_data(data_dir)
-    master = _add_health(master)
-    selected = _master_membership(master, monthly, ministry=ministry, sector=sector, state=state, snapshot_month=snapshot_month, financial_year_filter=financial_year_filter)
+    master, monthly, flash, ml_ready = load_data(data_dir)
+
+    selected = _master_membership(
+        master,
+        monthly,
+        ministry=ministry,
+        sector=sector,
+        state=state,
+        snapshot_month=snapshot_month,
+        financial_year_filter=financial_year_filter,
+    )
     temporal = _temporal_snapshot(monthly, snapshot_month=snapshot_month, financial_year_filter=financial_year_filter)
     if temporal is not None:
         temporal = temporal[temporal["project_code"].isin(set(selected["project_code"]))].copy()
     metrics_df = _temporal_metrics_frame(selected, temporal) if temporal is not None else selected.copy()
+
+    # --------------------------------------------------------
+    # REAL ML PREDICTIONS
+    # Uses the canonical paimana_ml_ready feature table.
+    # --------------------------------------------------------
+
+    ml_ready["project_code"] = (
+        ml_ready["project_code"]
+        .astype(str)
+        .str.strip()
+    )
+
+    selected_project_codes = set(
+        selected["project_code"]
+        .astype(str)
+        .str.strip()
+    )
+
+    ml_scope = ml_ready[
+        ml_ready["project_code"].isin(selected_project_codes)
+    ].copy()
+
+    # Match the selected temporal snapshot where applicable.
+    if snapshot_month is not None:
+            try:
+                target_month = pd.to_datetime(
+                    snapshot_month,
+                    errors="coerce",
+                )
+
+                if pd.notna(target_month) and not ml_scope.empty:
+                    ml_year = pd.to_numeric(
+                        ml_scope["snapshot_year"],
+                        errors="coerce",
+                    )
+
+                    ml_month = pd.to_numeric(
+                        ml_scope["snapshot_month_num"],
+                        errors="coerce",
+                    )
+
+                    ml_period = (
+                        ml_year * 12
+                        + ml_month
+                    )
+
+                    target_period = (
+                        target_month.year * 12
+                        + target_month.month
+                    )
+
+                    # Use the latest ML-ready snapshot that is
+                    # available on or before the selected month.
+                    eligible = ml_scope[
+                        ml_period <= target_period
+                    ].copy()
+
+                    if not eligible.empty:
+                        latest_period = (
+                            pd.to_numeric(
+                                eligible["snapshot_year"],
+                                errors="coerce",
+                            )
+                            * 12
+                            + pd.to_numeric(
+                                eligible["snapshot_month_num"],
+                                errors="coerce",
+                            )
+                        ).max()
+
+                        ml_scope = eligible[
+                            (
+                                pd.to_numeric(
+                                    eligible["snapshot_year"],
+                                    errors="coerce",
+                                )
+                                * 12
+                                + pd.to_numeric(
+                                    eligible["snapshot_month_num"],
+                                    errors="coerce",
+                                )
+                            )
+                            == latest_period
+                        ].copy()
+                    else:
+                        # No ML-ready snapshot exists on or before
+                        # the selected month.
+                        ml_scope = pd.DataFrame(
+                            columns=ml_scope.columns
+                        )
+
+            except Exception:
+                ml_scope = pd.DataFrame(
+                    columns=ml_scope.columns
+                )
+
+    elif financial_year_filter:
+        fy_match = re.search(
+            r"(20\d{2})\s*-\s*(\d{2,4})",
+            str(financial_year_filter),
+        )
+
+        if fy_match:
+            fy_start = int(fy_match.group(1))
+            fy_end = (
+                int(f"20{fy_match.group(2)}")
+                if len(fy_match.group(2)) == 2
+                else int(fy_match.group(2))
+            )
+
+            ml_year = pd.to_numeric(
+                ml_scope["snapshot_year"],
+                errors="coerce",
+            )
+
+            ml_month = pd.to_numeric(
+                ml_scope["snapshot_month_num"],
+                errors="coerce",
+            )
+
+            ml_scope = ml_scope[
+                (
+                    (
+                        (ml_year == fy_start)
+                        & (ml_month >= 4)
+                    )
+                    |
+                    (
+                        (ml_year == fy_end)
+                        & (ml_month <= 3)
+                    )
+                )
+            ].copy()
+
+    # Keep the latest ML snapshot per project.
+    if not ml_scope.empty:
+        ml_scope = (
+            ml_scope.sort_values(
+                [
+                    "project_code",
+                    "snapshot_year",
+                    "snapshot_month_num",
+                ]
+            )
+            .drop_duplicates(
+                subset=["project_code"],
+                keep="last",
+            )
+            .copy()
+        )
+
+    # Run the production ML engine only on canonical ML-ready features.
+    ml_predictions_df = engine.predict_batch(
+        ml_scope,
+        batch_size=256,
+    )
+
+    if not ml_predictions_df.empty:
+        ml_predictions_df["project_code"] = (
+            ml_predictions_df["project_code"]
+            .astype(str)
+            .str.strip()
+        )
+
+        metrics_df["project_code"] = (
+            metrics_df["project_code"]
+            .astype(str)
+            .str.strip()
+        )
+
+        metrics_df = metrics_df.merge(
+            ml_predictions_df,
+            on="project_code",
+            how="left",
+            suffixes=("", "_ml"),
+        )
 
     group_column = "sector" if view_by == "sector" else "ministry"
     sector_summary = _portfolio_summary(selected, "sector", temporal)
@@ -828,24 +1721,53 @@ def generate_analytics(*, view_by="sector", ministry=None, sector=None, state=No
 
     return {
         "metadata": {
-            "version": "V1", "analytics_type": "descriptive_diagnostic_rule_based", "ml_predictions_included": False,
-            "source_datasets": [MASTER_FILE, MONTHLY_FILE, FLASH_FILE],
-            "health_score_label": "V1 Project Health Score",
-            "financial_year_definition": "Indian Apr-Mar financial year; FY 2025-26 = 2025-04-01 through 2026-03-31.",
-            "snapshot_month_definition": "Monthly observation month from 02_PAIMANA_MONTHLY_HISTORY_CLEAN.csv.",
-            "temporal_metric_definition": "When a financial year or snapshot month is active, time-varying KPI metrics use the latest monthly-history observation per project within the selected period.",
-            "health_definition": "Rule-based V1 Project Health Score; not an ML risk score or probability.",
-        },
+        "version": "ML",
+        "analytics_type": "descriptive_diagnostic_ml",
+        "ml_predictions_included": True,
+        "source_datasets": [
+            "project_master",
+            "paimana_monthly_history",
+            "flash_modern_history",
+            "paimana_ml_ready",
+        ],
+        "risk_score_label": "PAIMANA ML Overall Risk",
+        "risk_levels": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL",
+        ],
+        "financial_year_definition": "Indian Apr-Mar financial year; FY 2025-26 = 2025-04-01 through 2026-03-31.",
+        "snapshot_month_definition": "Monthly observation month from paimana_monthly_history.",
+        "temporal_metric_definition": "When a financial year or snapshot month is active, time-varying KPI metrics use the latest monthly-history observation per project within the selected period.",
+        "risk_definition": "Canonical PAIMANA ML risk output from the existing delay, progress-stall and cost models.",
+    },
         "filters": {"view_by": view_by, "ministry": ministry or "All Ministries", "sector": sector or "All Sectors", "state": state or "All States", "financial_year": financial_year_filter or "All Years", "snapshot_month": snapshot_month or "All Months"},
         "portfolio_summary": {"selected_view": view_by, "kpis": kpis, "rows": _records(selected_summary)},
         "sector_summary": _records(sector_summary),
         "ministry_summary": _records(ministry_summary),
         "cost_analysis": {"sector": _records(_cost_analysis(sector_summary, "sector")), "ministry": _records(_cost_analysis(ministry_summary, "ministry"))},
         "delay_analysis": {"sector": _records(_delay_analysis(sector_summary, "sector")), "ministry": _records(_delay_analysis(ministry_summary, "ministry"))},
-        "health_analysis": {"sector": _records(_health_analysis(metrics_df, "sector")), "ministry": _records(_health_analysis(metrics_df, "ministry"))},
+        "risk_analysis": {
+        "sector": _records(
+            _ml_risk_analysis(
+                metrics_df,
+                "sector",
+            )
+        ),
+        "ministry": _records(
+            _ml_risk_analysis(
+                metrics_df,
+                "ministry",
+            )
+        ),
+    },
         "monthly_trends": {"sector": _records(trends["sector"]), "ministry": _records(trends["ministry"])},
         "key_insights": generate_key_insights(metrics_df, selected_summary, group_column),
-        "early_warnings": generate_early_warnings(metrics_df),
+        "early_warnings": _ml_early_warnings(
+        metrics_df,
+        group_column,
+    ),
         "priority_projects": _records(_priority_projects(metrics_df)),
         "data_quality": kpis["data_quality"],
     }

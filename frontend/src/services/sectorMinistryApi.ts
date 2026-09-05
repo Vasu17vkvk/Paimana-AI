@@ -43,7 +43,7 @@ export interface SummaryRow {
   avg_cost_overrun_pct: number | null;
   avg_delay_days: number | null;
   avg_delay_months: number | null;
-  avg_health_score_v1?: number | null;
+
   cost_overrun_projects: number;
   cost_overrun_rate_pct: number;
   data_quality_flagged_projects?: number | null;
@@ -62,13 +62,13 @@ export interface SummaryRow {
   total_revised_cost_cr?: number | null;
 }
 
-export interface HealthRow {
+export interface RiskDistributionRow {
   sector?: string | null;
   ministry?: string | null;
-  "Low Risk": number | null;
-  "Moderate Risk": number | null;
-  "High Risk": number | null;
-  "Very High Risk": number | null;
+  LOW: number;
+  MEDIUM: number;
+  HIGH: number;
+  CRITICAL: number;
 }
 
 export interface MonthlyTrendRow {
@@ -97,32 +97,34 @@ export interface KeyInsight {
 }
 
 export interface EarlyWarning {
-  affected_projects: number;
+  title: string;
+  severity: "low" | "moderate" | "high" | "immediate";
   message: string;
   metric: string;
-  reason: string;
-  severity: "low" | "moderate" | "high" | "immediate";
-  source_field: string;
-  title: string;
   value: number;
+  affected_projects: number;
+  source_field: string;
+  reason: string;
+  group?: string;
 }
 
 export interface PriorityProject {
-  analytics_cost_cr: number | null;
-  cost_overrun_pct: number | null;
-  delay_days: number | null;
-  delay_months: number | null;
-  final_cost_overrun_pct: number | null;
-  final_expenditure_cr: number | null;
-  flash_latest_physical_progress: number | null;
-  health_band_v1: string;
-  health_drivers_v1: string[];
-  health_score_v1: number;
-  ministry: string;
   project_code: string;
   project_name: string;
-  sector: string;
-  state: string;
+  sector: string | null;
+  state: string | null;
+
+  overall_risk_score: number;
+  risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+  future_delay_probability: number;
+  future_progress_stall_probability: number;
+  predicted_cost_overrun_pct: number;
+  cost_risk_score: number;
+  early_warning_active: boolean;
+
+  delay_months: number;
+  cost_overrun_pct: number;
 }
 
 export interface PortfolioSummary {
@@ -169,9 +171,9 @@ export interface AnalyticsResponse {
     ministry: SummaryRow[];
   };
 
-  health_analysis: {
-    sector: HealthRow[];
-    ministry: HealthRow[];
+  risk_analysis: {
+    sector: RiskDistributionRow[];
+    ministry: RiskDistributionRow[];
   };
 
   monthly_trends: {

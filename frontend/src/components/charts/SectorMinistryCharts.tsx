@@ -29,11 +29,11 @@ const PIE_COLORS = [
   "#e11d48",
 ];
 
-const HEALTH_COLORS = {
+const RISK_COLORS = {
   low: "#22c55e",
-  moderate: "#f59e0b",
+  medium: "#f59e0b",
   high: "#f97316",
-  veryHigh: "#ef4444",
+  critical: "#ef4444",
 };
 
 function shortName(value: string, max = 24) {
@@ -147,7 +147,6 @@ export function ProjectsBySectorChart({
         </PieChart>
       </ResponsiveContainer>
 
-      {/* Donut center value */}
       <div
         className="pointer-events-none absolute flex flex-col items-center justify-center text-center"
         style={{
@@ -316,7 +315,7 @@ export function CostVsExpenditureChart({
   );
 }
 
-export function HealthDistributionChart({
+export function RiskDistributionChart({
   data,
 }: {
   data: AnalyticsRow[];
@@ -325,10 +324,10 @@ export function HealthDistributionChart({
     .slice(0, 12)
     .map((row) => ({
       name: labelFor(row),
-      low: Number(row["Low Risk"] ?? 0),
-      moderate: Number(row["Moderate Risk"] ?? 0),
-      high: Number(row["High Risk"] ?? 0),
-      veryHigh: Number(row["Very High Risk"] ?? 0),
+      low: Number(row.LOW ?? 0),
+      medium: Number(row.MEDIUM ?? 0),
+      high: Number(row.HIGH ?? 0),
+      critical: Number(row.CRITICAL ?? 0),
     }));
 
   return (
@@ -368,37 +367,39 @@ export function HealthDistributionChart({
         />
 
         <Tooltip
-          formatter={(value) => pct(Number(value ?? 0))}
+          formatter={(value) =>
+            pct(Number(value ?? 0))
+          }
         />
 
         <Legend />
 
         <Bar
           dataKey="low"
-          name="Low Risk"
-          stackId="health"
-          fill={HEALTH_COLORS.low}
+          name="LOW"
+          stackId="risk"
+          fill={RISK_COLORS.low}
         />
 
         <Bar
-          dataKey="moderate"
-          name="Moderate Risk"
-          stackId="health"
-          fill={HEALTH_COLORS.moderate}
+          dataKey="medium"
+          name="MEDIUM"
+          stackId="risk"
+          fill={RISK_COLORS.medium}
         />
 
         <Bar
           dataKey="high"
-          name="High Risk"
-          stackId="health"
-          fill={HEALTH_COLORS.high}
+          name="HIGH"
+          stackId="risk"
+          fill={RISK_COLORS.high}
         />
 
         <Bar
-          dataKey="veryHigh"
-          name="Very High Risk"
-          stackId="health"
-          fill={HEALTH_COLORS.veryHigh}
+          dataKey="critical"
+          name="CRITICAL"
+          stackId="risk"
+          fill={RISK_COLORS.critical}
         />
       </BarChart>
     </ChartShell>
@@ -471,7 +472,9 @@ export function DelayAnalysisChart({
               return pct(Number(value ?? 0));
             }
 
-            return Number(value ?? 0).toLocaleString("en-IN");
+            return Number(value ?? 0).toLocaleString(
+              "en-IN",
+            );
           }}
         />
 
@@ -509,8 +512,12 @@ export function DelayAnalysisChart({
 
 export function TopCostOverrunChart({
   data,
+  limit = 5,
+  offset = 0,
 }: {
   data: AnalyticsRow[];
+  limit?: number;
+  offset?: number;
 }) {
   const rows = data
     .filter((row) => row.avg_cost_overrun_pct != null)
@@ -519,7 +526,7 @@ export function TopCostOverrunChart({
         Number(b.avg_cost_overrun_pct ?? 0) -
         Number(a.avg_cost_overrun_pct ?? 0),
     )
-    .slice(0, 10)
+    .slice(offset, offset + limit)
     .map((row) => ({
       name: labelFor(row),
       avg_overrun: Number(row.avg_cost_overrun_pct ?? 0),
@@ -527,7 +534,7 @@ export function TopCostOverrunChart({
     }));
 
   return (
-    <ChartShell height={350}>
+    <ChartShell height={280}>
       <BarChart
         data={rows}
         layout="vertical"
@@ -545,29 +552,31 @@ export function TopCostOverrunChart({
 
         <XAxis
           type="number"
-          tickFormatter={(value) =>
-            `${Number(value ?? 0)}%`
-          }
+          tickFormatter={(value) => `${value}%`}
           tick={{ fontSize: 10 }}
         />
 
         <YAxis
           type="category"
           dataKey="name"
-          width={155}
+          width={150}
           tick={{ fontSize: 9 }}
-          tickFormatter={(value) =>
-            shortName(String(value), 25)
-          }
+          tickFormatter={(value) => shortName(value, 22)}
         />
 
         <Tooltip
           formatter={(value, name) => {
-            if (String(name) === "Avg Overrun %") {
-              return pct(Number(value ?? 0));
+            const numericValue = Number(value);
+
+            if (!Number.isFinite(numericValue)) {
+              return "";
             }
 
-            return Number(value ?? 0).toLocaleString("en-IN");
+            if (name === "Avg Overrun %") {
+              return pct(numericValue);
+            }
+
+            return numericValue.toLocaleString("en-IN");
           }}
         />
 
@@ -579,100 +588,6 @@ export function TopCostOverrunChart({
         />
       </BarChart>
     </ChartShell>
-  );
-}
-
-export function PerformanceSummaryChart({
-  data,
-}: {
-  data: AnalyticsRow[];
-}) {
-  const rows = data
-    .filter((row) => Number(row.total_projects ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        Number(b.total_projects ?? 0) -
-        Number(a.total_projects ?? 0),
-    )
-    .slice(0, 10)
-    .map((row) => ({
-      name: labelFor(row),
-      progress: Math.max(
-        0,
-        Math.min(
-          100,
-          100 - Number(row.avg_delay_months ?? 0) * 1.2,
-        ),
-      ),
-      expenditure: Number(
-        row.expenditure_to_analytical_cost_pct ?? 0,
-      ),
-      quality: Math.max(
-        0,
-        Math.min(
-          100,
-          100 - Number(row.data_quality_rate_pct ?? 0),
-        ),
-      ),
-    }));
-
-  return (
-    <div className="space-y-3 py-2">
-      {rows.map((row) => (
-        <div key={row.name}>
-          <div className="mb-1 flex items-center justify-between gap-3">
-            <span
-              className="max-w-[48%] truncate text-[10px] font-medium text-slate-700"
-              title={row.name}
-            >
-              {row.name}
-            </span>
-
-            <div className="flex items-center gap-3 text-[10px] text-slate-400">
-              <span>
-                Progress {row.progress.toFixed(0)}%
-              </span>
-
-              <span>
-                Expense {row.expenditure.toFixed(0)}%
-              </span>
-
-              <span>
-                Quality {row.quality.toFixed(0)}%
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1.5">
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-blue-500"
-                style={{ width: `${row.progress}%` }}
-              />
-            </div>
-
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-emerald-500"
-                style={{
-                  width: `${Math.max(
-                    0,
-                    Math.min(100, row.expenditure),
-                  )}%`,
-                }}
-              />
-            </div>
-
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-amber-400"
-                style={{ width: `${row.quality}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
