@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
+import { useNavigate } from "react-router-dom";
 import L from "leaflet";
+
 import {
     GeoJSON,
     MapContainer,
@@ -26,7 +33,9 @@ import {
 type Coordinate = [number, number];
 
 type GeoJSONGeometry = {
-    type: "Polygon" | "MultiPolygon";
+    type:
+    | "Polygon"
+    | "MultiPolygon";
     coordinates:
     | Coordinate[][]
     | Coordinate[][][];
@@ -79,7 +88,8 @@ function getStateName(
             properties[key];
 
         if (
-            typeof value === "string" &&
+            typeof value ===
+            "string" &&
             value.trim()
         ) {
             return value.trim();
@@ -145,6 +155,7 @@ function createRiskIcon(
     return L.divIcon({
         className:
             "paimana-risk-marker",
+
         html: `
             <div
                 style="
@@ -160,6 +171,7 @@ function createRiskIcon(
                 "
             ></div>
         `,
+
         iconSize: [18, 18],
         iconAnchor: [9, 9],
         popupAnchor: [0, -12],
@@ -282,10 +294,14 @@ function pointInRing(
             ring[j]?.[1];
 
         if (
-            typeof xi !== "number" ||
-            typeof yi !== "number" ||
-            typeof xj !== "number" ||
-            typeof yj !== "number"
+            typeof xi !==
+            "number" ||
+            typeof yi !==
+            "number" ||
+            typeof xj !==
+            "number" ||
+            typeof yj !==
+            "number"
         ) {
             continue;
         }
@@ -509,7 +525,9 @@ function getMarkerPositions(
     bounds: L.LatLngBounds,
     geometry: GeoJSONGeometry,
 ): Coordinate[] {
-    if (total <= 0) {
+    if (
+        total <= 0
+    ) {
         return [];
     }
 
@@ -601,7 +619,9 @@ function getMarkerPositions(
         let bestDistance =
             -1;
 
-        for (const candidate of candidates) {
+        for (
+            const candidate of candidates
+        ) {
             const alreadySelected =
                 selected.some(
                     (
@@ -622,7 +642,9 @@ function getMarkerPositions(
             let minimumDistance =
                 Infinity;
 
-            for (const point of selected) {
+            for (
+                const point of selected
+            ) {
                 const distance =
                     pointDistance(
                         candidate,
@@ -673,6 +695,17 @@ function ProjectPopup({
 }: {
     project: GeographicProject;
 }) {
+    const navigate = useNavigate();
+
+    const openProjectAnalysis =
+        () => {
+            navigate(
+                `/project-analytics?project=${encodeURIComponent(
+                    project.project_code,
+                )}`,
+            );
+        };
+
     return (
         <div
             style={{
@@ -692,7 +725,9 @@ function ProjectPopup({
                 }}
             >
                 Project{" "}
-                {project.project_code}
+                {
+                    project.project_code
+                }
             </div>
 
             {/* Project Name */}
@@ -743,12 +778,14 @@ function ProjectPopup({
                     </span>
 
                     <strong>
-                        {project.risk_score !==
-                            null
-                            ? project.risk_score.toFixed(
-                                1,
-                            )
-                            : "N/A"}
+                        {
+                            project.risk_score !==
+                                null
+                                ? project.risk_score.toFixed(
+                                    1,
+                                )
+                                : "N/A"
+                        }
 
                         {project.risk_score !==
                             null &&
@@ -875,6 +912,50 @@ function ProjectPopup({
                         "-"}
                 </div>
             </div>
+
+            {/* Analyse Project */}
+            <button
+                type="button"
+                onClick={
+                    openProjectAnalysis
+                }
+                style={{
+                    width: "100%",
+                    marginTop:
+                        "14px",
+                    border: "none",
+                    borderRadius:
+                        "8px",
+                    background:
+                        "#0f172a",
+                    color:
+                        "#ffffff",
+                    padding:
+                        "9px 12px",
+                    fontSize:
+                        "12px",
+                    fontWeight:
+                        600,
+                    cursor:
+                        "pointer",
+                    transition:
+                        "background 0.2s ease",
+                }}
+                onMouseEnter={(
+                    event,
+                ) => {
+                    event.currentTarget.style.background =
+                        "#1e293b";
+                }}
+                onMouseLeave={(
+                    event,
+                ) => {
+                    event.currentTarget.style.background =
+                        "#0f172a";
+                }}
+            >
+                Analyse Project
+            </button>
         </div>
     );
 }
@@ -1010,7 +1091,7 @@ export default function ProjectMap() {
     }, []);
 
     /* =====================================================
-       LOAD PROJECTS ONLY AFTER STATE SELECTION
+       LOAD REAL PROJECTS ONLY AFTER STATE SELECTION
     ===================================================== */
 
     useEffect(() => {
@@ -1051,6 +1132,10 @@ export default function ProjectMap() {
                     null,
                 );
 
+                /*
+                 * REAL PRODUCTION PROJECT DATA
+                 * from Flask/PostgreSQL.
+                 */
                 const response =
                     await getGeographicProjects(
                         state,
@@ -1400,7 +1485,8 @@ export default function ProjectMap() {
                     false
                 }
                 style={{
-                    height: "600px",
+                    height:
+                        "600px",
                     width: "100%",
                     borderRadius:
                         "16px",
@@ -1447,7 +1533,7 @@ export default function ProjectMap() {
                 />
 
                 {/* =================================================
-                    PROJECT MARKERS
+                    REAL PROJECT MARKERS
                 ================================================= */}
 
                 {selectedState &&
@@ -1479,7 +1565,7 @@ export default function ProjectMap() {
                                 >
                                     {/* =================================================
                                         HOVER TOOLTIP
-
+                                        
                                         ONLY:
                                         Project ID
                                         Project Name
@@ -1541,6 +1627,7 @@ export default function ProjectMap() {
                                     {/* =================================================
                                         CLICK POPUP
 
+                                        REAL API PROJECT DATA.
                                         Full project information.
                                     ================================================= */}
 
