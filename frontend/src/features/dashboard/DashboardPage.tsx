@@ -270,17 +270,7 @@ export default function DashboardPage() {
         };
     }, [search]);
 
-    useEffect(() => {
-        const timer = window.setTimeout(() => {
-            setDebouncedSearch(
-                search.trim(),
-            );
-        }, 400);
 
-        return () => {
-            window.clearTimeout(timer);
-        };
-    }, [search]);
 
 
     /* =====================================================
@@ -826,20 +816,23 @@ export default function DashboardPage() {
                                     event.target.value,
                                 )
                             }
-                            options={
-                                filterOptions
-                                    .reportingPeriods
-                                    .map(
-                                        (
+                            options={[
+                                {
+                                    label: "Select Month",
+                                    value: "",
+                                },
+
+                                ...filterOptions.reportingPeriods.map(
+                                    (
+                                        period,
+                                    ) => ({
+                                        label:
                                             period,
-                                        ) => ({
-                                            label:
-                                                period,
-                                            value:
-                                                period,
-                                        }),
-                                    )
-                            }
+                                        value:
+                                            period,
+                                    }),
+                                ),
+                            ]}
                             className="w-[160px]"
                         />
 
@@ -881,20 +874,23 @@ export default function DashboardPage() {
                             event.target.value,
                         )
                     }
-                    options={
-                        filterOptions
-                            .reportingPeriods
-                            .map(
-                                (
+                    options={[
+                        {
+                            label: "Select Month",
+                            value: "",
+                        },
+
+                        ...filterOptions.reportingPeriods.map(
+                            (
+                                period,
+                            ) => ({
+                                label:
                                     period,
-                                ) => ({
-                                    label:
-                                        period,
-                                    value:
-                                        period,
-                                }),
-                            )
-                    }
+                                value:
+                                    period,
+                            }),
+                        ),
+                    ]}
                     className="flex-1"
                 />
 
