@@ -18,16 +18,56 @@ export default function AppProviders({
             new QueryClient({
                 defaultOptions: {
                     queries: {
-                        staleTime: 30_000,
+                        /*
+                         * Keep fetched data fresh for 5 minutes.
+                         * Moving between dashboard sections will
+                         * reuse cached data instead of immediately
+                         * requesting it again.
+                         */
+                        staleTime:
+                            5 * 60 * 1000,
+
+                        /*
+                         * Keep unused queries in memory for 30 minutes.
+                         */
+                        gcTime:
+                            30 * 60 * 1000,
+
+                        /*
+                         * Do not retry repeatedly on every request.
+                         */
                         retry: 1,
-                        refetchOnWindowFocus: false,
+
+                        /*
+                         * Do not refetch just because browser
+                         * window/tab becomes active again.
+                         */
+                        refetchOnWindowFocus:
+                            false,
+
+                        /*
+                         * Do not automatically refetch whenever
+                         * a route/component mounts again while
+                         * cached data already exists.
+                         */
+                        refetchOnMount:
+                            false,
+
+                        /*
+                         * Avoid another automatic request after
+                         * network reconnect.
+                         */
+                        refetchOnReconnect:
+                            false,
                     },
                 },
             }),
     );
 
     return (
-        <QueryClientProvider client={queryClient}>
+        <QueryClientProvider
+            client={queryClient}
+        >
             {children}
         </QueryClientProvider>
     );

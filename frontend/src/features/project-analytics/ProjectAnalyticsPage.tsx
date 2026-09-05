@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   getProjectAnalyticsDetail,
@@ -324,6 +325,14 @@ function numberValue(
 }
 
 export default function ProjectAnalyticsPage() {
+  const [
+    searchParams,
+    setSearchParams,
+  ] = useSearchParams();
+
+  const projectFromUrl =
+    searchParams.get("project")?.trim() || "";
+
   const [filters, setFilters] =
     useState<ProjectAnalyticsFilterOptions>(emptyFilters);
 
@@ -332,7 +341,9 @@ export default function ProjectAnalyticsPage() {
   const [selectedState, setSelectedState] = useState<string[]>([]);
   const [selectedRisk, setSelectedRisk] = useState<string[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(
+    projectFromUrl,
+  );
 
   const [summary, setSummary] =
     useState<ProjectAnalyticsSummary>(emptySummary);
@@ -341,7 +352,7 @@ export default function ProjectAnalyticsPage() {
     useState<ProjectAnalyticsProject[]>([]);
 
   const [selectedProjectCode, setSelectedProjectCode] =
-    useState("");
+    useState(projectFromUrl);
 
   const [projectDetail, setProjectDetail] =
     useState<ProjectAnalyticsDetail | null>(null);
@@ -371,6 +382,9 @@ export default function ProjectAnalyticsPage() {
   const [error, setError] =
     useState("");
 
+  const effectiveSearch =
+    projectFromUrl || search.trim();
+
   const requestParams = useMemo(
     () => ({
       ...(selectedSector.length > 0
@@ -388,8 +402,8 @@ export default function ProjectAnalyticsPage() {
       ...(selectedSchedule.length > 0
         ? { schedule_status: selectedSchedule }
         : {}),
-      ...(search.trim()
-        ? { search: search.trim() }
+      ...(effectiveSearch
+        ? { search: effectiveSearch }
         : {}),
     }),
     [
@@ -398,9 +412,11 @@ export default function ProjectAnalyticsPage() {
       selectedState,
       selectedRisk,
       selectedSchedule,
-      search,
+      effectiveSearch,
     ],
   );
+
+
 
   useEffect(() => {
     async function loadFilters() {
@@ -459,6 +475,7 @@ export default function ProjectAnalyticsPage() {
 
     loadAnalytics();
   }, [requestParams]);
+
 
   useEffect(() => {
     if (!selectedProjectCode) {
@@ -721,9 +738,38 @@ export default function ProjectAnalyticsPage() {
             <input
               type="text"
               value={search}
-              onChange={(e) =>
-                setSearch(e.target.value)
-              }
+              onChange={(e) => {
+                const value =
+                  e.target.value;
+
+                setSearch(value);
+
+                /*
+                 * Manual search means the user is
+                 * leaving project-specific analysis.
+                 */
+                if (
+                  searchParams.has("project")
+                ) {
+                  setSelectedProjectCode("");
+
+                  const nextParams =
+                    new URLSearchParams(
+                      searchParams,
+                    );
+
+                  nextParams.delete(
+                    "project",
+                  );
+
+                  setSearchParams(
+                    nextParams,
+                    {
+                      replace: true,
+                    },
+                  );
+                }
+              }}
               placeholder="Search by project code or project name..."
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400"
             />
@@ -947,11 +993,25 @@ export default function ProjectAnalyticsPage() {
                     <td className="px-5 py-4">
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
                           setSelectedProjectCode(
                             project.project_code,
-                          )
-                        }
+                          );
+
+                          setSearch(
+                            project.project_code,
+                          );
+
+                          setSearchParams(
+                            {
+                              project:
+                                project.project_code,
+                            },
+                            {
+                              replace: true,
+                            },
+                          );
+                        }}
                         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
                       >
                         Analyze
@@ -976,895 +1036,914 @@ export default function ProjectAnalyticsPage() {
         </section>
 
         {/* Project Detail */}
-        {selectedProjectCode && (
-          <section className="space-y-6">
+        {
+          selectedProjectCode && (
+            <section className="space-y-6">
 
-            <div className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-center">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Selected Project
-                </p>
+              <div className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-center">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Selected Project
+                  </p>
 
-                <h2 className="mt-1 text-xl font-bold text-slate-900">
-                  {selectedProjectName}
-                </h2>
+                  <h2 className="mt-1 text-xl font-bold text-slate-900">
+                    {selectedProjectName}
+                  </h2>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Project Code: {selectedProjectCode}
-                </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Project Code: {selectedProjectCode}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProjectCode("");
+                    setSearch("");
+
+                    const nextParams =
+                      new URLSearchParams(
+                        searchParams,
+                      );
+
+                    nextParams.delete(
+                      "project",
+                    );
+
+                    setSearchParams(
+                      nextParams,
+                      {
+                        replace: true,
+                      },
+                    );
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  Close Analysis
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedProjectCode("")
-                }
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
-              >
-                Close Analysis
-              </button>
-            </div>
+              {loadingProjectDetail && (
+                <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+                  Loading project analysis...
+                </div>
+              )}
 
-            {loadingProjectDetail && (
-              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-                Loading project analysis...
-              </div>
-            )}
+              {!loadingProjectDetail && projectDetail && (
+                <>
+                  {/* Project Header / Key Facts */}
+                  <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
 
-            {!loadingProjectDetail && projectDetail && (
-              <>
-                {/* Project Header / Key Facts */}
-                <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Risk Score
-                    </p>
-
-                    <p className="mt-2 text-3xl font-bold text-slate-900">
-                      {formatNumber(selectedRiskScore)}
-                    </p>
-
-                    <div className="mt-2">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${riskClass(
-                          selectedRiskLevel,
-                        )}`}
-                      >
-                        {selectedRiskLevel || "N/A"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Future Delay Probability
-                    </p>
-
-                    <p className="mt-2 text-3xl font-bold text-slate-900">
-                      {formatPercent(selectedDelayProbability)}
-                    </p>
-
-                    <p className="mt-2 text-xs text-slate-500">
-                      Model-based prediction
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Physical Progress
-                    </p>
-
-                    <p className="mt-2 text-3xl font-bold text-slate-900">
-                      {formatPercent(selectedPhysicalProgress)}
-                    </p>
-
-                    <p className="mt-2 text-xs text-slate-500">
-                      Latest available progress
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Delay Days
-                    </p>
-
-                    <p className="mt-2 text-3xl font-bold text-slate-900">
-                      {formatNumber(selectedDelayDays)}
-                    </p>
-
-                    <p className="mt-2 text-xs text-slate-500">
-                      Recorded schedule delay
-                    </p>
-                  </div>
-                </section>
-
-                {/* Project Facts */}
-                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      Project Overview
-                    </h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Ministry
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Risk Score
                       </p>
 
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        {typeof projectInfo?.ministry === "string"
-                          ? projectInfo.ministry
-                          : "—"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Sector
+                      <p className="mt-2 text-3xl font-bold text-slate-900">
+                        {formatNumber(selectedRiskScore)}
                       </p>
 
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        {typeof projectInfo?.sector === "string"
-                          ? projectInfo.sector
-                          : "—"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        State / UT
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        {typeof projectInfo?.state === "string"
-                          ? projectInfo.state
-                          : "—"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Implementing Agency
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        {typeof projectInfo?.implementing_agency === "string"
-                          ? projectInfo.implementing_agency
-                          : "—"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Schedule Status
-                      </p>
-
-                      <div className="mt-1">
+                      <div className="mt-2">
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(
-                            typeof projectInfo?.schedule_status === "string"
-                              ? projectInfo.schedule_status
-                              : null,
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${riskClass(
+                            selectedRiskLevel,
                           )}`}
                         >
-                          {typeof projectInfo?.schedule_status === "string"
-                            ? projectInfo.schedule_status
-                            : "—"}
+                          {selectedRiskLevel || "N/A"}
                         </span>
                       </div>
                     </div>
 
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Original Completion
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Future Delay Probability
                       </p>
 
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        {typeof projectInfo?.original_completion === "string"
-                          ? projectInfo.original_completion
-                          : "—"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Revised Completion
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        {typeof projectInfo?.revised_completion === "string"
-                          ? projectInfo.revised_completion
-                          : "—"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-400">
-                        Original Cost
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium text-slate-800">
-                        ₹ {formatNumber(selectedOriginalCost)} Cr
-                      </p>
-                    </div>
-                  </div>
-                </section>
-
-                {/* Risk Breakdown */}
-                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      Risk Breakdown
-                    </h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-
-                    <div className="rounded-lg bg-slate-50 p-4">
-                      <p className="text-xs text-slate-400">
-                        Cost Risk
-                      </p>
-
-                      <p className="mt-2 text-2xl font-bold text-slate-900">
-                        {formatPercent(selectedCostRisk)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg bg-slate-50 p-4">
-                      <p className="text-xs text-slate-400">
-                        Future Delay
-                      </p>
-
-                      <p className="mt-2 text-2xl font-bold text-slate-900">
+                      <p className="mt-2 text-3xl font-bold text-slate-900">
                         {formatPercent(selectedDelayProbability)}
                       </p>
+
+                      <p className="mt-2 text-xs text-slate-500">
+                        Model-based prediction
+                      </p>
                     </div>
 
-                    <div className="rounded-lg bg-slate-50 p-4">
-                      <p className="text-xs text-slate-400">
-                        Progress Stall
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Physical Progress
+                      </p>
+
+                      <p className="mt-2 text-3xl font-bold text-slate-900">
+                        {formatPercent(selectedPhysicalProgress)}
+                      </p>
+
+                      <p className="mt-2 text-xs text-slate-500">
+                        Latest available progress
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Delay Days
+                      </p>
+
+                      <p className="mt-2 text-3xl font-bold text-slate-900">
+                        {formatNumber(selectedDelayDays)}
+                      </p>
+
+                      <p className="mt-2 text-xs text-slate-500">
+                        Recorded schedule delay
+                      </p>
+                    </div>
+                  </section>
+
+                  {/* Project Facts */}
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Project Overview
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Ministry
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          {typeof projectInfo?.ministry === "string"
+                            ? projectInfo.ministry
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Sector
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          {typeof projectInfo?.sector === "string"
+                            ? projectInfo.sector
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          State / UT
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          {typeof projectInfo?.state === "string"
+                            ? projectInfo.state
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Implementing Agency
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          {typeof projectInfo?.implementing_agency === "string"
+                            ? projectInfo.implementing_agency
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Schedule Status
+                        </p>
+
+                        <div className="mt-1">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(
+                              typeof projectInfo?.schedule_status === "string"
+                                ? projectInfo.schedule_status
+                                : null,
+                            )}`}
+                          >
+                            {typeof projectInfo?.schedule_status === "string"
+                              ? projectInfo.schedule_status
+                              : "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Original Completion
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          {typeof projectInfo?.original_completion === "string"
+                            ? projectInfo.original_completion
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Revised Completion
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          {typeof projectInfo?.revised_completion === "string"
+                            ? projectInfo.revised_completion
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          Original Cost
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-800">
+                          ₹ {formatNumber(selectedOriginalCost)} Cr
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Risk Breakdown */}
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Risk Breakdown
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+
+                      <div className="rounded-lg bg-slate-50 p-4">
+                        <p className="text-xs text-slate-400">
+                          Cost Risk
+                        </p>
+
+                        <p className="mt-2 text-2xl font-bold text-slate-900">
+                          {formatPercent(selectedCostRisk)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-4">
+                        <p className="text-xs text-slate-400">
+                          Future Delay
+                        </p>
+
+                        <p className="mt-2 text-2xl font-bold text-slate-900">
+                          {formatPercent(selectedDelayProbability)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-4">
+                        <p className="text-xs text-slate-400">
+                          Progress Stall
+                        </p>
+
+                        <p className="mt-2 text-2xl font-bold text-slate-900">
+                          {formatPercent(selectedProgressStall)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-4">
+                        <p className="text-xs text-slate-400">
+                          Overall Risk
+                        </p>
+
+                        <p className="mt-2 text-2xl font-bold text-slate-900">
+                          {formatNumber(selectedRiskScore)}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <ProjectAnalyticsDetailCharts
+                    history={projectDetail.history}
+                    flashHistory={projectDetail.flash_history}
+                    progressTrajectory={
+                      projectDetail.progress_trajectory
+                    }
+                    riskTrajectory={
+                      projectDetail.risk_trajectory
+                    }
+                  />
+
+                  {/* Delay Reasons */}
+                  {projectDetail.delay_reasons.length > 0 && (
+                    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4">
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Reasons for Delay
+                        </h3>
+                      </div>
+
+                      <div className="space-y-3">
+                        {projectDetail.delay_reasons.map(
+                          (reason, index) => (
+                            <div
+                              key={`${reason.title}-${index}`}
+                              className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                            >
+                              <p className="text-sm font-semibold text-slate-800">
+                                {reason.title}
+                              </p>
+
+                              <p className="mt-1 text-sm text-slate-600">
+                                {reason.explanation}
+                              </p>
+
+                              <div className="mt-3 rounded-lg bg-white p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                  Recommended Solution
+                                </p>
+
+                                <p className="mt-1 text-sm text-slate-700">
+                                  {reason.recommended_solution}
+                                </p>
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* What-If Simulator */}
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-5">
+                      <h3 className="text-lg font-semibold text-slate-900">
+                        What-If Risk Simulator
+                      </h3>
+
+                      <p className="mt-1 text-sm text-slate-500">
+                        Adjust project assumptions and compare baseline versus scenario risk.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+
+                      {/* Physical Progress */}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-slate-700">
+                            Physical Progress Change
+                          </label>
+
+                          <span className="text-sm font-semibold text-slate-900">
+                            {scenario.physical_progress_delta > 0
+                              ? "+"
+                              : ""}
+                            {scenario.physical_progress_delta}%
+                          </span>
+                        </div>
+
+                        <input
+                          type="range"
+                          min={-30}
+                          max={30}
+                          step={1}
+                          value={scenario.physical_progress_delta}
+                          onChange={(e) =>
+                            updateScenario(
+                              "physical_progress_delta",
+                              Number(e.target.value),
+                            )
+                          }
+                          className="mt-3 w-full"
+                        />
+
+                        <div className="mt-1 flex justify-between text-xs text-slate-400">
+                          <span>-30%</span>
+                          <span>0%</span>
+                          <span>+30%</span>
+                        </div>
+                      </div>
+
+                      {/* Delay */}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-slate-700">
+                            Additional Schedule Delay
+                          </label>
+
+                          <span className="text-sm font-semibold text-slate-900">
+                            {scenario.schedule_delay_days > 0
+                              ? "+"
+                              : ""}
+                            {scenario.schedule_delay_days} days
+                          </span>
+                        </div>
+
+                        <input
+                          type="range"
+                          min={-365}
+                          max={365}
+                          step={1}
+                          value={scenario.schedule_delay_days}
+                          onChange={(e) =>
+                            updateScenario(
+                              "schedule_delay_days",
+                              Number(e.target.value),
+                            )
+                          }
+                          className="mt-3 w-full"
+                        />
+
+                        <div className="mt-1 flex justify-between text-xs text-slate-400">
+                          <span>-365</span>
+                          <span>0</span>
+                          <span>+365</span>
+                        </div>
+                      </div>
+
+                      {/* Expenditure */}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-slate-700">
+                            Monthly Expenditure Change
+                          </label>
+
+                          <span className="text-sm font-semibold text-slate-900">
+                            {scenario.monthly_expenditure_change_cr > 0
+                              ? "+"
+                              : ""}
+                            ₹ {scenario.monthly_expenditure_change_cr} Cr
+                          </span>
+                        </div>
+
+                        <input
+                          type="range"
+                          min={-200}
+                          max={200}
+                          step={1}
+                          value={
+                            scenario.monthly_expenditure_change_cr
+                          }
+                          onChange={(e) =>
+                            updateScenario(
+                              "monthly_expenditure_change_cr",
+                              Number(e.target.value),
+                            )
+                          }
+                          className="mt-3 w-full"
+                        />
+
+                        <div className="mt-1 flex justify-between text-xs text-slate-400">
+                          <span>-₹200 Cr</span>
+                          <span>₹0</span>
+                          <span>+₹200 Cr</span>
+                        </div>
+                      </div>
+
+                      {/* Revised Cost */}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-slate-700">
+                            Revised Cost Change
+                          </label>
+
+                          <span className="text-sm font-semibold text-slate-900">
+                            {scenario.revised_cost_change_cr > 0
+                              ? "+"
+                              : ""}
+                            ₹ {scenario.revised_cost_change_cr} Cr
+                          </span>
+                        </div>
+
+                        <input
+                          type="range"
+                          min={-500}
+                          max={500}
+                          step={1}
+                          value={scenario.revised_cost_change_cr}
+                          onChange={(e) =>
+                            updateScenario(
+                              "revised_cost_change_cr",
+                              Number(e.target.value),
+                            )
+                          }
+                          className="mt-3 w-full"
+                        />
+
+                        <div className="mt-1 flex justify-between text-xs text-slate-400">
+                          <span>-₹500 Cr</span>
+                          <span>₹0</span>
+                          <span>+₹500 Cr</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Simulator Actions */}
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={runWhatIf}
+                        disabled={whatIfLoading}
+                        className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {whatIfLoading
+                          ? "Running Simulation..."
+                          : "Run What-If Simulation"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={resetWhatIf}
+                        className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Reset Scenario
+                      </button>
+                    </div>
+
+                    {/* What-If Result */}
+                    {whatIfResult && (
+                      <div className="mt-6 space-y-5">
+
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-900">
+                            Scenario Comparison
+                          </h4>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            Baseline versus simulated project risk.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+
+                          {/* Baseline */}
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                              Baseline
+                            </p>
+
+                            <p className="mt-3 text-3xl font-bold text-slate-900">
+                              {formatNumber(
+                                numberValue(
+                                  baseline?.overall_risk,
+                                ),
+                              )}
+                            </p>
+
+                            <p className="mt-1 text-xs text-slate-500">
+                              Overall Risk
+                            </p>
+
+                            <div className="mt-4 space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Delay Probability
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      baseline?.delay_probability,
+                                    ) !== null
+                                      ? numberValue(
+                                        baseline?.delay_probability,
+                                      )! * 100
+                                      : null,
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Progress Stall
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      baseline?.stall_probability,
+                                    ) !== null
+                                      ? numberValue(
+                                        baseline?.stall_probability,
+                                      )! * 100
+                                      : null,
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Predicted Cost Overrun
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      baseline?.predicted_cost_overrun,
+                                    ),
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Cost Risk
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      baseline?.cost_risk,
+                                    ),
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Scenario */}
+                          <div className="rounded-xl border border-slate-200 bg-white p-5">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                              Scenario
+                            </p>
+
+                            <p className="mt-3 text-3xl font-bold text-slate-900">
+                              {formatNumber(
+                                numberValue(
+                                  simulated?.overall_risk,
+                                ),
+                              )}
+                            </p>
+
+                            <p className="mt-1 text-xs text-slate-500">
+                              Overall Risk
+                            </p>
+
+                            <div className="mt-4 space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Risk Level
+                                </span>
+
+                                <span
+                                  className={`rounded-full px-2 py-1 text-xs font-semibold ${riskClass(
+                                    typeof simulated?.risk_level === "string"
+                                      ? simulated?.risk_level
+                                      : null,
+                                  )}`}
+                                >
+                                  {typeof simulated?.risk_level === "string"
+                                    ? simulated?.risk_level
+                                    : "N/A"}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Delay Probability
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      simulated?.delay_probability,
+                                    ) !== null
+                                      ? numberValue(
+                                        simulated?.delay_probability,
+                                      )! * 100
+                                      : null,
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Progress Stall
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      simulated?.stall_probability,
+                                    ) !== null
+                                      ? numberValue(
+                                        simulated?.stall_probability,
+                                      )! * 100
+                                      : null,
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Predicted Cost Overrun
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      simulated?.predicted_cost_overrun,
+                                    ),
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Cost Risk
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      simulated?.cost_risk,
+                                    ),
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Change */}
+                          <div className="rounded-xl border border-slate-200 bg-white p-5">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                              Change
+                            </p>
+
+                            <p className="mt-3 text-3xl font-bold text-slate-900">
+                              {formatNumber(
+                                numberValue(
+                                  change?.overall_risk,
+                                ),
+                              )}
+                            </p>
+
+                            <p className="mt-1 text-xs text-slate-500">
+                              Risk Score Change
+                            </p>
+
+                            <div className="mt-4 space-y-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Delay Probability
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      change?.delay_probability,
+                                    ) !== null
+                                      ? numberValue(
+                                        change?.delay_probability,
+                                      )! * 100
+                                      : null,
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Progress Stall
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      change?.stall_probability,
+                                    ) !== null
+                                      ? numberValue(
+                                        change?.stall_probability,
+                                      )! * 100
+                                      : null,
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Predicted Cost Overrun
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      change?.predicted_cost_overrun,
+                                    ),
+                                  )}
+                                </span>
+                              </div>
+
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">
+                                  Cost Risk
+                                </span>
+
+                                <span className="font-medium">
+                                  {formatPercent(
+                                    numberValue(
+                                      change?.cost_risk,
+                                    ),
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Scenario Inputs */}
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Applied Scenario Inputs
+                          </p>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <div>
+                              <p className="text-xs text-slate-500">
+                                Progress
+                              </p>
+
+                              <p className="mt-1 text-sm font-semibold text-slate-800">
+                                {scenario.physical_progress_delta > 0
+                                  ? "+"
+                                  : ""}
+                                {scenario.physical_progress_delta}%
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-xs text-slate-500">
+                                Schedule Delay
+                              </p>
+
+                              <p className="mt-1 text-sm font-semibold text-slate-800">
+                                {scenario.schedule_delay_days > 0
+                                  ? "+"
+                                  : ""}
+                                {scenario.schedule_delay_days} days
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-xs text-slate-500">
+                                Monthly Expenditure
+                              </p>
+
+                              <p className="mt-1 text-sm font-semibold text-slate-800">
+                                {scenario.monthly_expenditure_change_cr > 0
+                                  ? "+"
+                                  : ""}
+                                ₹ {scenario.monthly_expenditure_change_cr} Cr
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-xs text-slate-500">
+                                Revised Cost
+                              </p>
+
+                              <p className="mt-1 text-sm font-semibold text-slate-800">
+                                {scenario.revised_cost_change_cr > 0
+                                  ? "+"
+                                  : ""}
+                                ₹ {scenario.revised_cost_change_cr} Cr
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Latest Expenditure */}
+                  <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Expenditure
+                      </p>
+
+                      <p className="mt-2 text-2xl font-bold text-slate-900">
+                        ₹ {formatNumber(selectedExpenditure)} Cr
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Progress Stall Risk
                       </p>
 
                       <p className="mt-2 text-2xl font-bold text-slate-900">
                         {formatPercent(selectedProgressStall)}
                       </p>
                     </div>
-
-                    <div className="rounded-lg bg-slate-50 p-4">
-                      <p className="text-xs text-slate-400">
-                        Overall Risk
-                      </p>
-
-                      <p className="mt-2 text-2xl font-bold text-slate-900">
-                        {formatNumber(selectedRiskScore)}
-                      </p>
-                    </div>
-                  </div>
-                </section>
-
-                <ProjectAnalyticsDetailCharts
-                  history={projectDetail.history}
-                  flashHistory={projectDetail.flash_history}
-                  progressTrajectory={
-                    projectDetail.progress_trajectory
-                  }
-                  riskTrajectory={
-                    projectDetail.risk_trajectory
-                  }
-                />
-
-                {/* Delay Reasons */}
-                {projectDetail.delay_reasons.length > 0 && (
-                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4">
-                      <h3 className="text-sm font-semibold text-slate-900">
-                        Reasons for Delay
-                      </h3>
-                    </div>
-
-                    <div className="space-y-3">
-                      {projectDetail.delay_reasons.map(
-                        (reason, index) => (
-                          <div
-                            key={`${reason.title}-${index}`}
-                            className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-                          >
-                            <p className="text-sm font-semibold text-slate-800">
-                              {reason.title}
-                            </p>
-
-                            <p className="mt-1 text-sm text-slate-600">
-                              {reason.explanation}
-                            </p>
-
-                            <div className="mt-3 rounded-lg bg-white p-3">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                                Recommended Solution
-                              </p>
-
-                              <p className="mt-1 text-sm text-slate-700">
-                                {reason.recommended_solution}
-                              </p>
-                            </div>
-                          </div>
-                        ),
-                      )}
-                    </div>
                   </section>
-                )}
-
-                {/* What-If Simulator */}
-                <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="mb-5">
-                    <h3 className="text-lg font-semibold text-slate-900">
-                      What-If Risk Simulator
-                    </h3>
-
-                    <p className="mt-1 text-sm text-slate-500">
-                      Adjust project assumptions and compare baseline versus scenario risk.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-
-                    {/* Physical Progress */}
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-slate-700">
-                          Physical Progress Change
-                        </label>
-
-                        <span className="text-sm font-semibold text-slate-900">
-                          {scenario.physical_progress_delta > 0
-                            ? "+"
-                            : ""}
-                          {scenario.physical_progress_delta}%
-                        </span>
-                      </div>
-
-                      <input
-                        type="range"
-                        min={-30}
-                        max={30}
-                        step={1}
-                        value={scenario.physical_progress_delta}
-                        onChange={(e) =>
-                          updateScenario(
-                            "physical_progress_delta",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="mt-3 w-full"
-                      />
-
-                      <div className="mt-1 flex justify-between text-xs text-slate-400">
-                        <span>-30%</span>
-                        <span>0%</span>
-                        <span>+30%</span>
-                      </div>
-                    </div>
-
-                    {/* Delay */}
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-slate-700">
-                          Additional Schedule Delay
-                        </label>
-
-                        <span className="text-sm font-semibold text-slate-900">
-                          {scenario.schedule_delay_days > 0
-                            ? "+"
-                            : ""}
-                          {scenario.schedule_delay_days} days
-                        </span>
-                      </div>
-
-                      <input
-                        type="range"
-                        min={-365}
-                        max={365}
-                        step={1}
-                        value={scenario.schedule_delay_days}
-                        onChange={(e) =>
-                          updateScenario(
-                            "schedule_delay_days",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="mt-3 w-full"
-                      />
-
-                      <div className="mt-1 flex justify-between text-xs text-slate-400">
-                        <span>-365</span>
-                        <span>0</span>
-                        <span>+365</span>
-                      </div>
-                    </div>
-
-                    {/* Expenditure */}
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-slate-700">
-                          Monthly Expenditure Change
-                        </label>
-
-                        <span className="text-sm font-semibold text-slate-900">
-                          {scenario.monthly_expenditure_change_cr > 0
-                            ? "+"
-                            : ""}
-                          ₹ {scenario.monthly_expenditure_change_cr} Cr
-                        </span>
-                      </div>
-
-                      <input
-                        type="range"
-                        min={-200}
-                        max={200}
-                        step={1}
-                        value={
-                          scenario.monthly_expenditure_change_cr
-                        }
-                        onChange={(e) =>
-                          updateScenario(
-                            "monthly_expenditure_change_cr",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="mt-3 w-full"
-                      />
-
-                      <div className="mt-1 flex justify-between text-xs text-slate-400">
-                        <span>-₹200 Cr</span>
-                        <span>₹0</span>
-                        <span>+₹200 Cr</span>
-                      </div>
-                    </div>
-
-                    {/* Revised Cost */}
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-slate-700">
-                          Revised Cost Change
-                        </label>
-
-                        <span className="text-sm font-semibold text-slate-900">
-                          {scenario.revised_cost_change_cr > 0
-                            ? "+"
-                            : ""}
-                          ₹ {scenario.revised_cost_change_cr} Cr
-                        </span>
-                      </div>
-
-                      <input
-                        type="range"
-                        min={-500}
-                        max={500}
-                        step={1}
-                        value={scenario.revised_cost_change_cr}
-                        onChange={(e) =>
-                          updateScenario(
-                            "revised_cost_change_cr",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="mt-3 w-full"
-                      />
-
-                      <div className="mt-1 flex justify-between text-xs text-slate-400">
-                        <span>-₹500 Cr</span>
-                        <span>₹0</span>
-                        <span>+₹500 Cr</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Simulator Actions */}
-                  <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={runWhatIf}
-                      disabled={whatIfLoading}
-                      className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {whatIfLoading
-                        ? "Running Simulation..."
-                        : "Run What-If Simulation"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={resetWhatIf}
-                      className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                    >
-                      Reset Scenario
-                    </button>
-                  </div>
-
-                  {/* What-If Result */}
-                  {whatIfResult && (
-                    <div className="mt-6 space-y-5">
-
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-900">
-                          Scenario Comparison
-                        </h4>
-
-                        <p className="mt-1 text-xs text-slate-500">
-                          Baseline versus simulated project risk.
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-
-                        {/* Baseline */}
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                            Baseline
-                          </p>
-
-                          <p className="mt-3 text-3xl font-bold text-slate-900">
-                            {formatNumber(
-                              numberValue(
-                                baseline?.overall_risk,
-                              ),
-                            )}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            Overall Risk
-                          </p>
-
-                          <div className="mt-4 space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Delay Probability
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    baseline?.delay_probability,
-                                  ) !== null
-                                    ? numberValue(
-                                      baseline?.delay_probability,
-                                    )! * 100
-                                    : null,
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Progress Stall
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    baseline?.stall_probability,
-                                  ) !== null
-                                    ? numberValue(
-                                      baseline?.stall_probability,
-                                    )! * 100
-                                    : null,
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Predicted Cost Overrun
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    baseline?.predicted_cost_overrun,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Cost Risk
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    baseline?.cost_risk,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Scenario */}
-                        <div className="rounded-xl border border-slate-200 bg-white p-5">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                            Scenario
-                          </p>
-
-                          <p className="mt-3 text-3xl font-bold text-slate-900">
-                            {formatNumber(
-                              numberValue(
-                                simulated?.overall_risk,
-                              ),
-                            )}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            Overall Risk
-                          </p>
-
-                          <div className="mt-4 space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Risk Level
-                              </span>
-
-                              <span
-                                className={`rounded-full px-2 py-1 text-xs font-semibold ${riskClass(
-                                  typeof simulated?.risk_level === "string"
-                                    ? simulated?.risk_level
-                                    : null,
-                                )}`}
-                              >
-                                {typeof simulated?.risk_level === "string"
-                                  ? simulated?.risk_level
-                                  : "N/A"}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Delay Probability
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    simulated?.delay_probability,
-                                  ) !== null
-                                    ? numberValue(
-                                      simulated?.delay_probability,
-                                    )! * 100
-                                    : null,
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Progress Stall
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    simulated?.stall_probability,
-                                  ) !== null
-                                    ? numberValue(
-                                      simulated?.stall_probability,
-                                    )! * 100
-                                    : null,
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Predicted Cost Overrun
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    simulated?.predicted_cost_overrun,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Cost Risk
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    simulated?.cost_risk,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Change */}
-                        <div className="rounded-xl border border-slate-200 bg-white p-5">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                            Change
-                          </p>
-
-                          <p className="mt-3 text-3xl font-bold text-slate-900">
-                            {formatNumber(
-                              numberValue(
-                                change?.overall_risk,
-                              ),
-                            )}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            Risk Score Change
-                          </p>
-
-                          <div className="mt-4 space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Delay Probability
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    change?.delay_probability,
-                                  ) !== null
-                                    ? numberValue(
-                                      change?.delay_probability,
-                                    )! * 100
-                                    : null,
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Progress Stall
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    change?.stall_probability,
-                                  ) !== null
-                                    ? numberValue(
-                                      change?.stall_probability,
-                                    )! * 100
-                                    : null,
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Predicted Cost Overrun
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    change?.predicted_cost_overrun,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">
-                                Cost Risk
-                              </span>
-
-                              <span className="font-medium">
-                                {formatPercent(
-                                  numberValue(
-                                    change?.cost_risk,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Scenario Inputs */}
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                          Applied Scenario Inputs
-                        </p>
-
-                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                          <div>
-                            <p className="text-xs text-slate-500">
-                              Progress
-                            </p>
-
-                            <p className="mt-1 text-sm font-semibold text-slate-800">
-                              {scenario.physical_progress_delta > 0
-                                ? "+"
-                                : ""}
-                              {scenario.physical_progress_delta}%
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-xs text-slate-500">
-                              Schedule Delay
-                            </p>
-
-                            <p className="mt-1 text-sm font-semibold text-slate-800">
-                              {scenario.schedule_delay_days > 0
-                                ? "+"
-                                : ""}
-                              {scenario.schedule_delay_days} days
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-xs text-slate-500">
-                              Monthly Expenditure
-                            </p>
-
-                            <p className="mt-1 text-sm font-semibold text-slate-800">
-                              {scenario.monthly_expenditure_change_cr > 0
-                                ? "+"
-                                : ""}
-                              ₹ {scenario.monthly_expenditure_change_cr} Cr
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-xs text-slate-500">
-                              Revised Cost
-                            </p>
-
-                            <p className="mt-1 text-sm font-semibold text-slate-800">
-                              {scenario.revised_cost_change_cr > 0
-                                ? "+"
-                                : ""}
-                              ₹ {scenario.revised_cost_change_cr} Cr
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </section>
-
-                {/* Latest Expenditure */}
-                <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Expenditure
-                    </p>
-
-                    <p className="mt-2 text-2xl font-bold text-slate-900">
-                      ₹ {formatNumber(selectedExpenditure)} Cr
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Progress Stall Risk
-                    </p>
-
-                    <p className="mt-2 text-2xl font-bold text-slate-900">
-                      {formatPercent(selectedProgressStall)}
-                    </p>
-                  </div>
-                </section>
-              </>
-            )}
-          </section>
-        )}
-
-      </div>
-    </div>
+                </>
+              )}
+            </section>
+          )
+        }
+
+      </div >
+    </div >
   );
 }
