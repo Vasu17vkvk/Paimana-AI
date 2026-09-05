@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { useQuery } from "@tanstack/react-query";
+
 import {
     AlertTriangle,
     ArrowRight,
@@ -59,7 +61,6 @@ import {
 
 import {
     getActiveWarnings,
-    type ActiveWarning,
 } from "../../services/warningsApi";
 
 
@@ -112,7 +113,7 @@ function mapDashboardProject(
 
         riskScore:
             project.riskScore === null ||
-            project.riskScore === undefined
+                project.riskScore === undefined
                 ? null
                 : Number(
                     project.riskScore,
@@ -152,41 +153,41 @@ function normalizeDashboardFilters(
     return {
         period:
             filters.period &&
-            filters.period !== "All Periods"
+                filters.period !== "All Periods"
                 ? filters.period
                 : undefined,
 
         ministry:
             filters.ministry &&
-            filters.ministry !==
+                filters.ministry !==
                 "All Ministries"
                 ? filters.ministry
                 : undefined,
 
         sector:
             filters.sector &&
-            filters.sector !==
+                filters.sector !==
                 "All Sectors"
                 ? filters.sector
                 : undefined,
 
         state:
             filters.state &&
-            filters.state !==
+                filters.state !==
                 "All States"
                 ? filters.state
                 : undefined,
 
         risk:
             filters.risk &&
-            filters.risk !==
+                filters.risk !==
                 "All Risk Levels"
                 ? filters.risk
                 : undefined,
 
         status:
             filters.status &&
-            filters.status !==
+                filters.status !==
                 "All Statuses"
                 ? filters.status
                 : undefined,
@@ -252,345 +253,167 @@ export default function DashboardPage() {
         setSearch,
     ] = useState("");
 
+    const [
+        debouncedSearch,
+        setDebouncedSearch,
+    ] = useState("");
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setDebouncedSearch(
+                search.trim(),
+            );
+        }, 400);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [search]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setDebouncedSearch(
+                search.trim(),
+            );
+        }, 400);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [search]);
+
 
     /* =====================================================
        DATA STATE
     ===================================================== */
 
-    const [
-        dashboardData,
-        setDashboardData,
-    ] = useState<DashboardResponse | null>(
-        null,
-    );
 
 
-    const [
-        activeWarnings,
-        setActiveWarnings,
-    ] = useState<ActiveWarning[]>(
-        [],
-    );
 
 
-    const [
-        filterOptions,
-        setFilterOptions,
-    ] = useState<DashboardFilterOptionsState>({
-        reportingPeriods: [],
-        ministries: [],
-        sectors: [],
-        states: [],
-        riskLevels: [
-            "Critical",
-            "High",
-            "Elevated",
-            "Moderate",
-            "Low",
+
+    const filterOptionsQuery = useQuery({
+        queryKey: ["dashboard-filter-options"],
+        queryFn: getDashboardFilterOptions,
+        staleTime: 10 * 60_000,
+    });
+
+    const filterOptions: DashboardFilterOptionsState = {
+        reportingPeriods:
+            filterOptionsQuery.data?.periods ?? [],
+
+        ministries:
+            filterOptionsQuery.data?.ministries ?? [],
+
+        sectors:
+            filterOptionsQuery.data?.sectors ?? [],
+
+        states:
+            filterOptionsQuery.data?.states ?? [],
+
+        riskLevels:
+            filterOptionsQuery.data?.risk_levels?.length
+                ? filterOptionsQuery.data.risk_levels
+                : [
+                    "Critical",
+                    "High",
+                    "Elevated",
+                    "Moderate",
+                    "Low",
+                ],
+
+        statuses:
+            filterOptionsQuery.data?.statuses?.length
+                ? filterOptionsQuery.data.statuses
+                : [
+                    "Ongoing",
+                    "Delayed",
+                    "Completed",
+                    "On Schedule",
+                    "Accelerated",
+                    "No Revised Date",
+                ],
+    };
+
+
+    const dashboardQuery = useQuery({
+        queryKey: [
+            "dashboard",
+            appliedFilters,
+            debouncedSearch,
         ],
-        statuses: [
-            "Ongoing",
-            "Delayed",
-            "Completed",
-            "On Schedule",
-            "Accelerated",
-            "No Revised Date",
-        ],
+
+        queryFn: () =>
+            getDashboard({
+                ...normalizeDashboardFilters(
+                    appliedFilters,
+                ),
+                search:
+                    debouncedSearch || undefined,
+            }),
+
+        staleTime: 60_000,
     });
 
 
-    const [
-        isLoading,
-        setIsLoading,
-    ] = useState(true);
+    const dashboardData =
+        dashboardQuery.data ?? null;
 
 
-    const [
-        isLoadingFilters,
-        setIsLoadingFilters,
-    ] = useState(true);
+    const isLoading =
+        dashboardQuery.isLoading ||
+        dashboardQuery.isFetching;
 
 
-    const [
-        isLoadingWarnings,
-        setIsLoadingWarnings,
-    ] = useState(true);
+    const dashboardError =
+        dashboardQuery.error
+            ? dashboardQuery.error instanceof Error
+                ? dashboardQuery.error.message
+                : "Failed to load dashboard data."
+            : null;
 
 
-    const [
-        error,
-        setError,
-    ] = useState<string | null>(
-        null,
-    );
+
+
+
+
 
 
     /* =====================================================
        LOAD FILTER OPTIONS
     ===================================================== */
 
-    useEffect(() => {
-        let cancelled = false;
 
-        const loadFilters =
-            async () => {
-                setIsLoadingFilters(
-                    true,
-                );
-
-                try {
-                    const options =
-                        await getDashboardFilterOptions();
-
-                    if (cancelled) {
-                        return;
-                    }
-
-                    const periods =
-                        options.periods ??
-                        [];
-
-                    setFilterOptions({
-                        reportingPeriods:
-                            periods,
-
-                        ministries:
-                            options.ministries ??
-                            [],
-
-                        sectors:
-                            options.sectors ??
-                            [],
-
-                        states:
-                            options.states ??
-                            [],
-
-                        riskLevels:
-                            options.risk_levels?.length
-                                ? options.risk_levels
-                                : [
-                                    "Critical",
-                                    "High",
-                                    "Elevated",
-                                    "Moderate",
-                                    "Low",
-                                ],
-
-                        statuses:
-                            options.statuses?.length
-                                ? options.statuses
-                                : [
-                                    "Ongoing",
-                                    "Delayed",
-                                    "Completed",
-                                    "On Schedule",
-                                    "Accelerated",
-                                    "No Revised Date",
-                                ],
-                    });
-
-
-                    if (periods.length > 0) {
-                        setFilters(
-                            (current) => ({
-                                ...current,
-                                period:
-                                    current.period ||
-                                    periods[0],
-                            }),
-                        );
-
-                        setAppliedFilters(
-                            (current) => ({
-                                ...current,
-                                period:
-                                    current.period ||
-                                    periods[0],
-                            }),
-                        );
-                    }
-                } catch (
-                    requestError
-                ) {
-                    if (
-                        cancelled
-                    ) {
-                        return;
-                    }
-
-                    setError(
-                        requestError instanceof
-                            Error
-                            ? requestError.message
-                            : "Unable to load dashboard filter options.",
-                    );
-                } finally {
-                    if (!cancelled) {
-                        setIsLoadingFilters(
-                            false,
-                        );
-                    }
-                }
-            };
-
-        loadFilters();
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
 
 
     /* =====================================================
        LOAD DASHBOARD
     ===================================================== */
 
-    useEffect(() => {
-        if (
-            isLoadingFilters
-        ) {
-            return;
-        }
-
-        let cancelled = false;
-
-        const timer =
-            window.setTimeout(
-                async () => {
-                    setIsLoading(
-                        true,
-                    );
-
-                    setError(
-                        null,
-                    );
-
-                    try {
-                        const data =
-                            await getDashboard({
-                                ...normalizeDashboardFilters(
-                                    appliedFilters,
-                                ),
-
-                                search:
-                                    search.trim() ||
-                                    undefined,
-                            });
-
-                        if (
-                            cancelled
-                        ) {
-                            return;
-                        }
-
-                        setDashboardData(
-                            data,
-                        );
-                    } catch (
-                        requestError
-                    ) {
-                        if (
-                            cancelled
-                        ) {
-                            return;
-                        }
-
-                        setError(
-                            requestError instanceof
-                                Error
-                                ? requestError.message
-                                : "Unable to load dashboard data.",
-                        );
-                    } finally {
-                        if (
-                            !cancelled
-                        ) {
-                            setIsLoading(
-                                false,
-                            );
-                        }
-                    }
-                },
-                250,
-            );
-
-        return () => {
-            cancelled = true;
-
-            window.clearTimeout(
-                timer,
-            );
-        };
-    }, [
-        appliedFilters,
-        search,
-        isLoadingFilters,
-    ]);
 
 
     /* =====================================================
-       LOAD REAL EARLY WARNINGS
-    ===================================================== */
+   LOAD REAL EARLY WARNINGS
+===================================================== */
 
-    useEffect(() => {
-        let cancelled = false;
+    const warningsQuery = useQuery({
+        queryKey: ["active-warnings"],
 
-        const loadWarnings =
-            async () => {
-                setIsLoadingWarnings(
-                    true,
-                );
+        queryFn: getActiveWarnings,
 
-                try {
-                    const warnings =
-                        await getActiveWarnings();
+        staleTime: 60_000,
 
-                    if (
-                        cancelled
-                    ) {
-                        return;
-                    }
+        refetchInterval: 60_000,
 
-                    setActiveWarnings(
-                        warnings ?? [],
-                    );
-                } catch {
-                    if (
-                        !cancelled
-                    ) {
-                        setActiveWarnings(
-                            [],
-                        );
-                    }
-                } finally {
-                    if (
-                        !cancelled
-                    ) {
-                        setIsLoadingWarnings(
-                            false,
-                        );
-                    }
-                }
-            };
+        refetchOnWindowFocus: false,
+    });
 
-        loadWarnings();
+    const activeWarnings =
+        warningsQuery.data ?? [];
 
-        const interval =
-            window.setInterval(
-                loadWarnings,
-                60_000,
-            );
-
-        return () => {
-            cancelled = true;
-
-            window.clearInterval(
-                interval,
-            );
-        };
-    }, []);
-
+    const isLoadingWarnings =
+        warningsQuery.isLoading ||
+        warningsQuery.isFetching;
 
     /* =====================================================
        PROJECTS
@@ -792,11 +615,11 @@ export default function DashboardPage() {
                 "";
 
             const resetValues: DashboardFilters =
-                {
-                    ...defaultDashboardFilters,
-                    period:
-                        firstPeriod,
-                };
+            {
+                ...defaultDashboardFilters,
+                period:
+                    firstPeriod,
+            };
 
             setFilters(
                 resetValues,
@@ -819,10 +642,10 @@ export default function DashboardPage() {
             value: string,
         ) => {
             const nextFilters =
-                {
-                    ...filters,
-                    period: value,
-                };
+            {
+                ...filters,
+                period: value,
+            };
 
             setFilters(
                 nextFilters,
@@ -924,7 +747,7 @@ export default function DashboardPage() {
     ===================================================== */
 
     if (
-        error &&
+        dashboardError &&
         !dashboardData
     ) {
         return (
@@ -954,7 +777,7 @@ export default function DashboardPage() {
                         </h3>
 
                         <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-red-600">
-                            {error}
+                            {dashboardError}
                         </p>
 
                         <Button
@@ -2285,10 +2108,10 @@ function WarningRow({
     count: number;
 
     variant:
-        | "success"
-        | "warning"
-        | "danger"
-        | "info";
+    | "success"
+    | "warning"
+    | "danger"
+    | "info";
 }) {
     return (
         <div className="flex items-center justify-between rounded-xl border border-slate-100 p-3">
@@ -2369,7 +2192,7 @@ function ProjectRow({
                 "overrun",
             ) ||
         costRisk ===
-            "High"
+        "High"
     ) {
         costVariant =
             "warning";
@@ -2437,7 +2260,7 @@ function ProjectRow({
 
                         {riskScore ===
                             null ||
-                        riskScore ===
+                            riskScore ===
                             undefined
                             ? "—"
                             : Number(

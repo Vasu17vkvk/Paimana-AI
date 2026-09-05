@@ -14,6 +14,8 @@ from app.services.project_analytics_service import (
 )
 
 
+
+
 # ============================================================
 # BASIC HELPERS
 # ============================================================
@@ -203,6 +205,7 @@ def _period_to_month(
 def _filter_projects_by_period(
     projects: pd.DataFrame,
     period: str | None,
+    monthly: pd.DataFrame,
 ) -> pd.DataFrame:
 
     target_month = _period_to_month(
@@ -212,9 +215,7 @@ def _filter_projects_by_period(
     if target_month is None:
         return projects
 
-    monthly = _load_table(
-        "paimana_monthly_history"
-    )
+    
 
     if (
         "project_code" not in monthly.columns
@@ -274,29 +275,36 @@ def _attach_ml_risk_scores(
 
     result = projects.copy()
 
-    result[
-        "predicted_cost_overrun_pct"
-    ] = np.nan
+    # --------------------------------------------------------
+    # Initialize output columns
+    # --------------------------------------------------------
 
-    result[
-        "future_delay_probability"
-    ] = np.nan
+    result["predicted_cost_overrun_pct"] = np.nan
+    result["future_delay_probability"] = np.nan
+    result["future_progress_stall_probability"] = np.nan
+    result["cost_risk_score"] = np.nan
+    result["overall_risk_score"] = np.nan
+    result["risk_level_ml"] = None
 
-    result[
-        "future_progress_stall_probability"
-    ] = np.nan
+    if result.empty:
+        return result
 
-    result[
-        "cost_risk_score"
-    ] = np.nan
+    # Normalize project codes once
+    result["project_code"] = (
+        result["project_code"]
+        .apply(_to_project_code)
+    )
 
-    result[
-        "overall_risk_score"
-    ] = np.nan
+    selected_codes = set(
+        result["project_code"].astype(str)
+    )
 
-    result[
-        "risk_level_ml"
-    ] = None
+    if not selected_codes:
+        return result
+
+    # --------------------------------------------------------
+    # Load ML data
+    # --------------------------------------------------------
 
     ml = load_ml_ready()
 
@@ -309,6 +317,23 @@ def _attach_ml_risk_scores(
         ml["project_code"]
         .apply(_to_project_code)
     )
+
+    # --------------------------------------------------------
+    # IMPORTANT OPTIMIZATION:
+    # Keep only projects visible in this dashboard request
+    # before snapshot filtering / sorting / deduplication.
+    # --------------------------------------------------------
+
+    ml = ml[
+        ml["project_code"].isin(selected_codes)
+    ].copy()
+
+    if ml.empty:
+        return result
+
+    # --------------------------------------------------------
+    # Build snapshot date
+    # --------------------------------------------------------
 
     if (
         "snapshot_year" in ml.columns
@@ -325,9 +350,7 @@ def _attach_ml_risk_scores(
             errors="coerce",
         )
 
-    target_month = _period_to_month(
-        period
-    )
+    target_month = _period_to_month(period)
 
     # --------------------------------------------------------
     # Select ML snapshot
@@ -338,12 +361,18 @@ def _attach_ml_risk_scores(
         and "snapshot_date" in ml.columns
     ):
         eligible = ml[
-            ml["snapshot_date"]
-            .le(target_month)
+            ml["snapshot_date"].le(target_month)
         ].copy()
 
         if not eligible.empty:
             ml = eligible
+
+    if ml.empty:
+        return result
+
+    # --------------------------------------------------------
+    # Keep latest snapshot per project
+    # --------------------------------------------------------
 
     sort_columns = [
         column
@@ -367,16 +396,6 @@ def _attach_ml_risk_scores(
         )
         .copy()
     )
-
-    selected_codes = set(
-        result["project_code"]
-        .astype(str)
-    )
-
-    latest_rows = latest_rows[
-        latest_rows["project_code"]
-        .isin(selected_codes)
-    ].copy()
 
     if latest_rows.empty:
         return result
@@ -405,9 +424,8 @@ def _attach_ml_risk_scores(
         keep="last",
     )
 
-    # IMPORTANT:
-    # model_scores_from_features_batch returns
-    # overall_risk_score, not overall_risk.
+    # --------------------------------------------------------
+    # Select only required scoring columns
     # --------------------------------------------------------
 
     risk_columns = [
@@ -432,15 +450,13 @@ def _attach_ml_risk_scores(
 
     scores = scores.rename(
         columns={
-            "risk_level":
-                "risk_level_ml",
+            "risk_level": "risk_level_ml",
         }
     )
 
-    result["project_code"] = (
-        result["project_code"]
-        .apply(_to_project_code)
-    )
+    # --------------------------------------------------------
+    # Merge scores back
+    # --------------------------------------------------------
 
     result = result.merge(
         scores,
@@ -453,7 +469,7 @@ def _attach_ml_risk_scores(
     )
 
     # --------------------------------------------------------
-    # Resolve merged columns correctly
+    # Resolve merged columns
     # --------------------------------------------------------
 
     risk_columns_to_apply = [
@@ -467,20 +483,14 @@ def _attach_ml_risk_scores(
 
     for column in risk_columns_to_apply:
 
-        risk_column = (
-            f"{column}_risk"
-        )
+        risk_column = f"{column}_risk"
 
         if risk_column in result.columns:
 
-            result[column] = (
-                result[risk_column]
-            )
+            result[column] = result[risk_column]
 
             result.drop(
-                columns=[
-                    risk_column
-                ],
+                columns=[risk_column],
                 inplace=True,
             )
 
@@ -892,6 +902,10 @@ def get_dashboard(
 
     projects = _load_dashboard_data()
 
+    monthly = _load_table(
+        "paimana_monthly_history"
+    )
+
     # --------------------------------------------------------
     # PERIOD
     # --------------------------------------------------------
@@ -899,6 +913,7 @@ def get_dashboard(
     projects = _filter_projects_by_period(
         projects,
         period,
+        monthly,
     )
 
     # --------------------------------------------------------
@@ -1236,44 +1251,31 @@ def get_dashboard(
     )
 
     # --------------------------------------------------------
+        # --------------------------------------------------------
     # MONTHLY TREND
     #
     # This respects the selected portfolio filters.
     # --------------------------------------------------------
 
-    monthly = _load_table(
-        "paimana_monthly_history"
-    )
+    monthly = monthly.copy()
 
     monthly["project_code"] = (
-        monthly[
-            "project_code"
-        ]
+        monthly["project_code"]
         .apply(_to_project_code)
     )
 
-    monthly["snapshot_month"] = (
-        pd.to_datetime(
-            monthly[
-                "snapshot_month"
-            ],
-            errors="coerce",
-        )
+    monthly["snapshot_month"] = pd.to_datetime(
+        monthly["snapshot_month"],
+        errors="coerce",
     )
 
     monthly["delay_days"] = pd.to_numeric(
-        monthly.get(
-            "delay_days",
-            0,
-        ),
+        monthly.get("delay_days", 0),
         errors="coerce",
     ).fillna(0)
 
     monthly["cost_overrun_pct"] = pd.to_numeric(
-        monthly.get(
-            "cost_overrun_pct",
-            0,
-        ),
+        monthly.get("cost_overrun_pct", 0),
         errors="coerce",
     ).fillna(0)
 
@@ -1284,85 +1286,113 @@ def get_dashboard(
         ]
     )
 
+    # --------------------------------------------------------
     # Only include currently filtered project codes.
+    # --------------------------------------------------------
+
     selected_codes = set(
-        projects[
-            "project_code"
-        ].astype(str)
+        projects["project_code"].astype(str)
     )
 
     if selected_codes:
         monthly = monthly[
-            monthly[
-                "project_code"
-            ].isin(
+            monthly["project_code"].isin(
                 selected_codes
             )
-        ]
+        ].copy()
+    else:
+        monthly = monthly.iloc[0:0].copy()
+
+    # --------------------------------------------------------
+    # Fast monthly aggregation
+    #
+    # First reduce to one row per project/month.
+    # Then aggregate the month.
+    # --------------------------------------------------------
+
+    if not monthly.empty:
+
+        project_month = (
+            monthly
+            .groupby(
+                [
+                    "snapshot_month",
+                    "project_code",
+                ],
+                as_index=False,
+            )
+            .agg(
+                delay_flag=(
+                    "delay_days",
+                    lambda values: bool(
+                        values.gt(0).any()
+                    ),
+                ),
+                cost_risk_flag=(
+                    "cost_overrun_pct",
+                    lambda values: bool(
+                        values.gt(0).any()
+                    ),
+                ),
+            )
+        )
+
+        monthly_summary = (
+            project_month
+            .groupby(
+                "snapshot_month",
+                as_index=False,
+            )
+            .agg(
+                projects=(
+                    "project_code",
+                    "nunique",
+                ),
+                delayed=(
+                    "delay_flag",
+                    "sum",
+                ),
+                costRisk=(
+                    "cost_risk_flag",
+                    "sum",
+                ),
+            )
+        )
+
+    else:
+
+        monthly_summary = pd.DataFrame(
+            columns=[
+                "snapshot_month",
+                "projects",
+                "delayed",
+                "costRisk",
+            ]
+        )
 
     trend_rows: list[
         dict[str, Any]
     ] = []
 
-    grouped = monthly.groupby(
-        "snapshot_month"
-    )
+    for row in monthly_summary.itertuples(
+        index=False
+    ):
 
-    for (
-        snapshot_month,
-        frame,
-    ) in grouped:
-
-        total = int(
-            frame[
-                "project_code"
-            ].nunique()
-        )
-
-        delayed = int(
-            frame[
-                "delay_days"
-            ]
-            .gt(0)
-            .groupby(
-                frame[
-                    "project_code"
-                ]
-            )
-            .max()
-            .sum()
-        )
-
-        cost_risk = int(
-            frame[
-                "cost_overrun_pct"
-            ]
-            .gt(0)
-            .groupby(
-                frame[
-                    "project_code"
-                ]
-            )
-            .max()
-            .sum()
-        )
+        snapshot_month = row.snapshot_month
+        total = int(row.projects)
+        delayed = int(row.delayed)
+        cost_risk = int(row.costRisk)
 
         trend_rows.append(
             {
                 "month":
-                    snapshot_month.strftime(
-                        "%b"
-                    ),
+                    snapshot_month.strftime("%b"),
 
                 "year":
-                    int(
-                        snapshot_month.year
-                    ),
+                    int(snapshot_month.year),
 
                 "label":
-                    snapshot_month.strftime(
-                        "%b %Y"
-                    ),
+                    snapshot_month.strftime("%b %Y"),
 
                 "projects":
                     total,

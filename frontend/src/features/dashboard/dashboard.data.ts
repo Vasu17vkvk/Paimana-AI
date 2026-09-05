@@ -56,20 +56,6 @@ export const statuses = [
 ];
 
 
-/*
- * IMPORTANT:
- *
- * The following are intentionally empty.
- *
- * DashboardPage now gets real reporting periods,
- * ministries, sectors and states from:
- *
- *     GET /api/dashboard/filter-options
- *
- * Do NOT put dummy project data here.
- */
-
-
 /* =========================================================
    REPORTING PERIODS
 ========================================================= */
