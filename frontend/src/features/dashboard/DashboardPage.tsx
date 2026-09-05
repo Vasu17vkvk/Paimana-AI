@@ -128,6 +128,9 @@ export default function DashboardPage() {
             defaultDashboardFilters,
         );
 
+    const [periodProjectCodes, setPeriodProjectCodes] =
+        useState<Set<string> | null>(null);
+
 
     /*
      * Load PostgreSQL projects + ML predictions
@@ -324,6 +327,58 @@ export default function DashboardPage() {
 
 
     /*
+     * Load project codes for the selected reporting period.
+     */
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadPeriodProjects() {
+            const period = appliedFilters.period?.trim();
+
+            if (!period) {
+                setPeriodProjectCodes(null);
+                return;
+            }
+
+            try {
+                const response = await apiRequest<{
+                    period: string;
+                    project_codes?: string[];
+                    count?: number;
+                }>(
+                    `/analytics/dashboard-period?period=${encodeURIComponent(period)}`,
+                );
+
+                if (cancelled) return;
+
+                const codes = Array.isArray(response.project_codes)
+                    ? response.project_codes.map((code) =>
+                          String(code).trim(),
+                      )
+                    : [];
+
+                setPeriodProjectCodes(new Set(codes));
+            } catch (err) {
+                console.error(
+                    "Reporting period loading failed:",
+                    err,
+                );
+
+                if (!cancelled) {
+                    setPeriodProjectCodes(new Set());
+                }
+            }
+        }
+
+        loadPeriodProjects();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [appliedFilters.period]);
+
+
+    /*
      * Apply dashboard filters.
      */
     const filteredProjects =
@@ -358,6 +413,15 @@ export default function DashboardPage() {
                             .includes(
                                 normalizedSearch,
                             );
+
+                    const projectCode = project.id.replace(
+                        /^PM-/i,
+                        "",
+                    );
+
+                    const matchesPeriod =
+                        periodProjectCodes === null ||
+                        periodProjectCodes.has(projectCode);
 
 
                     const matchesMinistry =
@@ -398,6 +462,7 @@ export default function DashboardPage() {
 
 
                     return (
+                        matchesPeriod &&
                         matchesSearch &&
                         matchesMinistry &&
                         matchesSector &&
@@ -411,6 +476,7 @@ export default function DashboardPage() {
             projects,
             search,
             appliedFilters,
+            periodProjectCodes,
         ]);
 
 
@@ -538,6 +604,8 @@ export default function DashboardPage() {
             defaultDashboardFilters,
         );
 
+        setPeriodProjectCodes(null);
+
         setSearch("");
     };
 
@@ -607,13 +675,19 @@ export default function DashboardPage() {
                         <Select
                             aria-label="Reporting period"
                             value={filters.period}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                                const period = event.target.value;
+
                                 setFilters({
                                     ...filters,
-                                    period:
-                                        event.target.value,
-                                })
-                            }
+                                    period,
+                                });
+
+                                setAppliedFilters({
+                                    ...appliedFilters,
+                                    period,
+                                });
+                            }}
                             options={reportingPeriods.map(
                                 (period) => ({
                                     label: period,
@@ -647,13 +721,19 @@ export default function DashboardPage() {
                 <Select
                     aria-label="Reporting period"
                     value={filters.period}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                        const period = event.target.value;
+
                         setFilters({
                             ...filters,
-                            period:
-                                event.target.value,
-                        })
-                    }
+                            period,
+                        });
+
+                        setAppliedFilters({
+                            ...appliedFilters,
+                            period,
+                        });
+                    }}
                     options={reportingPeriods.map(
                         (period) => ({
                             label: period,
