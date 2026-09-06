@@ -4,26 +4,21 @@ import {
     Bell,
     CheckCheck,
     Info,
+    Loader2,
     Search,
     ShieldAlert,
-
     X,
 } from "lucide-react";
-
-import { useMemo, useState } from "react";
-
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
+import { apiRequest } from "../../services/api";
 
-type NotificationType =
-    | "critical"
-    | "warning"
-    | "info"
-    | "success";
+type NotificationType = "critical" | "warning" | "info" | "success";
 
 type NotificationCategory =
     | "Risk"
@@ -31,6 +26,21 @@ type NotificationCategory =
     | "Delay"
     | "Progress"
     | "System";
+
+interface EarlyWarningProject {
+    project_code: number | string;
+    project_name?: string | null;
+    sector?: string | null;
+    ministry?: string | null;
+    state?: string | null;
+    delay_days?: number | null;
+    cost_overrun_pct?: number | null;
+    physical_progress_pct?: number | null;
+    schedule_status?: string | null;
+    cost_status?: string | null;
+    warning_count?: number;
+    warnings?: string[];
+}
 
 interface Notification {
     id: string;
@@ -45,297 +55,270 @@ interface Notification {
     actionLabel?: string;
 }
 
+const READ_STORAGE_KEY = "paimana-notification-read";
+const HIDDEN_STORAGE_KEY = "paimana-notification-hidden";
 
-/* =========================================================
-   MOCK NOTIFICATION DATA
-========================================================= */
+function normaliseProjectCode(value: number | string | null | undefined) {
+    return String(value ?? "").replace(/^PM-/i, "").trim();
+}
 
-const initialNotifications: Notification[] = [
-    {
-        id: "N-001",
-        title: "Critical delay risk detected",
-        message:
-            "Schedule deterioration has increased the predicted delay risk for National Highway Development.",
-        project: "National Highway Development",
-        projectId: "PM-400005",
-        type: "critical",
-        category: "Delay",
-        timestamp: "10 minutes ago",
-        isRead: false,
-        actionLabel: "View project",
-    },
+function categoryForWarnings(warnings: string[]): NotificationCategory {
+    const text = warnings.join(" ").toLowerCase();
 
-    {
-        id: "N-002",
-        title: "High cost escalation risk",
-        message:
-            "The predicted cost trajectory has moved above the monitoring threshold.",
-        project: "Freight Logistics Corridor",
-        projectId: "PM-400882",
-        type: "critical",
-        category: "Cost",
-        timestamp: "32 minutes ago",
-        isRead: false,
-        actionLabel: "View prediction",
-    },
+    const hasCost = text.includes("cost") || text.includes("expenditure");
+    const hasDelay = text.includes("delay") || text.includes("schedule");
 
-    {
-        id: "N-003",
-        title: "Risk score increased",
-        message:
-            "Overall project risk increased from 68 to 82 following new schedule and progress signals.",
-        project: "Regional Water Supply System",
-        projectId: "PM-400117",
-        type: "warning",
-        category: "Risk",
-        timestamp: "1 hour ago",
-        isRead: false,
-        actionLabel: "Review risk",
-    },
+    const hasProgress =
+        text.includes("progress") || text.includes("stagnation");
 
-    {
-        id: "N-004",
-        title: "Physical progress has stalled",
-        message:
-            "No meaningful physical progress has been recorded during the latest monitoring period.",
-        project: "Regional Power Infrastructure",
-        projectId: "PM-400993",
-        type: "warning",
-        category: "Progress",
-        timestamp: "2 hours ago",
-        isRead: false,
-        actionLabel: "View project",
-    },
+    if (hasCost && !hasDelay && !hasProgress) return "Cost";
+    if (hasDelay && !hasCost && !hasProgress) return "Delay";
+    if (hasProgress && !hasCost && !hasDelay) return "Progress";
 
-    {
-        id: "N-005",
-        title: "Schedule revision detected",
-        message:
-            "The expected completion date has moved by more than six months.",
-        project: "Integrated Railway Corridor",
-        projectId: "PM-400331",
-        type: "warning",
-        category: "Delay",
-        timestamp: "3 hours ago",
-        isRead: true,
-        actionLabel: "View project",
-    },
+    return "Risk";
+}
 
-    {
-        id: "N-006",
-        title: "Cost revision recorded",
-        message:
-            "The latest project estimate reflects an updated approved/revised cost.",
-        project: "Power Transmission Expansion",
-        projectId: "PM-400221",
-        type: "info",
-        category: "Cost",
-        timestamp: "5 hours ago",
-        isRead: true,
-        actionLabel: "View project",
-    },
+function severityForProject(
+    project: EarlyWarningProject,
+): NotificationType {
+    const count = Number(project.warning_count ?? project.warnings?.length ?? 0);
 
-    {
-        id: "N-007",
-        title: "Monitoring data updated",
-        message:
-            "The latest project monitoring dataset has been successfully processed.",
-        project: "",
-        projectId: "",
-        type: "success",
-        category: "System",
-        timestamp: "Yesterday",
-        isRead: true,
-    },
+    if (count >= 4) return "critical";
+    return count >= 1 ? "warning" : "info";
+}
 
-    {
-        id: "N-008",
-        title: "Monthly monitoring cycle completed",
-        message:
-            "April 2026 monitoring records are now available for dashboard analysis.",
-        project: "",
-        projectId: "",
-        type: "info",
-        category: "System",
-        timestamp: "Yesterday",
-        isRead: true,
-    },
+function titleForProject(project: EarlyWarningProject) {
+    const warnings = project.warnings ?? [];
+    const count = Number(project.warning_count ?? warnings.length);
 
-    {
-        id: "N-009",
-        title: "Progress health warning",
-        message:
-            "The project is progressing below the expected trajectory.",
-        project: "Metro Connectivity Programme",
-        projectId: "PM-401104",
-        type: "warning",
-        category: "Progress",
-        timestamp: "2 days ago",
-        isRead: true,
-        actionLabel: "View project",
-    },
-];
+    if (count >= 4) return "Critical project warning";
+    if (count >= 2) return "Multiple project warnings";
+    return warnings[0] ? `${warnings[0]} detected` : "Project warning detected";
+}
 
+function messageForProject(project: EarlyWarningProject) {
+    const warnings = project.warnings ?? [];
+    const parts: string[] = [];
 
-/* =========================================================
-   PAGE
-========================================================= */
+    if (warnings.length) {
+        parts.push(warnings.join(", ") + ".");
+    }
+
+    if (project.delay_days != null && Number(project.delay_days) > 0) {
+        parts.push(`Current delay: ${Number(project.delay_days).toFixed(0)} days.`);
+    }
+
+    if (project.cost_overrun_pct != null && Number(project.cost_overrun_pct) > 0) {
+        parts.push(
+            `Cost overrun: ${Number(project.cost_overrun_pct).toFixed(1)}%.`,
+        );
+    }
+
+    if (project.physical_progress_pct != null) {
+        parts.push(
+            `Physical progress: ${Number(project.physical_progress_pct).toFixed(1)}%.`,
+        );
+    }
+
+    return parts.join(" ") || "An active monitoring warning requires review.";
+}
+
+function buildNotifications(
+    projects: EarlyWarningProject[],
+    readIds: Set<string>,
+    hiddenIds: Set<string>,
+): Notification[] {
+    return projects
+        .map((project) => {
+            const projectId = normaliseProjectCode(project.project_code);
+            const id = `EW-${projectId}`;
+
+            return {
+                id,
+                title: titleForProject(project),
+                message: messageForProject(project),
+                project: project.project_name?.trim() || `Project ${projectId}`,
+                projectId,
+                type: severityForProject(project),
+                category: categoryForWarnings(project.warnings ?? []),
+                timestamp: "Active now",
+                isRead: readIds.has(id),
+                actionLabel: "View project",
+            };
+        })
+        .filter((notification) => !hiddenIds.has(notification.id));
+}
 
 export default function NotificationsPage() {
     const navigate = useNavigate();
 
-    const [notifications, setNotifications] =
-        useState<Notification[]>(
-            initialNotifications,
-        );
+    const [projects, setProjects] = useState<EarlyWarningProject[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-    const [activeTab, setActiveTab] =
-        useState<
-            "All" | "Unread" | "Critical" | NotificationCategory
-        >("All");
+    const [readIds, setReadIds] = useState<Set<string>>(() => {
+        try {
+            return new Set(
+                JSON.parse(
+                    localStorage.getItem(READ_STORAGE_KEY) || "[]",
+                ),
+            );
+        } catch {
+            return new Set();
+        }
+    });
 
-    const [search, setSearch] =
-        useState("");
+    const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => {
+        try {
+            return new Set(
+                JSON.parse(
+                    localStorage.getItem(HIDDEN_STORAGE_KEY) || "[]",
+                ),
+            );
+        } catch {
+            return new Set();
+        }
+    });
 
+    const [activeTab, setActiveTab] = useState<
+        "All" | "Unread" | "Critical" | NotificationCategory
+    >("All");
+
+    const [search, setSearch] = useState("");
     const [selectedNotification, setSelectedNotification] =
         useState<Notification | null>(null);
 
-    const filteredNotifications =
-        useMemo(() => {
-            const query =
-                search.trim().toLowerCase();
+    useEffect(() => {
+        let cancelled = false;
 
-            return notifications.filter(
-                (notification) => {
-                    const matchesSearch =
-                        !query ||
-                        notification.title
-                            .toLowerCase()
-                            .includes(query) ||
-                        notification.message
-                            .toLowerCase()
-                            .includes(query) ||
-                        notification.project
-                            .toLowerCase()
-                            .includes(query);
+        async function loadWarnings() {
+            setLoading(true);
+            setError(null);
 
-                    let matchesTab = true;
+            try {
+                const response = await apiRequest<EarlyWarningProject[]>(
+                    "/early-warnings/projects",
+                );
 
-                    if (activeTab === "Unread") {
-                        matchesTab =
-                            !notification.isRead;
-                    }
-
-                    if (activeTab === "Critical") {
-                        matchesTab =
-                            notification.type ===
-                            "critical";
-                    }
-
-                    if (
-                        activeTab !== "All" &&
-                        activeTab !== "Unread" &&
-                        activeTab !== "Critical"
-                    ) {
-                        matchesTab =
-                            notification.category ===
-                            activeTab;
-                    }
-
-                    return (
-                        matchesSearch &&
-                        matchesTab
+                if (!cancelled) {
+                    setProjects(Array.isArray(response) ? response : []);
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setError(
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to load notifications.",
                     );
-                },
-            );
-        }, [
-            notifications,
-            search,
-            activeTab,
-        ]);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        }
 
+        loadWarnings();
 
-    const unreadCount =
-        notifications.filter(
-            (notification) =>
-                !notification.isRead,
-        ).length;
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
-    const criticalCount =
-        notifications.filter(
-            (notification) =>
-                notification.type ===
-                "critical" &&
-                !notification.isRead,
-        ).length;
-
-
-    const markAsRead = (
-        notificationId: string,
-    ) => {
-        setNotifications(
-            (current) =>
-                current.map(
-                    (notification) =>
-                        notification.id ===
-                            notificationId
-                            ? {
-                                ...notification,
-                                isRead: true,
-                            }
-                            : notification,
-                ),
+    useEffect(() => {
+        localStorage.setItem(
+            READ_STORAGE_KEY,
+            JSON.stringify([...readIds]),
         );
-    };
+    }, [readIds]);
 
+    useEffect(() => {
+        localStorage.setItem(
+            HIDDEN_STORAGE_KEY,
+            JSON.stringify([...hiddenIds]),
+        );
+    }, [hiddenIds]);
+
+    const notifications = useMemo(
+        () => buildNotifications(projects, readIds, hiddenIds),
+        [projects, readIds, hiddenIds],
+    );
+
+    const filteredNotifications = useMemo(() => {
+        const query = search.trim().toLowerCase();
+
+        return notifications.filter((notification) => {
+            const matchesSearch =
+                !query ||
+                notification.title.toLowerCase().includes(query) ||
+                notification.message.toLowerCase().includes(query) ||
+                notification.project.toLowerCase().includes(query);
+
+            let matchesTab = true;
+
+            if (activeTab === "Unread") {
+                matchesTab = !notification.isRead;
+            } else if (activeTab === "Critical") {
+                matchesTab = notification.type === "critical";
+            } else if (activeTab === "All") {
+                matchesTab = true;
+            } else {
+                matchesTab = notification.category === activeTab;
+            }
+
+            return matchesSearch && matchesTab;
+        });
+    }, [notifications, search, activeTab]);
+
+    const unreadCount = notifications.filter(
+        (notification) => !notification.isRead,
+    ).length;
+
+    const criticalCount = notifications.filter(
+        (notification) => notification.type === "critical",
+    ).length;
+
+    const warningCount = notifications.filter(
+        (notification) => notification.type === "warning",
+    ).length;
+
+    const markAsRead = (notificationId: string) => {
+        setReadIds((current) => {
+            const next = new Set(current);
+            next.add(notificationId);
+            return next;
+        });
+    };
 
     const markAllAsRead = () => {
-        setNotifications(
-            (current) =>
-                current.map(
-                    (notification) => ({
-                        ...notification,
-                        isRead: true,
-                    }),
-                ),
-        );
+        setReadIds((current) => {
+            const next = new Set(current);
+            notifications.forEach((notification) => next.add(notification.id));
+            return next;
+        });
     };
 
+    const removeNotification = (notificationId: string) => {
+        setHiddenIds((current) => {
+            const next = new Set(current);
+            next.add(notificationId);
+            return next;
+        });
 
-    const removeNotification = (
-        notificationId: string,
-    ) => {
-        setNotifications(
-            (current) =>
-                current.filter(
-                    (notification) =>
-                        notification.id !==
-                        notificationId,
-                ),
-        );
-
-        if (
-            selectedNotification?.id ===
-            notificationId
-        ) {
-            setSelectedNotification(
-                null,
-            );
+        if (selectedNotification?.id === notificationId) {
+            setSelectedNotification(null);
         }
     };
 
+    const openProject = (projectId: string) => {
+        if (!projectId) return;
+
+        setSelectedNotification(null);
+        navigate(`/project-analytics?project=${encodeURIComponent(projectId)}`);
+    };
 
     return (
         <div className="mx-auto w-full max-w-[1400px]">
-
-            {/* ==================================================
-          PAGE HEADER
-      =================================================== */}
-
             <div className="mb-6">
-
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-
                     <div>
                         <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
                             <Bell size={12} />
@@ -347,104 +330,54 @@ export default function NotificationsPage() {
                         </h1>
 
                         <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500 sm:text-sm">
-                            Review project alerts, risk changes,
-                            cost and schedule warnings, and system
-                            updates.
+                            Live project warnings generated from the current
+                            PAIMANA early-warning monitoring data.
                         </p>
                     </div>
 
-
-                    <div className="flex gap-2">
-
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={markAllAsRead}
-                            disabled={unreadCount === 0}
-                        >
-                            <CheckCheck size={14} />
-                            Mark all as read
-                        </Button>
-
-                    </div>
-
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={markAllAsRead}
+                        disabled={unreadCount === 0}
+                    >
+                        <CheckCheck size={14} />
+                        Mark all as read
+                    </Button>
                 </div>
-
             </div>
 
-
-            {/* ==================================================
-          SUMMARY CARDS
-      =================================================== */}
-
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-
                 <NotificationSummary
-                    label="Total"
-                    value={
-                        notifications.length
-                    }
-                    icon={
-                        <Bell size={17} />
-                    }
+                    label="Active"
+                    value={notifications.length}
+                    icon={<Bell size={17} />}
                 />
 
                 <NotificationSummary
                     label="Unread"
                     value={unreadCount}
-                    icon={
-                        <Info size={17} />
-                    }
+                    icon={<Info size={17} />}
                 />
 
                 <NotificationSummary
                     label="Critical"
                     value={criticalCount}
-                    icon={
-                        <ShieldAlert size={17} />
-                    }
+                    icon={<ShieldAlert size={17} />}
                 />
 
                 <NotificationSummary
                     label="Warnings"
-                    value={
-                        notifications.filter(
-                            (item) =>
-                                item.type ===
-                                "warning" &&
-                                !item.isRead,
-                        ).length
-                    }
-                    icon={
-                        <AlertTriangle
-                            size={17}
-                        />
-                    }
+                    value={warningCount}
+                    icon={<AlertTriangle size={17} />}
                 />
-
             </section>
 
-
-            {/* ==================================================
-          CONTENT
-      =================================================== */}
-
             <section className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
-
-                {/* Notification list */}
-                <Card
-                    padding="none"
-                    className="min-w-0 overflow-hidden"
-                >
-
-                    {/* Search / tabs */}
+                <Card padding="none" className="min-w-0 overflow-hidden">
                     <div className="border-b border-slate-100 p-4 sm:p-5">
-
                         <div className="flex flex-col gap-4">
-
-                            {/* Search */}
                             <div className="relative w-full sm:max-w-md">
-
                                 <Search
                                     size={15}
                                     className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -453,265 +386,150 @@ export default function NotificationsPage() {
                                 <Input
                                     value={search}
                                     onChange={(event) =>
-                                        setSearch(
-                                            event.target.value,
-                                        )
+                                        setSearch(event.target.value)
                                     }
                                     placeholder="Search notifications..."
                                     className="pl-9"
                                 />
-
                             </div>
 
-
-                            {/* Tabs */}
                             <div className="flex min-w-0 gap-1 overflow-x-auto pb-1">
-
                                 <NotificationTab
                                     label="All"
-                                    count={
-                                        notifications.length
-                                    }
-                                    active={
-                                        activeTab === "All"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "All",
-                                        )
-                                    }
+                                    count={notifications.length}
+                                    active={activeTab === "All"}
+                                    onClick={() => setActiveTab("All")}
                                 />
 
                                 <NotificationTab
                                     label="Unread"
                                     count={unreadCount}
-                                    active={
-                                        activeTab ===
-                                        "Unread"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "Unread",
-                                        )
-                                    }
+                                    active={activeTab === "Unread"}
+                                    onClick={() => setActiveTab("Unread")}
                                 />
 
                                 <NotificationTab
                                     label="Critical"
-                                    count={
-                                        notifications.filter(
-                                            (item) =>
-                                                item.type ===
-                                                "critical",
-                                        ).length
-                                    }
-                                    active={
-                                        activeTab ===
-                                        "Critical"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "Critical",
-                                        )
-                                    }
+                                    count={criticalCount}
+                                    active={activeTab === "Critical"}
+                                    onClick={() => setActiveTab("Critical")}
                                 />
 
-                                <NotificationTab
-                                    label="Risk"
-                                    active={
-                                        activeTab ===
-                                        "Risk"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "Risk",
-                                        )
-                                    }
-                                />
-
-                                <NotificationTab
-                                    label="Cost"
-                                    active={
-                                        activeTab ===
-                                        "Cost"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "Cost",
-                                        )
-                                    }
-                                />
-
-                                <NotificationTab
-                                    label="Delay"
-                                    active={
-                                        activeTab ===
-                                        "Delay"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "Delay",
-                                        )
-                                    }
-                                />
-
-                                <NotificationTab
-                                    label="Progress"
-                                    active={
-                                        activeTab ===
-                                        "Progress"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "Progress",
-                                        )
-                                    }
-                                />
-
-                                <NotificationTab
-                                    label="System"
-                                    active={
-                                        activeTab ===
-                                        "System"
-                                    }
-                                    onClick={() =>
-                                        setActiveTab(
-                                            "System",
-                                        )
-                                    }
-                                />
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-
-                    {/* List */}
-                    <div>
-
-                        {filteredNotifications.length ===
-                            0 ? (
-                            <div className="px-5 py-16 text-center">
-
-                                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
-                                    <Bell size={20} />
-                                </div>
-
-                                <h3 className="mt-4 text-sm font-bold text-slate-800">
-                                    No notifications found
-                                </h3>
-
-                                <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-slate-400">
-                                    Try changing the selected category
-                                    or search term.
-                                </p>
-
-                            </div>
-                        ) : (
-                            filteredNotifications.map(
-                                (notification) => (
-                                    <NotificationRow
-                                        key={
-                                            notification.id
-                                        }
-                                        notification={
-                                            notification
-                                        }
-                                        onOpen={() => {
-                                            markAsRead(
-                                                notification.id,
-                                            );
-
-                                            setSelectedNotification(
-                                                notification,
-                                            );
-                                        }}
-                                        onDelete={() =>
-                                            removeNotification(
-                                                notification.id,
-                                            )
-                                        }
+                                {(
+                                    [
+                                        "Risk",
+                                        "Cost",
+                                        "Delay",
+                                        "Progress",
+                                    ] as NotificationCategory[]
+                                ).map((category) => (
+                                    <NotificationTab
+                                        key={category}
+                                        label={category}
+                                        active={activeTab === category}
+                                        onClick={() => setActiveTab(category)}
                                     />
-                                ),
-                            )
-                        )}
-
+                                ))}
+                            </div>
+                        </div>
                     </div>
 
+                    {loading ? (
+                        <div className="flex min-h-[320px] items-center justify-center">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                                <Loader2
+                                    size={16}
+                                    className="animate-spin"
+                                />
+                                Loading live warnings...
+                            </div>
+                        </div>
+                    ) : error ? (
+                        <div className="px-5 py-16 text-center">
+                            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-50 text-red-500">
+                                <ShieldAlert size={20} />
+                            </div>
+
+                            <h3 className="mt-4 text-sm font-bold text-slate-800">
+                                Could not load notifications
+                            </h3>
+
+                            <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-slate-400">
+                                {error}
+                            </p>
+                        </div>
+                    ) : filteredNotifications.length === 0 ? (
+                        <div className="px-5 py-16 text-center">
+                            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
+                                <Bell size={20} />
+                            </div>
+
+                            <h3 className="mt-4 text-sm font-bold text-slate-800">
+                                No notifications found
+                            </h3>
+
+                            <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-slate-400">
+                                No active warnings match the selected
+                                category or search term.
+                            </p>
+                        </div>
+                    ) : (
+                        <div>
+                            {filteredNotifications.map((notification) => (
+                                <NotificationRow
+                                    key={notification.id}
+                                    notification={notification}
+                                    onOpen={() => {
+                                        markAsRead(notification.id);
+                                        setSelectedNotification(notification);
+                                    }}
+                                    onDelete={() =>
+                                        removeNotification(notification.id)
+                                    }
+                                />
+                            ))}
+                        </div>
+                    )}
                 </Card>
 
-
-                {/* Desktop detail panel */}
                 <div className="hidden xl:sticky xl:top-[92px] xl:block xl:self-start">
                     {selectedNotification ? (
                         <NotificationDetails
                             notification={selectedNotification}
-                            onClose={() =>
-                                setSelectedNotification(null)
+                            onClose={() => setSelectedNotification(null)}
+                            onProject={() =>
+                                openProject(selectedNotification.projectId)
                             }
-                            onProject={() => {
-                                if (
-                                    selectedNotification.projectId
-                                ) {
-                                    navigate(
-                                        `/project-analytics?project=${selectedNotification.projectId}`,
-                                    );
-                                }
-                            }}
                         />
                     ) : (
                         <NotificationDetailsEmpty />
                     )}
                 </div>
-
             </section>
 
-            {/* Mobile notification detail sheet */}
             {selectedNotification && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-slate-950/40 xl:hidden">
                     <button
                         type="button"
                         aria-label="Close notification details"
-                        onClick={() =>
-                            setSelectedNotification(null)
-                        }
+                        onClick={() => setSelectedNotification(null)}
                         className="absolute inset-0"
                     />
 
                     <div className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl sm:p-5">
                         <NotificationDetails
                             notification={selectedNotification}
-                            onClose={() =>
-                                setSelectedNotification(null)
+                            onClose={() => setSelectedNotification(null)}
+                            onProject={() =>
+                                openProject(selectedNotification.projectId)
                             }
-                            onProject={() => {
-                                if (
-                                    selectedNotification.projectId
-                                ) {
-                                    setSelectedNotification(
-                                        null,
-                                    );
-
-                                    navigate(
-                                        `/project-analytics?project=${selectedNotification.projectId}`,
-                                    );
-                                }
-                            }}
                         />
                     </div>
                 </div>
             )}
-
         </div>
     );
 }
-
-
-/* =========================================================
-   SUMMARY CARD
-========================================================= */
 
 function NotificationSummary({
     label,
@@ -720,11 +538,10 @@ function NotificationSummary({
 }: {
     label: string;
     value: number;
-    icon: React.ReactNode;
+    icon: ReactNode;
 }) {
     return (
         <Card padding="md">
-
             <div className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-500">
                 {icon}
             </div>
@@ -736,15 +553,9 @@ function NotificationSummary({
             <div className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
                 {value}
             </div>
-
         </Card>
     );
 }
-
-
-/* =========================================================
-   TAB
-========================================================= */
 
 function NotificationTab({
     label,
@@ -786,11 +597,6 @@ function NotificationTab({
     );
 }
 
-
-/* =========================================================
-   NOTIFICATION ROW
-========================================================= */
-
 function NotificationRow({
     notification,
     onOpen,
@@ -800,25 +606,17 @@ function NotificationRow({
     onOpen: () => void;
     onDelete: () => void;
 }) {
-    const config =
-        notificationVisual(
-            notification.type,
-        );
-
+    const config = notificationVisual(notification.type);
     const Icon = config.icon;
 
     return (
         <div
             className={[
                 "group flex gap-3 border-b border-slate-100 p-4 transition-colors sm:p-5",
-                !notification.isRead
-                    ? "bg-slate-50/60"
-                    : "bg-white",
+                !notification.isRead ? "bg-slate-50/60" : "bg-white",
                 "hover:bg-slate-50",
             ].join(" ")}
         >
-
-            {/* Icon */}
             <div
                 className={[
                     "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
@@ -829,16 +627,12 @@ function NotificationRow({
                 <Icon size={17} />
             </div>
 
-
-            {/* Content */}
             <button
                 type="button"
                 onClick={onOpen}
                 className="min-w-0 flex-1 text-left"
             >
-
                 <div className="flex flex-wrap items-center gap-2">
-
                     {!notification.isRead && (
                         <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                     )}
@@ -847,48 +641,29 @@ function NotificationRow({
                         {notification.title}
                     </h3>
 
-                    <Badge
-                        variant={
-                            config.badgeVariant
-                        }
-                    >
+                    <Badge variant={config.badgeVariant}>
                         {notification.category}
                     </Badge>
-
                 </div>
-
 
                 <p className="mt-1.5 line-clamp-2 text-[11px] leading-5 text-slate-500 sm:text-xs">
                     {notification.message}
                 </p>
 
-
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
-
-                    {notification.project && (
-                        <span className="font-semibold text-slate-500">
-                            {notification.project}
-                        </span>
-                    )}
-
-                    <span>
-                        {notification.timestamp}
+                    <span className="font-semibold text-slate-500">
+                        {notification.project}
                     </span>
 
+                    <span>{notification.timestamp}</span>
                 </div>
-
             </button>
 
-
-            {/* Actions */}
             <div className="flex shrink-0 items-start gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-
                 <button
                     type="button"
-                    title="Delete notification"
-                    onClick={
-                        onDelete
-                    }
+                    title="Hide notification"
+                    onClick={onDelete}
                     className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
                 >
                     <X size={14} />
@@ -902,17 +677,10 @@ function NotificationRow({
                 >
                     <ArrowRight size={14} />
                 </button>
-
             </div>
-
         </div>
     );
 }
-
-
-/* =========================================================
-   DETAILS
-========================================================= */
 
 function NotificationDetails({
     notification,
@@ -923,18 +691,12 @@ function NotificationDetails({
     onClose: () => void;
     onProject: () => void;
 }) {
-    const config =
-        notificationVisual(
-            notification.type,
-        );
-
+    const config = notificationVisual(notification.type);
     const Icon = config.icon;
 
     return (
         <Card padding="lg">
-
             <div className="flex items-start justify-between gap-3">
-
                 <div
                     className={[
                         "grid h-10 w-10 place-items-center rounded-xl",
@@ -953,18 +715,10 @@ function NotificationDetails({
                 >
                     <X size={16} />
                 </button>
-
             </div>
 
-
             <div className="mt-5">
-
-                <Badge
-                    variant={
-                        config.badgeVariant
-                    }
-                    dot
-                >
+                <Badge variant={config.badgeVariant} dot>
                     {notification.category}
                 </Badge>
 
@@ -975,68 +729,44 @@ function NotificationDetails({
                 <p className="mt-2 text-xs leading-5 text-slate-500">
                     {notification.message}
                 </p>
-
             </div>
 
-
-            {notification.project && (
-                <div className="mt-6 rounded-xl border border-slate-100 bg-slate-50 p-4">
-
-                    <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">
-                        RELATED PROJECT
-                    </div>
-
-                    <div className="mt-1 text-sm font-bold text-slate-800">
-                        {notification.project}
-                    </div>
-
-                    <div className="mt-1 text-[10px] text-slate-400">
-                        {notification.projectId}
-                    </div>
-
+            <div className="mt-6 rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                    RELATED PROJECT
                 </div>
-            )}
 
+                <div className="mt-1 text-sm font-bold text-slate-800">
+                    {notification.project}
+                </div>
+
+                <div className="mt-1 text-[10px] text-slate-400">
+                    {notification.projectId}
+                </div>
+            </div>
 
             <div className="mt-6 grid grid-cols-2 gap-3">
-
                 <DetailMetric
                     label="Severity"
                     value={
-                        notification.type
-                            .charAt(0)
-                            .toUpperCase() +
+                        notification.type.charAt(0).toUpperCase() +
                         notification.type.slice(1)
                     }
                 />
 
                 <DetailMetric
-                    label="Time"
-                    value={
-                        notification.timestamp
-                    }
+                    label="Status"
+                    value={notification.timestamp}
                 />
-
             </div>
 
-
-            {notification.project && (
-                <Button
-                    fullWidth
-                    className="mt-6"
-                    onClick={
-                        onProject
-                    }
-                >
-                    Open project
-                    <ArrowRight size={14} />
-                </Button>
-            )}
-
+            <Button fullWidth className="mt-6" onClick={onProject}>
+                Open project
+                <ArrowRight size={14} />
+            </Button>
         </Card>
     );
 }
-
 
 function DetailMetric({
     label,
@@ -1047,7 +777,6 @@ function DetailMetric({
 }) {
     return (
         <div className="rounded-xl border border-slate-100 p-3">
-
             <div className="text-[9px] font-bold uppercase tracking-[0.06em] text-slate-400">
                 {label}
             </div>
@@ -1055,21 +784,14 @@ function DetailMetric({
             <div className="mt-1 text-xs font-semibold text-slate-700">
                 {value}
             </div>
-
         </div>
     );
 }
 
-
 function NotificationDetailsEmpty() {
     return (
-        <Card
-            padding="lg"
-            className="min-h-[330px]"
-        >
-
+        <Card padding="lg" className="min-h-[330px]">
             <div className="flex h-full min-h-[290px] flex-col items-center justify-center text-center">
-
                 <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
                     <Bell size={20} />
                 </div>
@@ -1079,68 +801,47 @@ function NotificationDetailsEmpty() {
                 </h3>
 
                 <p className="mt-2 max-w-xs text-xs leading-5 text-slate-400">
-                    Select an alert from the list to view
-                    details and take action.
+                    Select an alert from the list to view details and take
+                    action.
                 </p>
-
             </div>
-
         </Card>
     );
 }
 
-
-/* =========================================================
-   VISUAL CONFIG
-========================================================= */
-
-function notificationVisual(
-    type: NotificationType,
-) {
+function notificationVisual(type: NotificationType) {
     switch (type) {
         case "critical":
             return {
                 icon: ShieldAlert,
-                iconBackground:
-                    "bg-red-50",
-                iconText:
-                    "text-red-600",
-                badgeVariant:
-                    "danger" as const,
+                iconBackground: "bg-red-50",
+                iconText: "text-red-600",
+                badgeVariant: "danger" as const,
             };
 
         case "warning":
             return {
                 icon: AlertTriangle,
-                iconBackground:
-                    "bg-amber-50",
-                iconText:
-                    "text-amber-600",
-                badgeVariant:
-                    "warning" as const,
+                iconBackground: "bg-amber-50",
+                iconText: "text-amber-600",
+                badgeVariant: "warning" as const,
             };
 
         case "success":
             return {
                 icon: CheckCheck,
-                iconBackground:
-                    "bg-emerald-50",
-                iconText:
-                    "text-emerald-600",
-                badgeVariant:
-                    "success" as const,
+                iconBackground: "bg-emerald-50",
+                iconText: "text-emerald-600",
+                badgeVariant: "success" as const,
             };
 
         case "info":
         default:
             return {
                 icon: Info,
-                iconBackground:
-                    "bg-blue-50",
-                iconText:
-                    "text-blue-600",
-                badgeVariant:
-                    "info" as const,
+                iconBackground: "bg-blue-50",
+                iconText: "text-blue-600",
+                badgeVariant: "info" as const,
             };
     }
 }

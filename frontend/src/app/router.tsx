@@ -9,6 +9,7 @@ import CostPredictionPage from "../features/cost-prediction/CostPredictionPage";
 import DelayPredictionPage from "../features/delay-prediction/DelayPredictionPage";
 import ProjectAnalyticsPage from "../features/project-analytics/ProjectAnalyticsPage";
 import GeographicViewPage from "../features/geographic-view/GeographicViewPage";
+import SectorMinistryAnalyticsPage from "../features/ministry-analytics/SectorMinistryAnalyticsPage";
 
 export const router = createBrowserRouter([
     {
@@ -57,7 +58,11 @@ export const router = createBrowserRouter([
                 path: "project-analytics",
                 element: <ProjectAnalyticsPage />,
             },
-
+            // Sector & Ministry Analytics
+            {
+                path: "sector-ministry-analytics",
+                element: <SectorMinistryAnalyticsPage />,
+            },
             // Geographic View
             { path: "geographic-view", element: <GeographicViewPage /> },
 

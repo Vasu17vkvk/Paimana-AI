@@ -4,6 +4,9 @@ import {
     Search,
 } from "lucide-react";
 
+import { useEffect, useState } from "react";
+import { apiRequest } from "../../services/api";
+
 import { useNavigate } from "react-router-dom";
 
 
@@ -15,6 +18,71 @@ export default function Header({
     onMobileMenu,
 }: HeaderProps) {
     const navigate = useNavigate();
+
+    const [notificationCount, setNotificationCount] =
+        useState(0);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadNotificationCount() {
+            try {
+                const notifications =
+                    await apiRequest<
+                        Array<{
+                            project_code: number | string;
+                            warning_count?: number;
+                        }>
+                    >("/early-warnings/projects");
+
+                if (cancelled) return;
+
+                const readIds = new Set<string>();
+
+                try {
+                    const stored = JSON.parse(
+                        localStorage.getItem(
+                            "paimana-notification-read",
+                        ) || "[]",
+                    );
+
+                    if (Array.isArray(stored)) {
+                        stored.forEach((id) =>
+                            readIds.add(String(id)),
+                        );
+                    }
+                } catch {
+                    // Ignore invalid local storage.
+                }
+
+                const unreadCount =
+                    notifications.filter(
+                        (notification) =>
+                            !readIds.has(
+                                `EW-${String(
+                                    notification.project_code,
+                                )
+                                    .replace(/^PM-/i, "")
+                                    .trim()}`,
+                            ),
+                    ).length;
+
+                setNotificationCount(unreadCount);
+            } catch (error) {
+                console.error(
+                    "Notification count loading failed:",
+                    error,
+                );
+            }
+        }
+
+        loadNotificationCount();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     return (
         <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-3 backdrop-blur sm:h-[76px] sm:px-5 lg:px-7">
             {/* Left */}
@@ -58,7 +126,13 @@ export default function Header({
                 >
                     <Bell size={18} />
 
-                    <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-red-500" />
+                    {notificationCount > 0 && (
+                        <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-red-600 px-1 text-center text-[8px] font-bold leading-4 text-white">
+                            {notificationCount > 99
+                                ? "99+"
+                                : notificationCount}
+                        </span>
+)}
                 </button>
 
                 <div className="hidden h-7 w-px bg-slate-200 sm:block" />
