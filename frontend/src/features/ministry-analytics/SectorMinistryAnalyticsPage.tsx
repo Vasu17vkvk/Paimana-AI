@@ -1,816 +1,1067 @@
-import { useEffect, useMemo, useState } from "react";
 import {
-    BarChart3,
-    Building2,
-    Search,
-    TrendingDown,
-    TrendingUp,
-    Activity,
-    AlertTriangle,
+  ProjectsBySectorChart,
+  ProjectsRankingChart,
+  CostVsExpenditureChart,
+  RiskDistributionChart,
+  DelayAnalysisChart,
+  TopCostOverrunChart,
+  MonthlyTrendChart,
+} from "../../components/charts/SectorMinistryCharts";
+
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  BarChart3,
+  Building2,
+  CalendarDays,
+  Database,
+  RefreshCw,
+  ShieldAlert,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 
-import { apiRequest } from "../../services/api";
+import {
+  getSectorMinistryAnalytics,
+  getSectorMinistryFilterOptions,
+  type SummaryRow,
+} from "../../services/sectorMinistryApi";
 
-type SectorRow = {
-    sector: string;
-    projects: number;
-    average_delay_days: number;
-    average_cost_overrun_pct: number;
-    average_progress_pct: number;
-};
+function safeNumber(value: number | null | undefined): number {
+  const parsed = Number(value);
 
-type MinistryRow = {
-    ministry: string;
-    projects: number;
-    average_delay_days: number;
-    average_cost_overrun_pct: number;
-    average_progress_pct: number;
-};
-
-type Tab = "sector" | "ministry";
-
-function MetricCard({
-    title,
-    value,
-    subtitle,
-    icon,
-}: {
-    title: string;
-    value: string;
-    subtitle: string;
-    icon: React.ReactNode;
-}) {
-    return (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between">
-                <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                        {title}
-                    </p>
-
-                    <p className="mt-2 text-2xl font-bold text-slate-800">
-                        {value}
-                    </p>
-
-                    <p className="mt-1 text-[10px] text-slate-400">
-                        {subtitle}
-                    </p>
-                </div>
-
-                <div className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-slate-600">
-                    {icon}
-                </div>
-            </div>
-        </div>
-    );
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function ProgressBar({
-    value,
-    max,
-}: {
-    value: number;
-    max: number;
-}) {
-    const percentage =
-        max > 0
-            ? Math.min((value / max) * 100, 100)
-            : 0;
+function formatCrore(
+  value: number | null | undefined,
+): string {
+  const safeValue = safeNumber(value);
 
-    return (
-        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-            <div
-                className="h-full rounded-full bg-slate-700 transition-all"
-                style={{
-                    width: `${percentage}%`,
-                }}
-            />
-        </div>
-    );
+  if (safeValue >= 100000) {
+    return `₹${(safeValue / 100000).toFixed(2)}L Cr`;
+  }
+
+  if (safeValue >= 1000) {
+    return `₹${(safeValue / 1000).toFixed(2)}K Cr`;
+  }
+
+  return `₹${safeValue.toFixed(2)} Cr`;
+}
+
+function formatNumber(
+  value: number | null | undefined,
+): string {
+  return new Intl.NumberFormat("en-IN").format(
+    Math.round(safeNumber(value)),
+  );
+}
+
+function formatPct(
+  value: number | null | undefined,
+): string {
+  return `${safeNumber(value).toFixed(1)}%`;
+}
+
+function formatMonths(
+  value: number | null | undefined,
+): string {
+  return `${safeNumber(value).toFixed(1)} mo`;
+}
+
+function riskClass(value: number): string {
+  if (value >= 85) {
+    return "text-red-600";
+  }
+
+  if (value >= 70) {
+    return "text-orange-600";
+  }
+
+  if (value >= 40) {
+    return "text-yellow-600";
+  }
+
+  return "text-emerald-600";
 }
 
 export default function SectorMinistryAnalyticsPage() {
-    const [sectorData, setSectorData] = useState<SectorRow[]>([]);
-    const [ministryData, setMinistryData] = useState<MinistryRow[]>([]);
+  const [viewBy, setViewBy] = useState<"sector" | "ministry">("sector");
+  const [ministry, setMinistry] = useState("All Ministries");
+  const [sector, setSector] = useState("All Sectors");
+  const [state, setState] = useState("All States");
+  const [financialYear, setFinancialYear] = useState("All Years");
+  const [snapshotMonth, setSnapshotMonth] = useState("All Months");
 
-    const [activeTab, setActiveTab] =
-        useState<Tab>("sector");
+  const {
+    data: filterOptions,
+    isLoading: isLoadingFilterOptions,
+    isError: isFilterOptionsError,
+  } = useQuery({
+    queryKey: ["sector-ministry-filter-options"],
+    queryFn: getSectorMinistryFilterOptions,
+    staleTime: 5 * 60_000,
+  });
 
-    const [search, setSearch] = useState("");
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: [
+      "sector-ministry-analytics",
+      viewBy,
+      ministry,
+      sector,
+      state,
+      financialYear,
+      snapshotMonth,
+    ],
+    queryFn: () =>
+      getSectorMinistryAnalytics({
+        view_by: viewBy,
+        ministry,
+        sector,
+        state,
+        financial_year: financialYear,
+        snapshot_month: snapshotMonth,
+      }),
+    staleTime: 60_000,
+  });
 
-    const [loading, setLoading] =
-        useState(true);
+  const summaryRows = useMemo<SummaryRow[]>(() => {
+    if (!data) {
+      return [];
+    }
 
-    const [error, setError] =
-        useState("");
+    return viewBy === "sector"
+      ? data.sector_summary
+      : data.ministry_summary;
+  }, [data, viewBy]);
 
-    useEffect(() => {
-        let cancelled = false;
+  const trends = data
+    ? viewBy === "sector"
+      ? data.monthly_trends.sector
+      : data.monthly_trends.ministry
+    : [];
 
-        async function loadAnalytics() {
-            try {
-                setLoading(true);
-                setError("");
+  return (
+    <div className="min-h-full bg-slate-50 p-4 sm:p-6">
+      <div className="mx-auto max-w-7xl space-y-5">
 
-                const [sectors, ministries] =
-                    await Promise.all([
-                        apiRequest<SectorRow[]>(
-                            "/analytics/sectors",
-                        ),
-                        apiRequest<MinistryRow[]>(
-                            "/analytics/ministries",
-                        ),
-                    ]);
-
-                if (cancelled) return;
-
-                setSectorData(
-                    Array.isArray(sectors)
-                        ? sectors
-                        : [],
-                );
-
-                setMinistryData(
-                    Array.isArray(ministries)
-                        ? ministries
-                        : [],
-                );
-            } catch (err) {
-                if (cancelled) return;
-
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to load analytics.",
-                );
-            } finally {
-                if (!cancelled) {
-                    setLoading(false);
-                }
-            }
-        }
-
-        loadAnalytics();
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    const activeData =
-        activeTab === "sector"
-            ? sectorData
-            : ministryData;
-
-    const filteredData = useMemo(() => {
-        const query =
-            search.trim().toLowerCase();
-
-        if (!query) {
-            return activeData;
-        }
-
-        return activeData.filter((item) => {
-            const name =
-                activeTab === "sector"
-                    ? (item as SectorRow).sector
-                    : (item as MinistryRow).ministry;
-
-            return name
-                .toLowerCase()
-                .includes(query);
-        });
-    }, [activeData, activeTab, search]);
-
-    const stats = useMemo(() => {
-        if (!activeData.length) {
-            return {
-                totalProjects: 0,
-                averageDelay: 0,
-                averageCost: 0,
-                averageProgress: 0,
-            };
-        }
-
-        const totalProjects =
-            activeData.reduce(
-                (sum, item) =>
-                    sum + Number(item.projects || 0),
-                0,
-            );
-
-        const weightedDelay =
-            activeData.reduce(
-                (sum, item) =>
-                    sum +
-                    Number(
-                        item.average_delay_days || 0,
-                    ) *
-                        Number(
-                            item.projects || 0,
-                        ),
-                0,
-            );
-
-        const weightedCost =
-            activeData.reduce(
-                (sum, item) =>
-                    sum +
-                    Number(
-                        item.average_cost_overrun_pct ||
-                            0,
-                    ) *
-                        Number(
-                            item.projects || 0,
-                        ),
-                0,
-            );
-
-        const weightedProgress =
-            activeData.reduce(
-                (sum, item) =>
-                    sum +
-                    Number(
-                        item.average_progress_pct || 0,
-                    ) *
-                        Number(
-                            item.projects || 0,
-                        ),
-                0,
-            );
-
-        return {
-            totalProjects,
-            averageDelay:
-                totalProjects > 0
-                    ? weightedDelay / totalProjects
-                    : 0,
-            averageCost:
-                totalProjects > 0
-                    ? weightedCost / totalProjects
-                    : 0,
-            averageProgress:
-                totalProjects > 0
-                    ? weightedProgress / totalProjects
-                    : 0,
-        };
-    }, [activeData]);
-
-    const topProjectCount =
-        activeData.length > 0
-            ? Math.max(
-                  ...activeData.map((item) =>
-                      Number(item.projects || 0),
-                  ),
-              )
-            : 0;
-
-    const highestDelay = useMemo(() => {
-        if (!activeData.length) return null;
-
-        return [...activeData].sort(
-            (a, b) =>
-                Number(
-                    b.average_delay_days || 0,
-                ) -
-                Number(
-                    a.average_delay_days || 0,
-                ),
-        )[0];
-    }, [activeData]);
-
-    const highestCost = useMemo(() => {
-        if (!activeData.length) return null;
-
-        return [...activeData].sort(
-            (a, b) =>
-                Number(
-                    b.average_cost_overrun_pct ||
-                        0,
-                ) -
-                Number(
-                    a.average_cost_overrun_pct ||
-                        0,
-                ),
-        )[0];
-    }, [activeData]);
-
-    const lowestProgress = useMemo(() => {
-        if (!activeData.length) return null;
-
-        return [...activeData].sort(
-            (a, b) =>
-                Number(
-                    a.average_progress_pct || 0,
-                ) -
-                Number(
-                    b.average_progress_pct || 0,
-                ),
-        )[0];
-    }, [activeData]);
-
-    const getName = (
-        item: SectorRow | MinistryRow,
-    ) => {
-        return activeTab === "sector"
-            ? (item as SectorRow).sector
-            : (item as MinistryRow).ministry;
-    };
-
-    return (
-        <div className="min-h-full bg-slate-50 p-3 sm:p-5 lg:p-7">
-            {/* Header */}
-            <div className="mb-5">
-                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
-                            PAIMANA AI
-                        </p>
-
-                        <h1 className="mt-1 text-2xl font-bold text-slate-800">
-                            Sector & Ministry Analytics
-                        </h1>
-
-                        <p className="mt-1 max-w-2xl text-xs text-slate-500">
-                            Compare infrastructure project
-                            performance, delays, cost pressure
-                            and physical progress across
-                            sectors and ministries.
-                        </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-medium text-slate-500 shadow-sm">
-                        <Activity size={14} />
-                        Live PostgreSQL analytics
-                    </div>
-                </div>
+        {/* Header */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <BarChart3 size={13} />
+              Portfolio Intelligence
             </div>
 
-            {/* Tabs */}
-            <div className="mb-5 flex w-full max-w-md rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-                <button
-                    type="button"
-                    onClick={() => {
-                        setActiveTab("sector");
-                        setSearch("");
-                    }}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold transition ${
-                        activeTab === "sector"
-                            ? "bg-slate-800 text-white"
-                            : "text-slate-500 hover:bg-slate-50"
-                    }`}
-                >
-                    <BarChart3 size={15} />
-                    Sector Analytics
-                </button>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">
+              Sector / Ministry Analytics
+            </h1>
 
-                <button
-                    type="button"
-                    onClick={() => {
-                        setActiveTab("ministry");
-                        setSearch("");
-                    }}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold transition ${
-                        activeTab === "ministry"
-                            ? "bg-slate-800 text-white"
-                            : "text-slate-500 hover:bg-slate-50"
-                    }`}
-                >
-                    <Building2 size={15} />
-                    Ministry Analytics
-                </button>
-            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Descriptive, diagnostic and ML-driven infrastructure portfolio analytics.
+            </p>
+          </div>
 
-            {/* Loading */}
-            {loading && (
-                <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                    <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
-
-                    <p className="mt-3 text-xs text-slate-500">
-                        Loading analytics...
-                    </p>
-                </div>
-            )}
-
-            {/* Error */}
-            {!loading && error && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-red-700">
-                        <AlertTriangle size={17} />
-                        Unable to load analytics
-                    </div>
-
-                    <p className="mt-1 text-xs text-red-600">
-                        {error}
-                    </p>
-                </div>
-            )}
-
-            {!loading && !error && (
-                <>
-                    {/* KPI Cards */}
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <MetricCard
-                            title="Total Projects"
-                            value={stats.totalProjects.toLocaleString()}
-                            subtitle={`Across ${activeData.length} ${
-                                activeTab === "sector"
-                                    ? "sectors"
-                                    : "ministries"
-                            }`}
-                            icon={
-                                <BarChart3
-                                    size={17}
-                                />
-                            }
-                        />
-
-                        <MetricCard
-                            title="Average Delay"
-                            value={`${stats.averageDelay.toFixed(
-                                1,
-                            )} days`}
-                            subtitle="Weighted portfolio average"
-                            icon={
-                                <TrendingUp
-                                    size={17}
-                                />
-                            }
-                        />
-
-                        <MetricCard
-                            title="Average Cost Overrun"
-                            value={`${stats.averageCost.toFixed(
-                                1,
-                            )}%`}
-                            subtitle="Weighted portfolio average"
-                            icon={
-                                <TrendingUp
-                                    size={17}
-                                />
-                            }
-                        />
-
-                        <MetricCard
-                            title="Average Progress"
-                            value={`${stats.averageProgress.toFixed(
-                                1,
-                            )}%`}
-                            subtitle="Latest physical progress"
-                            icon={
-                                <TrendingDown
-                                    size={17}
-                                />
-                            }
-                        />
-                    </div>
-
-                    {/* AI Insights */}
-                    <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="flex items-center gap-2">
-                            <div className="grid h-8 w-8 place-items-center rounded-lg bg-slate-800 text-white">
-                                <Activity
-                                    size={15}
-                                />
-                            </div>
-
-                            <div>
-                                <h2 className="text-sm font-bold text-slate-800">
-                                    AI Portfolio Insights
-                                </h2>
-
-                                <p className="text-[10px] text-slate-400">
-                                    Automatically generated from
-                                    current analytics
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                            <div className="rounded-lg bg-slate-50 p-3">
-                                <p className="text-[9px] font-bold uppercase text-slate-400">
-                                    Highest delay
-                                </p>
-
-                                <p className="mt-1 text-xs font-bold text-slate-700">
-                                    {highestDelay
-                                        ? getName(
-                                              highestDelay,
-                                          )
-                                        : "N/A"}
-                                </p>
-
-                                <p className="mt-1 text-[10px] text-slate-500">
-                                    {highestDelay
-                                        ? `${Number(
-                                              highestDelay.average_delay_days,
-                                          ).toFixed(
-                                              1,
-                                          )} days average delay`
-                                        : "No data available"}
-                                </p>
-                            </div>
-
-                            <div className="rounded-lg bg-slate-50 p-3">
-                                <p className="text-[9px] font-bold uppercase text-slate-400">
-                                    Highest cost pressure
-                                </p>
-
-                                <p className="mt-1 text-xs font-bold text-slate-700">
-                                    {highestCost
-                                        ? getName(
-                                              highestCost,
-                                          )
-                                        : "N/A"}
-                                </p>
-
-                                <p className="mt-1 text-[10px] text-slate-500">
-                                    {highestCost
-                                        ? `${Number(
-                                              highestCost.average_cost_overrun_pct,
-                                          ).toFixed(
-                                              1,
-                                          )}% average cost overrun`
-                                        : "No data available"}
-                                </p>
-                            </div>
-
-                            <div className="rounded-lg bg-slate-50 p-3">
-                                <p className="text-[9px] font-bold uppercase text-slate-400">
-                                    Lowest progress
-                                </p>
-
-                                <p className="mt-1 text-xs font-bold text-slate-700">
-                                    {lowestProgress
-                                        ? getName(
-                                              lowestProgress,
-                                          )
-                                        : "N/A"}
-                                </p>
-
-                                <p className="mt-1 text-[10px] text-slate-500">
-                                    {lowestProgress
-                                        ? `${Number(
-                                              lowestProgress.average_progress_pct,
-                                          ).toFixed(
-                                              1,
-                                          )}% average progress`
-                                        : "No data available"}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Search */}
-                    <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <h2 className="text-sm font-bold text-slate-800">
-                                {activeTab === "sector"
-                                    ? "Sector Performance"
-                                    : "Ministry Performance"}
-                            </h2>
-
-                            <p className="mt-0.5 text-[10px] text-slate-400">
-                                {filteredData.length} results
-                            </p>
-                        </div>
-
-                        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 sm:max-w-xs">
-                            <Search
-                                size={15}
-                                className="shrink-0 text-slate-400"
-                            />
-
-                            <input
-                                type="search"
-                                value={search}
-                                onChange={(event) =>
-                                    setSearch(
-                                        event.target.value,
-                                    )
-                                }
-                                placeholder={
-                                    activeTab === "sector"
-                                        ? "Search sector..."
-                                        : "Search ministry..."
-                                }
-                                className="w-full bg-transparent py-2.5 text-xs text-slate-700 outline-none placeholder:text-slate-400"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Chart */}
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="mb-4">
-                            <h3 className="text-xs font-bold text-slate-700">
-                                Project Distribution
-                            </h3>
-
-                            <p className="text-[10px] text-slate-400">
-                                Number of projects by{" "}
-                                {activeTab === "sector"
-                                    ? "sector"
-                                    : "ministry"}
-                            </p>
-                        </div>
-
-                        <div className="space-y-3">
-                            {filteredData.map(
-                                (item) => {
-                                    const projects =
-                                        Number(
-                                            item.projects ||
-                                                0,
-                                        );
-
-                                    return (
-                                        <div
-                                            key={getName(
-                                                item,
-                                            )}
-                                        >
-                                            <div className="mb-1 flex items-center justify-between gap-3">
-                                                <span className="min-w-0 truncate text-[10px] font-semibold text-slate-600">
-                                                    {getName(
-                                                        item,
-                                                    )}
-                                                </span>
-
-                                                <span className="shrink-0 text-[10px] font-bold text-slate-800">
-                                                    {projects.toLocaleString()}
-                                                </span>
-                                            </div>
-
-                                            <ProgressBar
-                                                value={
-                                                    projects
-                                                }
-                                                max={
-                                                    topProjectCount
-                                                }
-                                            />
-                                        </div>
-                                    );
-                                },
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Detailed Table */}
-                    <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                        <div className="overflow-x-auto">
-                            <table className="w-full min-w-[760px] border-collapse">
-                                <thead>
-                                    <tr className="border-b border-slate-200 bg-slate-50">
-                                        <th className="px-4 py-3 text-left text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                                            #
-                                        </th>
-
-                                        <th className="px-4 py-3 text-left text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                                            {activeTab ===
-                                            "sector"
-                                                ? "Sector"
-                                                : "Ministry"}
-                                        </th>
-
-                                        <th className="px-4 py-3 text-right text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                                            Projects
-                                        </th>
-
-                                        <th className="px-4 py-3 text-right text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                                            Avg Delay
-                                        </th>
-
-                                        <th className="px-4 py-3 text-right text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                                            Avg Cost Overrun
-                                        </th>
-
-                                        <th className="px-4 py-3 text-right text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                                            Avg Progress
-                                        </th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-                                    {filteredData.map(
-                                        (
-                                            item,
-                                            index,
-                                        ) => {
-                                            const delay =
-                                                Number(
-                                                    item.average_delay_days ||
-                                                        0,
-                                                );
-
-                                            const cost =
-                                                Number(
-                                                    item.average_cost_overrun_pct ||
-                                                        0,
-                                                );
-
-                                            const progress =
-                                                Number(
-                                                    item.average_progress_pct ||
-                                                        0,
-                                                );
-
-                                            return (
-                                                <tr
-                                                    key={`${getName(
-                                                        item,
-                                                    )}-${index}`}
-                                                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                                                >
-                                                    <td className="px-4 py-3 text-[10px] font-semibold text-slate-400">
-                                                        {index +
-                                                            1}
-                                                    </td>
-
-                                                    <td className="max-w-[300px] px-4 py-3 text-[11px] font-semibold text-slate-700">
-                                                        <div className="truncate">
-                                                            {getName(
-                                                                item,
-                                                            )}
-                                                        </div>
-                                                    </td>
-
-                                                    <td className="px-4 py-3 text-right text-[11px] font-bold text-slate-700">
-                                                        {Number(
-                                                            item.projects ||
-                                                                0,
-                                                        ).toLocaleString()}
-                                                    </td>
-
-                                                    <td
-                                                        className={`px-4 py-3 text-right text-[11px] font-semibold ${
-                                                            delay >
-                                                            365
-                                                                ? "text-red-600"
-                                                                : "text-slate-600"
-                                                        }`}
-                                                    >
-                                                        {delay.toFixed(
-                                                            1,
-                                                        )}{" "}
-                                                        days
-                                                    </td>
-
-                                                    <td
-                                                        className={`px-4 py-3 text-right text-[11px] font-semibold ${
-                                                            cost >
-                                                            20
-                                                                ? "text-red-600"
-                                                                : "text-slate-600"
-                                                        }`}
-                                                    >
-                                                        {cost.toFixed(
-                                                            1,
-                                                        )}
-                                                        %
-                                                    </td>
-
-                                                    <td
-                                                        className={`px-4 py-3 text-right text-[11px] font-semibold ${
-                                                            progress <
-                                                            60
-                                                                ? "text-amber-600"
-                                                                : "text-emerald-600"
-                                                        }`}
-                                                    >
-                                                        {progress.toFixed(
-                                                            1,
-                                                        )}
-                                                        %
-                                                    </td>
-                                                </tr>
-                                            );
-                                        },
-                                    )}
-
-                                    {!filteredData.length && (
-                                        <tr>
-                                            <td
-                                                colSpan={
-                                                    6
-                                                }
-                                                className="px-4 py-10 text-center text-xs text-slate-400"
-                                            >
-                                                No matching{" "}
-                                                {activeTab ===
-                                                "sector"
-                                                    ? "sectors"
-                                                    : "ministries"}{" "}
-                                                found.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </>
-            )}
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
         </div>
-    );
+
+        {/* Filters */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-xs font-semibold text-slate-800">
+              Analytics Filters
+            </div>
+
+            {isLoadingFilterOptions && (
+              <div className="text-[10px] text-slate-400">
+                Loading filter options...
+              </div>
+            )}
+
+            {isFilterOptionsError && (
+              <div className="text-[10px] text-red-500">
+                Unable to load filter options
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {/* View By */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                View By
+              </span>
+
+              <select
+                value={viewBy}
+                onChange={(event) =>
+                  setViewBy(
+                    event.target.value as "sector" | "ministry",
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="sector">Sector</option>
+                <option value="ministry">Ministry</option>
+              </select>
+            </label>
+
+            {/* Ministry */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Ministry
+              </span>
+
+              <select
+                value={ministry}
+                onChange={(event) =>
+                  setMinistry(event.target.value)
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Ministries">
+                  All Ministries
+                </option>
+
+                {filterOptions?.ministries.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            {/* Sector */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Sector
+              </span>
+
+              <select
+                value={sector}
+                onChange={(event) =>
+                  setSector(event.target.value)
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Sectors">
+                  All Sectors
+                </option>
+
+                {filterOptions?.sectors.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            {/* State */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                State
+              </span>
+
+              <select
+                value={state}
+                onChange={(event) =>
+                  setState(event.target.value)
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All States">
+                  All States
+                </option>
+
+                {filterOptions?.states.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            {/* Financial Year */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Financial Year
+              </span>
+
+              <select
+                value={financialYear}
+                onChange={(event) =>
+                  setFinancialYear(
+                    event.target.value,
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Years">
+                  All Years
+                </option>
+
+                {filterOptions?.financial_years.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={`FY ${value}`}
+                    >
+                      FY {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            {/* Snapshot Month */}
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Snapshot Month
+              </span>
+
+              <select
+                value={snapshotMonth}
+                onChange={(event) =>
+                  setSnapshotMonth(
+                    event.target.value,
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              >
+                <option value="All Months">
+                  All Months
+                </option>
+
+                {filterOptions?.snapshot_months.map(
+                  (value) => (
+                    <option
+                      key={value}
+                      value={value}
+                    >
+                      {new Intl.DateTimeFormat(
+                        "en-IN",
+                        {
+                          month: "long",
+                          year: "numeric",
+                        },
+                      ).format(
+                        new Date(
+                          `${value}-01T00:00:00`,
+                        ),
+                      )}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        {/* Loading */}
+        {isLoading && (
+          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+            <div className="text-sm font-medium text-slate-700">
+              Loading portfolio analytics...
+            </div>
+
+            <div className="mt-1 text-xs text-slate-400">
+              Processing sector and ministry data.
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {isError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-red-700">
+              <AlertTriangle size={16} />
+              Unable to load analytics
+            </div>
+
+            <div className="mt-1 text-xs text-red-600">
+              {error instanceof Error
+                ? error.message
+                : "The analytics API returned an error."}
+            </div>
+          </div>
+        )}
+
+        {/* Data */}
+        {!isLoading && !isError && data && (
+          <>
+            {/* KPI cards */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-500">
+                    Total Projects
+                  </span>
+                  <Building2 size={16} className="text-slate-400" />
+                </div>
+
+                <div className="mt-3 text-2xl font-semibold text-slate-900">
+                  {formatNumber(
+                    data.portfolio_summary.kpis.total_projects,
+                  )}
+                </div>
+
+                <div className="mt-1 text-[11px] text-slate-400">
+                  Selected portfolio
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-500">
+                    Delay Rate
+                  </span>
+                  <TrendingDown size={16} className="text-orange-500" />
+                </div>
+
+                <div className="mt-3 text-2xl font-semibold text-orange-600">
+                  {formatPct(data.portfolio_summary.kpis.delay_rate_pct)}
+                </div>
+
+                <div className="mt-1 text-[11px] text-slate-400">
+                  {formatNumber(
+                    data.portfolio_summary.kpis.delayed_projects,
+                  )}{" "}
+                  delayed projects
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-500">
+                    Cost Overrun Rate
+                  </span>
+                  <TrendingUp size={16} className="text-red-500" />
+                </div>
+
+                <div className="mt-3 text-2xl font-semibold text-red-600">
+                  {formatPct(
+                    data.portfolio_summary.kpis.cost_overrun_rate_pct,
+                  )}
+                </div>
+
+                <div className="mt-1 text-[11px] text-slate-400">
+                  {formatNumber(
+                    data.portfolio_summary.kpis.cost_overrun_projects,
+                  )}{" "}
+                  projects
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-500">
+                    Cost Exposure
+                  </span>
+                  <Database size={16} className="text-slate-400" />
+                </div>
+
+                <div className="mt-3 text-xl font-semibold text-slate-900">
+                  {formatCrore(
+                    data.portfolio_summary.kpis
+                      .total_cost_change_exposure_cr,
+                  )}
+                </div>
+
+                <div className="mt-1 text-[11px] text-slate-400">
+                  Validated positive cost-change exposure
+                </div>
+              </div>
+            </div>
+
+            {/* Secondary KPIs */}
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500">
+                  Original Cost
+                </div>
+
+                <div className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatCrore(
+                    data.portfolio_summary.kpis
+                      .total_original_cost_cr,
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500">
+                  Revised Cost
+                </div>
+
+                <div className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatCrore(
+                    data.portfolio_summary.kpis
+                      .total_revised_cost_cr,
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-medium text-slate-500">
+                  Expenditure
+                </div>
+
+                <div className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatCrore(
+                    data.portfolio_summary.kpis.total_expenditure_cr,
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2">
+                  <div className="text-sm font-semibold text-slate-800">
+                    {viewBy === "sector"
+                      ? "Projects by Sector"
+                      : "Projects by Ministry"}
+                  </div>
+
+                  <div className="text-xs text-slate-400">
+                    Top 10 groups by project count.
+                  </div>
+                </div>
+
+                <ProjectsBySectorChart data={summaryRows} />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2">
+                  <div className="text-sm font-semibold text-slate-800">
+                    {viewBy === "sector"
+                      ? "Projects by Sector"
+                      : "Projects by Ministry"}{" "}
+                    <span className="font-normal text-slate-400">
+                      (Top 10)
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-slate-400">
+                    Project concentration across the selected portfolio.
+                  </div>
+                </div>
+
+                <ProjectsRankingChart data={summaryRows} />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-2">
+                <div className="text-sm font-semibold text-slate-800">
+                  Revised Cost vs Expenditure{" "}
+                  {viewBy === "sector" ? "by Sector" : "by Ministry"}
+                </div>
+
+                <div className="text-xs text-slate-400">
+                  Financial comparison across the selected portfolio.
+                </div>
+              </div>
+
+              <CostVsExpenditureChart data={summaryRows} />
+
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2">
+                  <div className="text-sm font-semibold text-slate-800">
+                    ML Risk Distribution by{" "}
+                    {viewBy === "sector" ? "Sector" : "Ministry"}
+                  </div>
+
+                  <div className="text-xs text-slate-400">
+                    PAIMANA ML overall-risk distribution across the selected portfolio.
+                  </div>
+                </div>
+
+                <RiskDistributionChart
+                  data={
+                    viewBy === "sector"
+                      ? data.risk_analysis.sector
+                      : data.risk_analysis.ministry
+                  }
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2">
+                  <div className="text-sm font-semibold text-slate-800">
+                    Delay Analysis by{" "}
+                    {viewBy === "sector" ? "Sector" : "Ministry"}
+                  </div>
+
+                  <div className="text-xs text-slate-400">
+                    Total projects, delayed projects and delay percentage.
+                  </div>
+                </div>
+
+                <DelayAnalysisChart
+                  data={
+                    viewBy === "sector"
+                      ? data.delay_analysis.sector
+                      : data.delay_analysis.ministry
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2">
+                  <div className="text-sm font-semibold text-slate-800">
+                    Top 5{" "}
+                    {viewBy === "sector" ? "Sectors" : "Ministries"}{" "}
+                    by Cost Overrun
+                  </div>
+
+                  <div className="text-xs text-slate-400">
+                    Highest average observed cost-overrun percentages.
+                  </div>
+                </div>
+
+                <TopCostOverrunChart
+                  data={
+                    viewBy === "sector"
+                      ? data.cost_analysis.sector
+                      : data.cost_analysis.ministry
+                  }
+                  limit={5}
+                  offset={0}
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2">
+                  <div className="text-sm font-semibold text-slate-800">
+                    Next 5{" "}
+                    {viewBy === "sector" ? "Sectors" : "Ministries"}{" "}
+                    by Cost Overrun
+                  </div>
+
+                  <div className="text-xs text-slate-400">
+                    Remaining high-overrun groups in the selected portfolio.
+                  </div>
+                </div>
+
+                <TopCostOverrunChart
+                  data={
+                    viewBy === "sector"
+                      ? data.cost_analysis.sector
+                      : data.cost_analysis.ministry
+                  }
+                  limit={5}
+                  offset={5}
+                />
+              </div>
+            </div>
+
+            {/* Summary table */}
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-800">
+                    {viewBy === "sector"
+                      ? "Sector Performance"
+                      : "Ministry Performance"}
+                  </div>
+
+                  <div className="mt-0.5 text-xs text-slate-400">
+                    {summaryRows.length} groups
+                  </div>
+                </div>
+
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-500">
+                  {data.metadata.version}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] text-left">
+                  <thead className="border-b border-slate-100 bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        {viewBy === "sector" ? "Sector" : "Ministry"}
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Projects
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Delay Rate
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Cost Overrun
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Avg Delay
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Cost Exposure
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+                    {summaryRows.slice(0, 15).map((row) => (
+                      <tr
+                        key={row.sector ?? row.ministry ?? "unknown"}
+                        className="hover:bg-slate-50"
+                      >
+                        <td className="px-4 py-3 text-xs font-medium text-slate-800">
+                          {row.sector ?? row.ministry ?? "Unknown"}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {formatNumber(row.total_projects)}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-orange-600">
+                          {formatPct(row.delay_rate_pct)}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-red-600">
+                          {formatPct(row.cost_overrun_rate_pct)}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {formatMonths(row.avg_delay_months)}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs font-medium text-slate-700">
+                          {row.total_cost_change_exposure_cr != null
+                            ? formatCrore(
+                              row.total_cost_change_exposure_cr,
+                            )
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Insights + warnings */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center gap-2">
+                  <BarChart3 size={16} className="text-slate-500" />
+
+                  <h2 className="text-sm font-semibold text-slate-800">
+                    Key Insights
+                  </h2>
+                </div>
+
+                <div className="space-y-2">
+                  {data.key_insights.map((insight) => (
+                    <div
+                      key={`${insight.title}-${insight.group ?? ""}`}
+                      className="rounded-lg border border-slate-100 bg-slate-50 p-3"
+                    >
+                      <div className="text-xs font-semibold text-slate-800">
+                        {insight.title}
+                      </div>
+
+                      <div className="mt-1 text-xs leading-5 text-slate-500">
+                        {insight.message}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center gap-2">
+                  <ShieldAlert size={16} className="text-slate-500" />
+
+                  <h2 className="text-sm font-semibold text-slate-800">
+                    Early Warnings
+                  </h2>
+                </div>
+
+                <div className="space-y-2">
+                  {data.early_warnings.slice(0, 6).map((warning) => (
+                    <div
+                      key={warning.title}
+                      className="rounded-lg border border-slate-100 bg-slate-50 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-semibold text-slate-800">
+                          {warning.title}
+                        </div>
+
+                        <span className="rounded-full bg-red-50 px-2 py-1 text-[10px] font-semibold uppercase text-red-600">
+                          {warning.severity}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 text-xs leading-5 text-slate-500">
+                        {warning.message}
+                      </div>
+                    </div>
+                  ))}
+
+                  {data.early_warnings.length === 0 && (
+                    <div className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-700">
+                      No active ML-generated warnings for the selected portfolio.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Priority projects */}
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <div className="text-sm font-semibold text-slate-800">
+                  Priority Projects
+                </div>
+
+                <div className="mt-0.5 text-xs text-slate-400">
+                  Highest PAIMANA ML overall-risk exposure in the selected portfolio.
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1000px] text-left">
+                  <thead className="border-b border-slate-100 bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Project
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Sector
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        State
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        ML Risk
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Delay
+                      </th>
+
+                      <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        Cost Overrun
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+                    {data.priority_projects.slice(0, 10).map((project) => (
+                      <tr
+                        key={project.project_code}
+                        className="hover:bg-slate-50"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="text-xs font-semibold text-slate-800">
+                            {project.project_code}
+                          </div>
+
+                          <div className="mt-0.5 max-w-xs text-[11px] text-slate-400">
+                            {project.project_name}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {project.sector}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {project.state}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div
+                            className={`text-sm font-semibold ${riskClass(
+                              project.overall_risk_score,
+                            )}`}
+                          >
+                            {Number(
+                              project.overall_risk_score,
+                            ).toFixed(1)}
+                          </div>
+
+                          <div className="text-[10px] text-slate-400">
+                            {project.risk_level}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-orange-600">
+                          {formatMonths(project.delay_months)}
+                        </td>
+
+                        <td className="px-4 py-3 text-xs text-red-600">
+                          {formatPct(project.cost_overrun_pct)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Data quality */}
+            <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                  <Database size={14} />
+                  Data Quality
+                </div>
+
+                <div className="mt-1 text-[11px] text-slate-400">
+                  {data.data_quality.definition}
+                </div>
+              </div>
+
+              <div className="text-left sm:text-right">
+                <div className="text-lg font-semibold text-slate-900">
+                  {data.data_quality.projects_flagged}
+                </div>
+
+                <div className="text-[11px] text-slate-400">
+                  {safeNumber(data.data_quality.rate_pct).toFixed(2)}% flagged
+                </div>
+              </div>
+            </div>
+
+            {/* Monthly trend chart */}
+            {trends.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2 flex items-center gap-2">
+                  <CalendarDays size={15} className="text-slate-500" />
+
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      Monthly Performance Trend
+                    </div>
+
+                    <div className="text-xs text-slate-400">
+                      Delay rate and cost-overrun rate over the latest monthly observations.
+                    </div>
+                  </div>
+                </div>
+
+                <MonthlyTrendChart data={trends} />
+              </div>
+            )}
+
+            {/* Monthly trend */}
+            {trends.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center gap-2">
+                  <CalendarDays size={15} className="text-slate-500" />
+
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      Monthly Trend Data
+                    </div>
+
+                    <div className="text-xs text-slate-400">
+                      Latest monthly observations from the analytics service.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[850px] text-left">
+                    <thead className="border-b border-slate-100 bg-slate-50">
+                      <tr>
+                        <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Month
+                        </th>
+
+                        <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Projects
+                        </th>
+
+                        <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Delay Rate
+                        </th>
+
+                        <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Cost Overrun Rate
+                        </th>
+
+                        <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Expenditure
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100">
+                      {trends.slice(-12).map((trend) => (
+                        <tr
+                          key={`${trend.snapshot_month}-${trend.sector ?? trend.ministry ?? ""}`}
+                        >
+                          <td className="px-4 py-3 text-xs text-slate-700">
+                            {trend.snapshot_month.slice(0, 7)}
+                          </td>
+
+                          <td className="px-4 py-3 text-xs text-slate-600">
+                            {formatNumber(trend.project_count)}
+                          </td>
+
+                          <td className="px-4 py-3 text-xs text-orange-600">
+                            {formatPct(trend.delay_rate_pct)}
+                          </td>
+
+                          <td className="px-4 py-3 text-xs text-red-600">
+                            {formatPct(trend.cost_overrun_rate_pct)}
+                          </td>
+
+                          <td className="px-4 py-3 text-xs text-slate-700">
+                            {formatCrore(trend.expenditure_cr)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
 }

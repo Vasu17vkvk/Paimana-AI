@@ -28,6 +28,7 @@ def create_app() -> Flask:
     from app.routes.early_warnings import early_warnings_bp
     from app.routes.analytics import analytics_bp
     from app.routes.ml_risk import ml_risk_bp
+    from app.routes.sector_ministry import sector_ministry_bp
 
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(projects_bp, url_prefix="/api")
@@ -37,6 +38,7 @@ def create_app() -> Flask:
     app.register_blueprint(early_warnings_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(ml_risk_bp, url_prefix="/api")
+    app.register_blueprint(sector_ministry_bp, url_prefix="/api")
 
     with app.app_context():
         db.create_all()

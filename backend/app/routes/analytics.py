@@ -1106,7 +1106,93 @@ def project_analytics_projects():
                 projects,
         }
     )
+# ============================================================
+# DASHBOARD REPORTING PERIOD
+# ============================================================
 
+@analytics_bp.get("/analytics/dashboard-period")
+def dashboard_period_projects():
+    period = request.args.get("period", "").strip()
+
+    if not period:
+        return jsonify({
+            "period": None,
+            "project_codes": []
+        })
+
+    try:
+        target_month = pd.to_datetime(
+            period,
+            format="%B %Y",
+            errors="coerce"
+        )
+
+        if pd.isna(target_month):
+            return jsonify({
+                "error": "Invalid reporting period."
+            }), 400
+
+        history = _load_csv(
+            "02_PAIMANA_MONTHLY_HISTORY_CLEAN.csv",
+            "02_PAIMANA_MONTHLY_HISTORY.csv",
+        )
+
+        if history.empty or "project_code" not in history.columns:
+            return jsonify({
+                "period": period,
+                "project_codes": []
+            })
+
+        if "snapshot_month" not in history.columns:
+            return jsonify({
+                "error": "snapshot_month is missing from monthly history."
+            }), 500
+
+        history["project_code"] = (
+            history["project_code"]
+            .map(_normalise_code)
+        )
+
+        history["snapshot_month"] = pd.to_datetime(
+            history["snapshot_month"],
+            errors="coerce"
+        )
+
+        matching = history[
+            history["snapshot_month"].dt.year.eq(
+                target_month.year
+            )
+            &
+            history["snapshot_month"].dt.month.eq(
+                target_month.month
+            )
+        ].copy()
+
+        project_codes = (
+            matching["project_code"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        return jsonify({
+            "period": period,
+            "project_codes": project_codes,
+            "count": len(project_codes)
+        })
+
+    except FileNotFoundError:
+        return jsonify({
+            "period": period,
+            "project_codes": [],
+            "count": 0
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "error": f"Failed to load reporting period: {exc}"
+        }), 500
 
 # ============================================================
 # DELAY REASONS + SOLUTIONS

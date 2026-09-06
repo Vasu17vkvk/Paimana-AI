@@ -60,7 +60,7 @@ export const router = createBrowserRouter([
             },
             // Sector & Ministry Analytics
             {
-                path: "sector-ministry-analytics",
+                path: "ministry-analytics",
                 element: <SectorMinistryAnalyticsPage />,
             },
             // Geographic View
