@@ -3,6 +3,7 @@ from flask_cors import CORS
 
 from app.config.development import DevelopmentConfig
 from app.extensions import db
+from app.services.database_initializer import initialize_analytics_tables
 
 
 def create_app() -> Flask:
@@ -29,6 +30,7 @@ def create_app() -> Flask:
     from app.routes.analytics import analytics_bp
     from app.routes.ml_risk import ml_risk_bp
     from app.routes.sector_ministry import sector_ministry_bp
+    
 
     app.register_blueprint(dashboard_bp, url_prefix="/api")
     app.register_blueprint(projects_bp, url_prefix="/api")
@@ -42,5 +44,6 @@ def create_app() -> Flask:
 
     with app.app_context():
         db.create_all()
+        initialize_analytics_tables()
 
     return app
