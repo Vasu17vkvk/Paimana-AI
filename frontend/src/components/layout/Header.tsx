@@ -115,7 +115,7 @@ export default function Header({
                         </div>
 
                         <div className="text-[10px] text-slate-400">
-                            PAIMANA Monitoring
+                            NIRMAAN Monitoring
                         </div>
                     </div>
                 </button>

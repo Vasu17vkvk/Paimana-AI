@@ -2,6 +2,8 @@ import { NavLink } from "react-router-dom";
 
 import { navigationSections } from "../../app/navigation";
 
+import logo from "../../assets/logo.png";
+
 interface SidebarProps {
     collapsed: boolean;
     onToggle: () => void;
@@ -28,13 +30,17 @@ export default function Sidebar({
             <div className="flex h-[76px] shrink-0 items-center border-b border-white/10 px-4">
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-sm font-extrabold text-slate-900">
-                        P
+                        <img
+                            src={logo}
+                            alt="My New Brand"
+                            className="h-full w-full object-contain"
+                        />
                     </div>
 
                     {!collapsed && (
                         <div className="min-w-0">
                             <div className="truncate text-sm font-bold tracking-tight">
-                                PAIMANA AI
+                                NIRMAAN AI
                             </div>
 
                             <div className="truncate text-[10px] text-slate-400">
