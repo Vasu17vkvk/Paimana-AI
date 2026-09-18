@@ -5,10 +5,12 @@ import Header from "./Header";
 import Sidebar from "./Sidebar";
 
 export default function AppLayout() {
-    const [collapsed, setCollapsed] = useState(false);
-    const [mobileOpen, setMobileOpen] = useState(false);
+    const [collapsed, setCollapsed] =
+        useState(false);
 
-    // Close mobile sidebar when switching to desktop
+    const [mobileOpen, setMobileOpen] =
+        useState(false);
+
     useEffect(() => {
         const handleResize = () => {
             if (window.innerWidth >= 768) {
@@ -16,14 +18,19 @@ export default function AppLayout() {
             }
         };
 
-        window.addEventListener("resize", handleResize);
+        window.addEventListener(
+            "resize",
+            handleResize,
+        );
 
         return () => {
-            window.removeEventListener("resize", handleResize);
+            window.removeEventListener(
+                "resize",
+                handleResize,
+            );
         };
     }, []);
 
-    // Close mobile sidebar after navigation
     const handleNavigate = () => {
         if (window.innerWidth < 768) {
             setMobileOpen(false);
@@ -31,56 +38,105 @@ export default function AppLayout() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50">
-            {/* =========================
-          MOBILE OVERLAY
-      ========================== */}
+        <div
+            className="
+                min-h-screen
+                bg-[#EEF2F5]
+                text-[#172033]
+            "
+        >
+            {/* =================================================
+                MOBILE OVERLAY
+            ================================================= */}
+
             {mobileOpen && (
                 <button
                     type="button"
                     aria-label="Close navigation"
-                    onClick={() => setMobileOpen(false)}
-                    className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[1px] md:hidden"
+                    onClick={() =>
+                        setMobileOpen(false)
+                    }
+                    className="
+                        fixed inset-0 z-[90]
+                        bg-slate-950/40
+                        backdrop-blur-[2px]
+                        md:hidden
+                    "
                 />
             )}
 
-            {/* =========================
-          SIDEBAR
-      ========================== */}
+
+            {/* =================================================
+                FLOATING SIDEBAR
+            ================================================= */}
+
             <div
                 className={[
-                    "fixed inset-y-0 left-0 z-50",
-                    "transition-transform duration-200 ease-out",
+                    "fixed z-[100]",
+                    "left-3 top-3 bottom-3",
+                    "transition-[width,transform]",
+                    "duration-200 ease-out",
                     mobileOpen
                         ? "translate-x-0"
-                        : "-translate-x-full md:translate-x-0",
+                        : "-translate-x-[110%] md:translate-x-0",
                 ].join(" ")}
             >
                 <Sidebar
                     collapsed={collapsed}
                     onToggle={() =>
-                        setCollapsed((current) => !current)
+                        setCollapsed(
+                            (current) =>
+                                !current,
+                        )
                     }
                     onNavigate={handleNavigate}
                 />
             </div>
 
-            {/* =========================
-          MAIN CONTENT
-      ========================== */}
+
+            {/* =================================================
+                MAIN AREA
+            ================================================= */}
+
             <div
                 className={[
-                    "min-h-screen transition-[margin] duration-200",
+                    "min-h-screen",
+                    "transition-[margin] duration-200 ease-out",
                     collapsed
-                        ? "md:ml-[68px]"
-                        : "md:ml-[220px]"
+                        ? "md:ml-[92px]"
+                        : "md:ml-[316px]",
                 ].join(" ")}
             >
-                <Header
-                    onMobileMenu={() => setMobileOpen(true)}
-                />
+                {/* =================================================
+                    HEADER
+                ================================================= */}
 
-                <main className="px-3 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-7">
+                <div
+                    className="
+                        px-3 pt-3
+                        sm:px-4 sm:pt-3
+                        lg:px-5 lg:pt-3
+                    "
+                >
+                    <Header
+                        onMobileMenu={() =>
+                            setMobileOpen(true)
+                        }
+                    />
+                </div>
+
+
+                {/* =================================================
+                    PAGE CONTENT
+                ================================================= */}
+
+                <main
+                    className="
+                        px-3 py-4
+                        sm:px-4 sm:py-5
+                        lg:px-5 lg:py-5
+                    "
+                >
                     <Outlet />
                 </main>
             </div>

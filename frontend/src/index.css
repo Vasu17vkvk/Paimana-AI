@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 
+/* =========================================================
+   NIRMAN AI — GLOBAL DESIGN SYSTEM
+========================================================= */
+
 :root {
     font-family:
         Inter,
@@ -11,17 +15,113 @@
         "Segoe UI",
         sans-serif;
 
-    color: #0f172a;
-    background: #f8fafc;
-
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+
+    /* -----------------------------------------------------
+       GLOBAL COLORS
+    ----------------------------------------------------- */
+
+    --nirman-background: #f3f6f8;
+    --nirman-surface: #ffffff;
+    --nirman-surface-soft: #eef2f5;
+
+    --nirman-border: #d9e1e8;
+    --nirman-border-soft: #e7edf2;
+
+    --nirman-text: #172033;
+    --nirman-text-secondary: #64748b;
+    --nirman-text-muted: #94a3b8;
+
+    /* -----------------------------------------------------
+       BRAND
+    ----------------------------------------------------- */
+
+    --nirman-primary: #102a43;
+    --nirman-primary-hover: #173b5e;
+    --nirman-primary-soft: #e8eef4;
+
+    --nirman-saffron: #f59e0b;
+    --nirman-green: #16a34a;
+
+    /* -----------------------------------------------------
+       SIDEBAR
+    ----------------------------------------------------- */
+
+    --nirman-sidebar: #111827;
+    --nirman-sidebar-hover: #1f2937;
+    --nirman-sidebar-active: #2b3442;
+
+    --nirman-sidebar-text: #cbd5e1;
+    --nirman-sidebar-muted: #94a3b8;
+
+    --nirman-sidebar-border: rgba(
+        255,
+        255,
+        255,
+        0.07
+    );
+
+    /* -----------------------------------------------------
+       STATUS COLORS
+    ----------------------------------------------------- */
+
+    --nirman-success: #16a34a;
+    --nirman-warning: #f59e0b;
+    --nirman-danger: #ef4444;
+    --nirman-info: #3b82f6;
+
+    /* -----------------------------------------------------
+       SHADOWS
+    ----------------------------------------------------- */
+
+    --nirman-shadow:
+        0 1px 3px rgba(
+            15,
+            23,
+            42,
+            0.05
+        );
+
+    --nirman-shadow-md:
+        0 4px 12px rgba(
+            15,
+            23,
+            42,
+            0.06
+        );
+
+    --nirman-shadow-lg:
+        0 10px 30px rgba(
+            15,
+            23,
+            42,
+            0.08
+        );
+
+    /* -----------------------------------------------------
+       RADIUS
+    ----------------------------------------------------- */
+
+    --nirman-radius-sm: 8px;
+    --nirman-radius-md: 12px;
+    --nirman-radius-lg: 14px;
+    --nirman-radius-xl: 18px;
+
+    color: var(--nirman-text);
+    background: var(--nirman-background);
 }
+
+
+/* =========================================================
+   BASE
+========================================================= */
 
 * {
     box-sizing: border-box;
 }
+
 
 html,
 body,
@@ -31,10 +131,25 @@ body,
     margin: 0;
 }
 
+
+html {
+    background:
+        var(--nirman-background);
+}
+
+
 body {
     min-height: 100vh;
-    background: #f8fafc;
+
+    margin: 0;
+
+    background:
+        var(--nirman-background);
+
+    color:
+        var(--nirman-text);
 }
+
 
 button,
 input,
@@ -43,99 +158,103 @@ textarea {
     font: inherit;
 }
 
+
 button {
     cursor: pointer;
 }
 
-/* ==============================
-   PAIMANA DESIGN TOKENS
-================================= */
 
-:root {
-    --paimana-background: #f8fafc;
-    --paimana-surface: #ffffff;
-    --paimana-border: #e2e8f0;
-
-    --paimana-text: #0f172a;
-    --paimana-text-secondary: #475569;
-    --paimana-text-muted: #94a3b8;
-
-    --paimana-sidebar: #0f172a;
-    --paimana-sidebar-hover: #1e293b;
-
-    --paimana-success: #16a34a;
-    --paimana-warning: #f59e0b;
-    --paimana-danger: #dc2626;
-    --paimana-info: #2563eb;
-}
-
-/* ==============================
+/* =========================================================
    APPLICATION
-================================= */
+========================================================= */
 
 .paimana-app {
     min-height: 100vh;
-    background: var(--paimana-background);
+
+    background:
+        var(--nirman-background);
+
+    color:
+        var(--nirman-text);
 }
 
-/* ==============================
+
+/* =========================================================
    SIDEBAR
-================================= */
+========================================================= */
 
 .paimana-sidebar {
     position: fixed;
+
     inset: 0 auto 0 0;
 
     z-index: 50;
 
-    width: 256px;
+    width: 212px;
     height: 100vh;
 
     display: flex;
     flex-direction: column;
 
-    background: var(--paimana-sidebar);
+    background:
+        var(--nirman-sidebar);
 
-    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    border-right:
+        1px solid
+        var(--nirman-sidebar-border);
 
     transition:
         width 180ms ease,
         transform 180ms ease;
 }
 
+
+/* ---------------------------------------------------------
+   COLLAPSED
+--------------------------------------------------------- */
+
 .paimana-sidebar-collapsed {
-    width: 76px;
+    width: 68px;
 }
 
-/* ==============================
-   CONTENT AREA
-================================= */
+
+/* =========================================================
+   MAIN CONTENT
+========================================================= */
 
 .paimana-main {
     min-height: 100vh;
 
-    margin-left: 256px;
+    margin-left: 212px;
 
-    transition: margin-left 180ms ease;
+    background:
+        var(--nirman-background);
+
+    transition:
+        margin-left 180ms ease;
 }
+
 
 .paimana-main-expanded {
-    margin-left: 76px;
+    margin-left: 68px;
 }
 
-/* ==============================
+
+/* =========================================================
    MOBILE
-================================= */
+========================================================= */
 
 @media (max-width: 768px) {
     .paimana-sidebar {
-        width: 256px;
+        width: 212px;
 
-        transform: translateX(-100%);
+        transform:
+            translateX(-100%);
     }
 
     .paimana-sidebar-mobile-open {
-        transform: translateX(0);
+        transform:
+            translateX(0);
     }
 
     .paimana-main,
@@ -144,91 +263,315 @@ button {
     }
 }
 
+
 /* =========================================================
-   PAIMANA CUSTOM SCROLLBARS
+   SIDEBAR NAVIGATION
 ========================================================= */
 
-/* Sidebar navigation */
 .paimana-sidebar nav {
     overflow-y: auto !important;
 
-    /* Firefox */
     scrollbar-width: thin !important;
-    scrollbar-color: #3b82f6 #ffffff !important;
+
+    scrollbar-color:
+        #475569
+        transparent !important;
 }
 
-/* Chrome / Edge / Safari */
+
+/* =========================================================
+   SIDEBAR SCROLLBAR — CHROME / EDGE / SAFARI
+========================================================= */
+
 .paimana-sidebar nav::-webkit-scrollbar {
+    width: 5px !important;
+    height: 5px !important;
+}
+
+
+.paimana-sidebar nav::-webkit-scrollbar-track {
+    background:
+        transparent !important;
+
+    border-radius:
+        999px !important;
+}
+
+
+.paimana-sidebar nav::-webkit-scrollbar-thumb {
+    background:
+        #475569 !important;
+
+    border-radius:
+        999px !important;
+
+    border:
+        0 !important;
+
+    min-height:
+        32px !important;
+}
+
+
+.paimana-sidebar nav::-webkit-scrollbar-thumb:hover {
+    background:
+        #64748b !important;
+}
+
+
+.paimana-sidebar nav::-webkit-scrollbar-button {
+    display: none !important;
+
+    width: 0 !important;
+    height: 0 !important;
+}
+
+
+.paimana-sidebar nav::-webkit-scrollbar-corner {
+    background:
+        transparent !important;
+}
+
+
+/* =========================================================
+   GLOBAL SCROLLBAR
+========================================================= */
+
+html {
+    scrollbar-width:
+        thin !important;
+
+    scrollbar-color:
+        #64748b
+        transparent !important;
+}
+
+
+body {
+    scrollbar-width:
+        thin !important;
+
+    scrollbar-color:
+        #64748b
+        transparent !important;
+}
+
+
+body::-webkit-scrollbar {
     width: 7px !important;
     height: 7px !important;
 }
 
-.paimana-sidebar nav::-webkit-scrollbar-track {
-    background: #ffffff !important;
-    border-radius: 999px !important;
+
+body::-webkit-scrollbar-track {
+    background:
+        transparent !important;
 }
 
-.paimana-sidebar nav::-webkit-scrollbar-thumb {
-    background: #3b82f6 !important;
-    border-radius: 999px !important;
-    border: 1px solid #ffffff !important;
-    min-height: 40px !important;
+
+body::-webkit-scrollbar-thumb {
+    background:
+        #64748b !important;
+
+    border-radius:
+        999px !important;
+
+    border:
+        2px solid
+        transparent !important;
+
+    background-clip:
+        padding-box !important;
 }
 
-.paimana-sidebar nav::-webkit-scrollbar-thumb:hover {
-    background: #2563eb !important;
+
+body::-webkit-scrollbar-thumb:hover {
+    background:
+        #475569 !important;
+
+    background-clip:
+        padding-box !important;
 }
 
-.paimana-sidebar nav::-webkit-scrollbar-button {
+
+body::-webkit-scrollbar-button {
     display: none !important;
+
     width: 0 !important;
     height: 0 !important;
 }
 
-.paimana-sidebar nav::-webkit-scrollbar-corner {
-    background: #ffffff !important;
+
+body::-webkit-scrollbar-corner {
+    background:
+        transparent !important;
 }
 
 
 /* =========================================================
-   MAIN PAGE SCROLLBAR
+   SELECTION
 ========================================================= */
 
-html {
-    scrollbar-width: thin !important;
-    scrollbar-color: #010a35ee #ffffff !important;
+::selection {
+    background:
+        rgba(
+            16,
+            42,
+            67,
+            0.14
+        );
+
+    color:
+        var(--nirman-text);
 }
 
-body {
-    scrollbar-width: thin !important;
-    scrollbar-color: #010a35ee #ffffff !important;
+
+/* =========================================================
+   INPUT / SELECT FOCUS
+========================================================= */
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
 }
 
-body::-webkit-scrollbar {
-    width: 8px !important;
-    height: 8px !important;
+
+/* =========================================================
+   TABLE DEFAULTS
+========================================================= */
+
+table {
+    border-collapse: collapse;
 }
 
-body::-webkit-scrollbar-track {
-    background: #ffffff !important;
+
+/* =========================================================
+   IMAGE DEFAULT
+========================================================= */
+
+img {
+    display: block;
+    max-width: 100%;
 }
 
-body::-webkit-scrollbar-thumb {
-    background: #010a35ee !important;
-    border-radius: 999px !important;
-    border: 2px solid #ffffff !important;
+
+/* =========================================================
+   LINKS
+========================================================= */
+
+a {
+    color: inherit;
+    text-decoration: none;
 }
 
-body::-webkit-scrollbar-thumb:hover {
-    background: #010a35ee !important;
+
+/* =========================================================
+   PREMIUM UTILITY CLASSES
+========================================================= */
+
+.nirman-card {
+    background:
+        var(--nirman-surface);
+
+    border:
+        1px solid
+        var(--nirman-border);
+
+    border-radius:
+        var(--nirman-radius-lg);
+
+    box-shadow:
+        var(--nirman-shadow);
 }
 
-body::-webkit-scrollbar-button {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
+
+.nirman-card-soft {
+    background:
+        var(--nirman-surface-soft);
+
+    border:
+        1px solid
+        var(--nirman-border-soft);
+
+    border-radius:
+        var(--nirman-radius-lg);
 }
 
-body::-webkit-scrollbar-corner {
-    background: #ffffff !important;
+
+.nirman-dark-panel {
+    background:
+        linear-gradient(
+            135deg,
+            #172033 0%,
+            #263548 100%
+        );
+
+    color:
+        #ffffff;
+
+    border:
+        1px solid
+        rgba(
+            255,
+            255,
+            255,
+            0.05
+        );
+
+    border-radius:
+        var(--nirman-radius-lg);
+
+    box-shadow:
+        var(--nirman-shadow-lg);
+}
+
+
+/* =========================================================
+   STATUS UTILITY CLASSES
+========================================================= */
+
+.nirman-success {
+    color:
+        var(--nirman-success);
+}
+
+
+.nirman-warning {
+    color:
+        var(--nirman-warning);
+}
+
+
+.nirman-danger {
+    color:
+        var(--nirman-danger);
+}
+
+
+.nirman-info {
+    color:
+        var(--nirman-info);
+}
+
+
+/* =========================================================
+   REDUCED MOTION
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+
+        transition-duration:
+            0.01ms !important;
+
+        animation-duration:
+            0.01ms !important;
+
+        animation-iteration-count:
+            1 !important;
+    }
 }

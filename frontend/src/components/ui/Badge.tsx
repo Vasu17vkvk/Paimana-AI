@@ -21,27 +21,33 @@ export default function Badge({
 }: BadgeProps) {
     const styles = {
         default: {
-            container: "bg-slate-100 text-slate-600",
+            container:
+                "border border-slate-200 bg-slate-100 text-slate-600",
             dot: "bg-slate-500",
         },
         success: {
-            container: "bg-emerald-50 text-emerald-700",
+            container:
+                "border border-emerald-100 bg-emerald-50 text-emerald-700",
             dot: "bg-emerald-500",
         },
         warning: {
-            container: "bg-amber-50 text-amber-700",
+            container:
+                "border border-amber-100 bg-amber-50 text-amber-700",
             dot: "bg-amber-500",
         },
         danger: {
-            container: "bg-red-50 text-red-700",
+            container:
+                "border border-red-100 bg-red-50 text-red-700",
             dot: "bg-red-500",
         },
         info: {
-            container: "bg-blue-50 text-blue-700",
+            container:
+                "border border-blue-100 bg-blue-50 text-blue-700",
             dot: "bg-blue-500",
         },
         neutral: {
-            container: "bg-slate-50 text-slate-500",
+            container:
+                "border border-slate-200 bg-slate-50 text-slate-500",
             dot: "bg-slate-400",
         },
     };
@@ -51,8 +57,10 @@ export default function Badge({
     return (
         <span
             className={[
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1",
-                "text-[10px] font-bold",
+                "inline-flex items-center gap-1.5",
+                "rounded-full px-2 py-1",
+                "text-[9px] font-semibold leading-none",
+                "whitespace-nowrap",
                 selected.container,
                 className,
             ]
@@ -62,7 +70,7 @@ export default function Badge({
             {dot && (
                 <span
                     className={[
-                        "h-1.5 w-1.5 rounded-full",
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
                         selected.dot,
                     ].join(" ")}
                 />

@@ -18,7 +18,12 @@ export default function Input({
             {label && (
                 <label
                     htmlFor={id}
-                    className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.05em] text-slate-400"
+                    className="
+                        mb-1.5 block
+                        text-[9px] font-bold
+                        uppercase tracking-[0.08em]
+                        text-[#94A3B8]
+                    "
                 >
                     {label}
                 </label>
@@ -28,13 +33,30 @@ export default function Input({
                 {...props}
                 id={id}
                 className={[
-                    "h-10 w-full rounded-lg border bg-slate-50 px-3",
-                    "text-xs text-slate-700 outline-none",
-                    "transition-colors",
-                    "placeholder:text-slate-400",
+                    "h-10 w-full rounded-[9px]",
+                    "border bg-[#F8FAFB] px-3",
+                    "text-[11px] font-medium",
+                    "text-[#334155]",
+                    "outline-none",
+                    "transition-[border-color,background,box-shadow]",
+                    "duration-150",
+                    "placeholder:text-[#94A3B8]",
+                    "hover:border-slate-300",
                     error
-                        ? "border-red-300 focus:border-red-500"
-                        : "border-slate-200 focus:border-slate-400 focus:bg-white",
+                        ? [
+                            "border-red-300",
+                            "focus:border-red-400",
+                            "focus:bg-white",
+                            "focus:ring-2",
+                            "focus:ring-red-500/5",
+                        ].join(" ")
+                        : [
+                            "border-[#D9E1E8]",
+                            "focus:border-[#94A3B8]",
+                            "focus:bg-white",
+                            "focus:ring-2",
+                            "focus:ring-[#102A43]/5",
+                        ].join(" "),
                     className,
                 ]
                     .filter(Boolean)
@@ -42,7 +64,10 @@ export default function Input({
             />
 
             {error && (
-                <p className="mt-1.5 text-[10px] text-red-600">
+                <p className="
+                    mt-1.5 text-[10px]
+                    font-medium text-red-600
+                ">
                     {error}
                 </p>
             )}

@@ -1,4 +1,8 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type {
+    HTMLAttributes,
+    ReactNode,
+} from "react";
+
 
 interface CardProps
     extends HTMLAttributes<HTMLDivElement> {
@@ -6,6 +10,7 @@ interface CardProps
     padding?: "none" | "sm" | "md" | "lg";
     hoverable?: boolean;
 }
+
 
 export default function Card({
     children,
@@ -17,7 +22,7 @@ export default function Card({
     const paddingStyles = {
         none: "p-0",
         sm: "p-3",
-        md: "p-4 sm:p-5",
+        md: "p-4 sm:p-[18px]",
         lg: "p-5 sm:p-6",
     };
 
@@ -25,12 +30,45 @@ export default function Card({
         <div
             {...props}
             className={[
-                "rounded-2xl border border-slate-200 bg-white",
-                "shadow-[0_1px_2px_rgba(15,23,42,0.03)]",
+                /* =================================================
+                   BASE CARD
+                ================================================== */
+
+                "rounded-[14px]",
+                "border border-[#D9E1E8]",
+                "bg-white",
+
+                /* =================================================
+                   PREMIUM SHADOW
+                ================================================== */
+
+                "shadow-[0_1px_3px_rgba(15,23,42,0.05)]",
+
+                /* =================================================
+                   TRANSITION
+                ================================================== */
+
+                "transition-[box-shadow,transform,border-color]",
+                "duration-150",
+
+                /* =================================================
+                   PADDING
+                ================================================== */
+
                 paddingStyles[padding],
+
+                /* =================================================
+                   HOVER
+                ================================================== */
+
                 hoverable
-                    ? "transition-shadow hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
+                    ? [
+                        "hover:-translate-y-[1px]",
+                        "hover:border-slate-300",
+                        "hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)]",
+                    ].join(" ")
                     : "",
+
                 className,
             ]
                 .filter(Boolean)

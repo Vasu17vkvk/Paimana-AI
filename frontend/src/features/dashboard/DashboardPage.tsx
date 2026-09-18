@@ -30,9 +30,7 @@ import Input from "../../components/ui/Input";
 import Select from "../../components/ui/Select";
 
 import MetricCard from "../../components/cards/MetricCard";
-
 import FilterChips from "../../components/filters/FilterChips";
-
 import PageHeader from "../../components/layout/PageHeader";
 
 import {
@@ -64,10 +62,6 @@ import {
 } from "../../services/warningsApi";
 
 
-/* =========================================================
-   TYPES
-========================================================= */
-
 interface DashboardFilterOptionsState {
     reportingPeriods: string[];
     ministries: string[];
@@ -78,68 +72,50 @@ interface DashboardFilterOptionsState {
 }
 
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
 function mapDashboardProject(
-    project:
-        DashboardResponse["projects"][number],
+    project: DashboardResponse["projects"][number],
 ): DashboardProject {
     return {
         id: project.id,
+        name: project.name || "Unnamed Project",
+        ministry: project.ministry || "",
+        sector: project.sector || "",
+        state: project.state || "",
 
-        name:
-            project.name || "Unnamed Project",
+        originalCost: Number(
+            project.originalCost ?? 0,
+        ),
 
-        ministry:
-            project.ministry || "",
-
-        sector:
-            project.sector || "",
-
-        state:
-            project.state || "",
-
-        originalCost:
-            Number(
-                project.originalCost ?? 0,
-            ),
-
-        revisedCost:
-            Number(
-                project.revisedCost ?? 0,
-            ),
+        revisedCost: Number(
+            project.revisedCost ?? 0,
+        ),
 
         riskScore:
             project.riskScore === null ||
                 project.riskScore === undefined
                 ? null
-                : Number(
-                    project.riskScore,
-                ),
+                : Number(project.riskScore),
 
-        riskLevel:
-            (project.riskLevel ||
-                "Low") as DashboardProject["riskLevel"],
+        riskLevel: (
+            project.riskLevel || "Low"
+        ) as DashboardProject["riskLevel"],
 
         costRisk:
             project.costRisk || "—",
 
-        delayRisk:
-            (project.delayRisk ||
-                project.riskLevel ||
-                "Low") as DashboardProject["delayRisk"],
+        delayRisk: (
+            project.delayRisk ||
+            project.riskLevel ||
+            "Low"
+        ) as DashboardProject["delayRisk"],
 
-        delayMonths:
-            Number(
-                project.delayMonths ?? 0,
-            ),
+        delayMonths: Number(
+            project.delayMonths ?? 0,
+        ),
 
-        physicalProgress:
-            Number(
-                project.physicalProgress ?? 0,
-            ),
+        physicalProgress: Number(
+            project.physicalProgress ?? 0,
+        ),
 
         status:
             project.status || "—",
@@ -159,36 +135,31 @@ function normalizeDashboardFilters(
 
         ministry:
             filters.ministry &&
-                filters.ministry !==
-                "All Ministries"
+                filters.ministry !== "All Ministries"
                 ? filters.ministry
                 : undefined,
 
         sector:
             filters.sector &&
-                filters.sector !==
-                "All Sectors"
+                filters.sector !== "All Sectors"
                 ? filters.sector
                 : undefined,
 
         state:
             filters.state &&
-                filters.state !==
-                "All States"
+                filters.state !== "All States"
                 ? filters.state
                 : undefined,
 
         risk:
             filters.risk &&
-                filters.risk !==
-                "All Risk Levels"
+                filters.risk !== "All Risk Levels"
                 ? filters.risk
                 : undefined,
 
         status:
             filters.status &&
-                filters.status !==
-                "All Statuses"
+                filters.status !== "All Statuses"
                 ? filters.status
                 : undefined,
     };
@@ -199,71 +170,56 @@ function getProjectCodeSet(
     projects: DashboardProject[],
 ) {
     return new Set(
-        projects.map(
-            (project) =>
-                String(project.id),
+        projects.map((project) =>
+            String(project.id),
         ),
     );
 }
 
 
-/* =========================================================
-   PAGE
-========================================================= */
-
 export default function DashboardPage() {
-    const navigate =
-        useNavigate();
+    const navigate = useNavigate();
 
+    const [filters, setFilters] =
+        useState<DashboardFilters>({
+            ...defaultDashboardFilters,
+            period:
+                defaultDashboardFilters.period ||
+                "",
+        });
 
-    /* =====================================================
-       FILTER STATE
-    ===================================================== */
+    const [appliedFilters, setAppliedFilters] =
+        useState<DashboardFilters>({
+            ...defaultDashboardFilters,
+            period:
+                defaultDashboardFilters.period ||
+                "",
+        });
 
-    const [
-        filters,
-        setFilters,
-    ] = useState<DashboardFilters>({
-        ...defaultDashboardFilters,
-        period:
-            defaultDashboardFilters.period ||
-            "",
-    });
+    const [filterDrawerOpen, setFilterDrawerOpen] =
+        useState(false);
 
+    const [search, setSearch] =
+        useState("");
 
-    const [
-        appliedFilters,
-        setAppliedFilters,
-    ] = useState<DashboardFilters>({
-        ...defaultDashboardFilters,
-        period:
-            defaultDashboardFilters.period ||
-            "",
-    });
-
+    const [debouncedSearch, setDebouncedSearch] =
+        useState("");
 
     const [
-        filterDrawerOpen,
-        setFilterDrawerOpen,
-    ] = useState(false);
+        scheduleViewMode,
+        setScheduleViewMode,
+    ] = useState<
+        "projects" | "percentage"
+    >("projects");
 
-
-    const [
-        search,
-        setSearch,
-    ] = useState("");
-
-    const [
-        debouncedSearch,
-        setDebouncedSearch,
-    ] = useState("");
 
     useEffect(() => {
-        const timer = window.setTimeout(() => {
-            setDebouncedSearch(
-                search.trim(),
-            );
-        }, 400);
+        const timer =
+            window.setTimeout(() => {
+                setDebouncedSearch(
+                    search.trim(),
+                );
+            }, 400);
 
         return () => {
             window.clearTimeout(timer);
@@ -271,39 +227,41 @@ export default function DashboardPage() {
     }, [search]);
 
 
-
-
-    /* =====================================================
-       DATA STATE
-    ===================================================== */
-
-
-
-
-
-
     const filterOptionsQuery = useQuery({
-        queryKey: ["dashboard-filter-options"],
-        queryFn: getDashboardFilterOptions,
+        queryKey: [
+            "dashboard-filter-options",
+        ],
+        queryFn:
+            getDashboardFilterOptions,
         staleTime: 10 * 60_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     });
 
-    const filterOptions: DashboardFilterOptionsState = {
+
+    const filterOptions:
+        DashboardFilterOptionsState = {
         reportingPeriods:
-            filterOptionsQuery.data?.periods ?? [],
+            filterOptionsQuery.data?.periods ??
+            [],
 
         ministries:
-            filterOptionsQuery.data?.ministries ?? [],
+            filterOptionsQuery.data?.ministries ??
+            [],
 
         sectors:
-            filterOptionsQuery.data?.sectors ?? [],
+            filterOptionsQuery.data?.sectors ??
+            [],
 
         states:
-            filterOptionsQuery.data?.states ?? [],
+            filterOptionsQuery.data?.states ??
+            [],
 
         riskLevels:
-            filterOptionsQuery.data?.risk_levels?.length
-                ? filterOptionsQuery.data.risk_levels
+            filterOptionsQuery.data
+                ?.risk_levels?.length
+                ? filterOptionsQuery.data
+                    .risk_levels
                 : [
                     "Critical",
                     "High",
@@ -313,8 +271,10 @@ export default function DashboardPage() {
                 ],
 
         statuses:
-            filterOptionsQuery.data?.statuses?.length
-                ? filterOptionsQuery.data.statuses
+            filterOptionsQuery.data
+                ?.statuses?.length
+                ? filterOptionsQuery.data
+                    .statuses
                 : [
                     "Ongoing",
                     "Delayed",
@@ -339,64 +299,41 @@ export default function DashboardPage() {
                     appliedFilters,
                 ),
                 search:
-                    debouncedSearch || undefined,
+                    debouncedSearch ||
+                    undefined,
             }),
 
         staleTime: 60_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     });
 
 
     const dashboardData =
         dashboardQuery.data ?? null;
 
-
     const isLoading =
         dashboardQuery.isLoading ||
         dashboardQuery.isFetching;
 
-
     const dashboardError =
         dashboardQuery.error
-            ? dashboardQuery.error instanceof Error
+            ? dashboardQuery.error instanceof
+                Error
                 ? dashboardQuery.error.message
                 : "Failed to load dashboard data."
             : null;
 
 
-
-
-
-
-
-
-    /* =====================================================
-       LOAD FILTER OPTIONS
-    ===================================================== */
-
-
-
-
-    /* =====================================================
-       LOAD DASHBOARD
-    ===================================================== */
-
-
-
-    /* =====================================================
-   LOAD REAL EARLY WARNINGS
-===================================================== */
-
     const warningsQuery = useQuery({
         queryKey: ["active-warnings"],
-
         queryFn: getActiveWarnings,
-
         staleTime: 60_000,
-
         refetchInterval: 60_000,
-
         refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     });
+
 
     const activeWarnings =
         warningsQuery.data ?? [];
@@ -405,61 +342,30 @@ export default function DashboardPage() {
         warningsQuery.isLoading ||
         warningsQuery.isFetching;
 
-    /* =====================================================
-       PROJECTS
-    ===================================================== */
 
     const dashboardProjects =
         useMemo(() => {
             return (
-                dashboardData?.projects ??
-                []
-            ).map(
-                mapDashboardProject,
-            );
-        }, [
-            dashboardData,
-        ]);
+                dashboardData?.projects ?? []
+            ).map(mapDashboardProject);
+        }, [dashboardData]);
 
-
-    /* =====================================================
-       HIGHEST RISK PROJECTS
-    ===================================================== */
 
     const highestRiskProjects =
         useMemo(() => {
             if (
-                dashboardData
-                    ?.highestRiskProjects
+                dashboardData?.highestRiskProjects
             ) {
                 return dashboardData
                     .highestRiskProjects
-                    .map(
-                        mapDashboardProject,
-                    );
+                    .map(mapDashboardProject);
             }
 
-            return [
-                ...dashboardProjects,
-            ]
+            return [...dashboardProjects]
                 .sort(
-                    (
-                        first,
-                        second,
-                    ) => {
-                        const firstScore =
-                            first.riskScore ??
-                            -1;
-
-                        const secondScore =
-                            second.riskScore ??
-                            -1;
-
-                        return (
-                            secondScore -
-                            firstScore
-                        );
-                    },
+                    (first, second) =>
+                        (second.riskScore ?? -1) -
+                        (first.riskScore ?? -1),
                 )
                 .slice(0, 8);
         }, [
@@ -467,10 +373,6 @@ export default function DashboardPage() {
             dashboardProjects,
         ]);
 
-
-    /* =====================================================
-       BACKEND KPI DATA
-    ===================================================== */
 
     const metrics =
         dashboardData?.metrics ?? {
@@ -481,13 +383,8 @@ export default function DashboardPage() {
         };
 
 
-    /* =====================================================
-       BACKEND RISK DISTRIBUTION
-    ===================================================== */
-
     const riskDistribution =
-        dashboardData
-            ?.riskDistribution ?? {
+        dashboardData?.riskDistribution ?? {
             Critical: 0,
             High: 0,
             Elevated: 0,
@@ -496,10 +393,6 @@ export default function DashboardPage() {
         };
 
 
-    /* =====================================================
-       FINANCIALS
-    ===================================================== */
-
     const financials =
         dashboardData?.financials ?? {
             originalCost: 0,
@@ -507,9 +400,102 @@ export default function DashboardPage() {
         };
 
 
-    /* =====================================================
-       EXACT EARLY WARNING DATA
-    ===================================================== */
+    const monthlyPortfolioData =
+        dashboardData?.monthlyPortfolioData ??
+        [];
+
+
+    const getTrend = (
+        key:
+            | "projects"
+            | "highRisk"
+            | "delayed"
+            | "costRisk",
+        lowerIsBetter = false,
+    ) => {
+        const values =
+            monthlyPortfolioData
+                .map((item) =>
+                    Number(item[key] ?? 0),
+                )
+                .filter((value) =>
+                    Number.isFinite(value),
+                );
+
+        if (values.length < 2) {
+            return {
+                values,
+                text: undefined as
+                    | string
+                    | undefined,
+                positive: true,
+            };
+        }
+
+        const previous =
+            values[
+            values.length - 2
+            ] ?? 0;
+
+        const current =
+            values[
+            values.length - 1
+            ] ?? 0;
+
+        if (previous === 0) {
+            return {
+                values,
+                text:
+                    current > 0
+                        ? "New"
+                        : "No change",
+                positive:
+                    lowerIsBetter
+                        ? current === 0
+                        : current > 0,
+            };
+        }
+
+        const change =
+            ((current - previous) /
+                Math.abs(previous)) *
+            100;
+
+        const positive =
+            lowerIsBetter
+                ? change <= 0
+                : change >= 0;
+
+        return {
+            values,
+            text:
+                `${Math.abs(change).toFixed(1)}%`,
+            positive,
+        };
+    };
+
+
+    const projectTrend =
+        getTrend("projects");
+
+    const highRiskTrend =
+        getTrend(
+            "highRisk",
+            true,
+        );
+
+    const costRiskTrend =
+        getTrend(
+            "costRisk",
+            true,
+        );
+
+    const delayedTrend =
+        getTrend(
+            "delayed",
+            true,
+        );
+
 
     const filteredWarningCounts =
         useMemo(() => {
@@ -542,32 +528,11 @@ export default function DashboardPage() {
                         "HIGH",
                 ).length;
 
-            const critical =
-                warningsForPortfolio.filter(
-                    (warning) =>
-                        warning.risk_level ===
-                        "CRITICAL",
-                ).length;
-
-            const highRisk =
-                warningsForPortfolio.filter(
-                    (warning) =>
-                        warning.risk_level ===
-                        "HIGH",
-                ).length;
-
             return {
                 active:
                     warningsForPortfolio.length,
-
                 immediate,
-
                 highPriority,
-
-                critical,
-
-                highRisk,
-
                 warnings:
                     warningsForPortfolio,
             };
@@ -577,172 +542,149 @@ export default function DashboardPage() {
         ]);
 
 
-    /* =====================================================
-       APPLY FILTERS
-    ===================================================== */
+    const applyFilters = () => {
+        setAppliedFilters(filters);
+        setFilterDrawerOpen(false);
+    };
 
-    const applyFilters =
-        () => {
-            setAppliedFilters(
-                filters,
-            );
 
-            setFilterDrawerOpen(
-                false,
-            );
+    const resetFilters = () => {
+        const resetValues:
+            DashboardFilters = {
+            ...defaultDashboardFilters,
+            period: "",
         };
 
+        setFilters(resetValues);
+        setAppliedFilters(resetValues);
+        setSearch("");
+        setDebouncedSearch("");
+    };
 
-    /* =====================================================
-       RESET FILTERS
-    ===================================================== */
 
-    const resetFilters =
-        () => {
-            const firstPeriod =
-                filterOptions
-                    .reportingPeriods[0] ??
-                "";
-
-            const resetValues: DashboardFilters =
-            {
-                ...defaultDashboardFilters,
-                period:
-                    firstPeriod,
-            };
-
-            setFilters(
-                resetValues,
-            );
-
-            setAppliedFilters(
-                resetValues,
-            );
-
-            setSearch("");
+    const handlePeriodChange = (
+        value: string,
+    ) => {
+        const nextFilters = {
+            ...filters,
+            period: value,
         };
 
+        setFilters(nextFilters);
+        setAppliedFilters(nextFilters);
+    };
 
-    /* =====================================================
-       PERIOD CHANGE
-    ===================================================== */
-
-    const handlePeriodChange =
-        (
-            value: string,
-        ) => {
-            const nextFilters =
-            {
-                ...filters,
-                period: value,
-            };
-
-            setFilters(
-                nextFilters,
-            );
-
-            /*
-             * Reporting period is a primary dashboard control,
-             * so apply it immediately.
-             */
-            setAppliedFilters(
-                nextFilters,
-            );
-        };
-
-
-    /* =====================================================
-       LOADING
-    ===================================================== */
 
     if (
         isLoading &&
         !dashboardData
     ) {
         return (
-            <div className="mx-auto w-full max-w-[1500px]">
-
+            <div className="
+                mx-auto w-full
+                max-w-[1500px]
+            ">
                 <PageHeader
                     eyebrow="NATIONAL PROJECT MONITORING"
                     title="Dashboard"
                     description="Monitor infrastructure projects, emerging risks, cost pressure and schedule performance."
                 />
 
-                <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-
+                <div className="
+                    mt-6 grid grid-cols-2
+                    gap-3 sm:gap-4
+                    xl:grid-cols-4
+                ">
                     {[
                         "Total Projects",
                         "High Risk Projects",
                         "Projects at Cost Risk",
                         "Delayed Projects",
-                    ].map(
-                        (
-                            label,
-                        ) => (
-                            <Card
-                                key={
-                                    label
-                                }
-                                padding="md"
-                            >
+                    ].map((label) => (
+                        <Card
+                            key={label}
+                            padding="md"
+                        >
+                            <div className="
+                                h-9 w-9
+                                animate-pulse
+                                rounded-[10px]
+                                bg-slate-100
+                            " />
 
-                                <div className="h-9 w-9 animate-pulse rounded-xl bg-slate-100" />
+                            <div className="
+                                mt-4 h-2 w-24
+                                animate-pulse
+                                rounded
+                                bg-slate-100
+                            " />
 
-                                <div className="mt-4 h-2 w-24 animate-pulse rounded bg-slate-100" />
+                            <div className="
+                                mt-2 h-7 w-20
+                                animate-pulse
+                                rounded
+                                bg-slate-100
+                            " />
 
-                                <div className="mt-2 h-7 w-20 animate-pulse rounded bg-slate-100" />
-
-                                <div className="mt-2 h-2 w-36 animate-pulse rounded bg-slate-100" />
-
-                            </Card>
-                        ),
-                    )}
-
+                            <div className="
+                                mt-2 h-2 w-36
+                                animate-pulse
+                                rounded
+                                bg-slate-100
+                            " />
+                        </Card>
+                    ))}
                 </div>
 
-
                 <div className="mt-5">
-
                     <Card
                         padding="lg"
-                        className="py-16 text-center"
+                        className="
+                            py-16 text-center
+                        "
                     >
-
-                        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400">
+                        <div className="
+                            mx-auto grid h-12 w-12
+                            place-items-center
+                            rounded-[14px]
+                            bg-slate-100
+                            text-slate-400
+                        ">
                             <ShieldAlert
                                 size={20}
                                 className="animate-pulse"
                             />
                         </div>
 
-                        <h3 className="mt-4 text-sm font-bold text-slate-800">
+                        <h3 className="
+                            mt-4 text-[13px]
+                            font-bold text-[#172033]
+                        ">
                             Loading live dashboard
                         </h3>
 
-                        <p className="mt-2 text-xs text-slate-400">
+                        <p className="
+                            mt-2 text-[11px]
+                            text-[#94A3B8]
+                        ">
                             Fetching current portfolio and ML risk data.
                         </p>
-
                     </Card>
-
                 </div>
-
             </div>
         );
     }
 
-
-    /* =====================================================
-       ERROR
-    ===================================================== */
 
     if (
         dashboardError &&
         !dashboardData
     ) {
         return (
-            <div className="mx-auto w-full max-w-[1500px]">
-
+            <div className="
+                mx-auto w-full
+                max-w-[1500px]
+            ">
                 <PageHeader
                     eyebrow="NATIONAL PROJECT MONITORING"
                     title="Dashboard"
@@ -750,23 +692,41 @@ export default function DashboardPage() {
                 />
 
                 <div className="mt-6">
-
                     <Card
                         padding="lg"
-                        className="border-red-100 bg-red-50/40 py-16 text-center"
+                        className="
+                            border-red-100
+                            bg-red-50/40
+                            py-16 text-center
+                        "
                     >
-
-                        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-100 text-red-600">
+                        <div className="
+                            mx-auto grid h-12 w-12
+                            place-items-center
+                            rounded-[14px]
+                            bg-red-100
+                            text-red-600
+                        ">
                             <ShieldAlert
                                 size={20}
                             />
                         </div>
 
-                        <h3 className="mt-4 text-sm font-bold text-red-800">
+                        <h3 className="
+                            mt-4 text-[13px]
+                            font-bold
+                            text-red-800
+                        ">
                             Unable to load dashboard
                         </h3>
 
-                        <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-red-600">
+                        <p className="
+                            mx-auto mt-2
+                            max-w-lg
+                            text-[11px]
+                            leading-5
+                            text-red-600
+                        ">
                             {dashboardError}
                         </p>
 
@@ -780,58 +740,50 @@ export default function DashboardPage() {
                         >
                             Retry
                         </Button>
-
                     </Card>
-
                 </div>
-
             </div>
         );
     }
 
 
     return (
-        <div className="mx-auto w-full max-w-[1500px]">
-
-            {/* ==================================================
-              HEADER
-            =================================================== */}
-
+        <div className="
+            mx-auto w-full
+            max-w-[1500px]
+        ">
             <PageHeader
                 eyebrow="NATIONAL PROJECT MONITORING"
                 title="Dashboard"
                 description="Monitor infrastructure projects, emerging risks, cost pressure and schedule performance."
                 action={
-                    <div className="hidden items-center gap-2 sm:flex">
-
+                    <div className="
+                        hidden items-center
+                        gap-2 sm:flex
+                    ">
                         <Select
                             aria-label="Reporting period"
-                            value={
-                                filters.period
-                            }
-                            onChange={(
-                                event,
-                            ) =>
+                            value={filters.period}
+                            onChange={(event) =>
                                 handlePeriodChange(
                                     event.target.value,
                                 )
                             }
+                            tone="dark"
                             options={[
                                 {
-                                    label: "Select Month",
+                                    label:
+                                        "Select Month",
                                     value: "",
                                 },
-
-                                ...filterOptions.reportingPeriods.map(
-                                    (
-                                        period,
-                                    ) => ({
-                                        label:
-                                            period,
-                                        value:
-                                            period,
-                                    }),
-                                ),
+                                ...filterOptions
+                                    .reportingPeriods
+                                    .map(
+                                        (period) => ({
+                                            label: period,
+                                            value: period,
+                                        }),
+                                    ),
                             ]}
                             className="w-[160px]"
                         />
@@ -845,51 +797,39 @@ export default function DashboardPage() {
                                 )
                             }
                         >
-                            <Filter
-                                size={14}
-                            />
+                            <Filter size={14} />
                             Filters
                         </Button>
-
                     </div>
                 }
             />
 
 
-            {/* ==================================================
-              MOBILE CONTROLS
-            =================================================== */}
-
-            <div className="mb-5 flex gap-2 sm:hidden">
-
+            <div className="
+                mb-5 flex gap-2 sm:hidden
+            ">
                 <Select
                     aria-label="Reporting period"
-                    value={
-                        filters.period
-                    }
-                    onChange={(
-                        event,
-                    ) =>
+                    value={filters.period}
+                    onChange={(event) =>
                         handlePeriodChange(
                             event.target.value,
                         )
                     }
                     options={[
                         {
-                            label: "Select Month",
+                            label:
+                                "Select Month",
                             value: "",
                         },
-
-                        ...filterOptions.reportingPeriods.map(
-                            (
-                                period,
-                            ) => ({
-                                label:
-                                    period,
-                                value:
-                                    period,
-                            }),
-                        ),
+                        ...filterOptions
+                            .reportingPeriods
+                            .map(
+                                (period) => ({
+                                    label: period,
+                                    value: period,
+                                }),
+                            ),
                     ]}
                     className="flex-1"
                 />
@@ -903,36 +843,32 @@ export default function DashboardPage() {
                         )
                     }
                 >
-                    <Filter
-                        size={14}
-                    />
+                    <Filter size={14} />
                     Filters
                 </Button>
-
             </div>
 
 
-            {/* ==================================================
-              SEARCH
-            =================================================== */}
-
-            <div className="mb-4 max-w-md">
-
+            <div className="
+                mb-4 w-full
+                max-w-[600px]
+            ">
                 <div className="relative">
-
                     <Search
                         size={15}
-                        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                        className="
+                            pointer-events-none
+                            absolute left-3
+                            top-1/2
+                            -translate-y-1/2
+                            text-slate-400
+                        "
                     />
 
                     <Input
                         aria-label="Search projects"
-                        value={
-                            search
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={search}
+                        onChange={(event) =>
                             setSearch(
                                 event.target.value,
                             )
@@ -940,25 +876,14 @@ export default function DashboardPage() {
                         placeholder="Search projects, ministries..."
                         className="pl-9"
                     />
-
                 </div>
-
             </div>
 
 
-            {/* ==================================================
-              ACTIVE FILTER CHIPS
-            =================================================== */}
-
             <div className="mb-5">
-
                 <FilterChips
-                    filters={
-                        appliedFilters
-                    }
-                    onChange={(
-                        nextFilters,
-                    ) => {
+                    filters={appliedFilters}
+                    onChange={(nextFilters) => {
                         setAppliedFilters(
                             nextFilters,
                         );
@@ -968,32 +893,35 @@ export default function DashboardPage() {
                         );
                     }}
                 />
-
             </div>
 
 
-            {/* ==================================================
-              REFRESHING
-            =================================================== */}
-
             {isLoading && (
-                <div className="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-400">
+                <div className="
+                    mb-4 flex
+                    items-center gap-2
+                    rounded-[9px]
+                    border
+                    border-[#D9E1E8]
+                    bg-white
+                    px-3 py-2
+                    text-[10px]
+                    text-[#94A3B8]
+                ">
                     <ShieldAlert
                         size={13}
                         className="animate-pulse"
                     />
-
                     Updating live dashboard data...
                 </div>
             )}
 
 
-            {/* ==================================================
-              KPI
-            =================================================== */}
-
-            <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-
+            <section className="
+                grid grid-cols-2
+                gap-3 sm:gap-4
+                xl:grid-cols-4
+            ">
                 <MetricCard
                     label="Total Projects"
                     value={formatNumber(
@@ -1003,7 +931,15 @@ export default function DashboardPage() {
                     icon={
                         <ShieldAlert
                             size={18}
+                            strokeWidth={1.8}
                         />
+                    }
+                    trend={projectTrend.text}
+                    trendPositive={
+                        projectTrend.positive
+                    }
+                    sparkline={
+                        projectTrend.values
                     }
                     onClick={() =>
                         navigate(
@@ -1021,7 +957,15 @@ export default function DashboardPage() {
                     icon={
                         <AlertTriangle
                             size={18}
+                            strokeWidth={1.8}
                         />
+                    }
+                    trend={highRiskTrend.text}
+                    trendPositive={
+                        highRiskTrend.positive
+                    }
+                    sparkline={
+                        highRiskTrend.values
                     }
                     onClick={() =>
                         navigate(
@@ -1039,7 +983,15 @@ export default function DashboardPage() {
                     icon={
                         <IndianRupee
                             size={18}
+                            strokeWidth={1.8}
                         />
+                    }
+                    trend={costRiskTrend.text}
+                    trendPositive={
+                        costRiskTrend.positive
+                    }
+                    sparkline={
+                        costRiskTrend.values
                     }
                     onClick={() =>
                         navigate(
@@ -1057,7 +1009,15 @@ export default function DashboardPage() {
                     icon={
                         <Clock3
                             size={18}
+                            strokeWidth={1.8}
                         />
+                    }
+                    trend={delayedTrend.text}
+                    trendPositive={
+                        delayedTrend.positive
+                    }
+                    sparkline={
+                        delayedTrend.values
                     }
                     onClick={() =>
                         navigate(
@@ -1065,16 +1025,10 @@ export default function DashboardPage() {
                         )
                     }
                 />
-
             </section>
 
 
-            {/* ==================================================
-              FINANCIALS
-            =================================================== */}
-
             <section className="mt-5">
-
                 <PortfolioFinancials
                     originalCost={
                         financials.originalCost
@@ -1083,165 +1037,367 @@ export default function DashboardPage() {
                         financials.revisedCost
                     }
                 />
-
             </section>
 
 
-            {/* ==================================================
-              RISK + EARLY WARNING
-            =================================================== */}
-
-            <section className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
-
-                {/* Risk Overview */}
-                <Card padding="lg">
-
-                    <div className="flex items-start justify-between gap-4">
-
+            <section className="
+                mt-5 grid grid-cols-1
+                gap-4 xl:grid-cols-2
+            ">
+                <Card
+                    padding="lg"
+                    className="overflow-hidden"
+                >
+                    <div className="
+                        flex items-start
+                        justify-between gap-4
+                    ">
                         <div>
-
-                            <h2 className="text-sm font-bold text-slate-900">
-                                Risk Overview
-                            </h2>
-
-                            <p className="mt-1 text-[11px] text-slate-400">
-                                Current ML risk distribution for the selected portfolio.
-                            </p>
-
-                        </div>
-
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                                navigate(
-                                    "/risk-analysis",
-                                )
-                            }
-                        >
-                            View analysis
-                            <ArrowRight
-                                size={13}
-                            />
-                        </Button>
-
-                    </div>
-
-
-                    <RiskDistribution
-                        data={
-                            riskDistribution
-                        }
-                    />
-
-                </Card>
-
-
-                {/* Early Warning Center */}
-                <Card padding="lg">
-
-                    <div className="flex items-start gap-3">
-
-                        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-50 text-red-600">
-                            <Bell
-                                size={17}
-                            />
-                        </div>
-
-                        <div>
-
-                            <div className="flex items-center gap-2">
-
-                                <h2 className="text-sm font-bold text-slate-900">
-                                    Early Warning Center
-                                </h2>
-
-                                {isLoadingWarnings && (
-                                    <span className="text-[9px] text-slate-400">
-                                        Updating...
-                                    </span>
-                                )}
-
+                            <div className="
+                                text-[10px]
+                                font-bold uppercase
+                                tracking-[0.08em]
+                                text-[#94A3B8]
+                            ">
+                                RISK MONITORING
                             </div>
 
-                            <p className="mt-1 text-[11px] text-slate-400">
-                                Live ML-generated warnings requiring attention.
-                            </p>
+                            <h2 className="
+                                mt-1 text-[16px]
+                                font-bold
+                                tracking-[-0.02em]
+                                text-[#172033]
+                            ">
+                                Risk Distribution
+                            </h2>
 
+                            <p className="
+                                mt-1 text-[11px]
+                                leading-4
+                                text-[#64748B]
+                            ">
+                                Current model-based risk classification
+                            </p>
                         </div>
 
+                        <ChartMenu
+                            actions={[
+                                {
+                                    label:
+                                        "Open Risk Analysis",
+                                    onClick: () =>
+                                        navigate(
+                                            "/risk-analysis",
+                                        ),
+                                },
+                                {
+                                    label:
+                                        "Open Early Warnings",
+                                    onClick: () =>
+                                        navigate(
+                                            "/early-warnings",
+                                        ),
+                                },
+                            ]}
+                        />
                     </div>
 
-
-                    <div className="mt-6 space-y-3">
-
-                        <WarningRow
-                            label="Immediate"
-                            count={
-                                filteredWarningCounts.immediate
-                            }
-                            variant="danger"
-                        />
-
-                        <WarningRow
-                            label="High Priority"
-                            count={
-                                filteredWarningCounts.highPriority
-                            }
-                            variant="warning"
-                        />
-
-                        <WarningRow
-                            label="Active Warnings"
-                            count={
-                                filteredWarningCounts.active
-                            }
-                            variant="info"
-                        />
-
-                    </div>
-
-
-                    <Button
-                        fullWidth
-                        className="mt-5"
-                        onClick={() =>
-                            navigate(
-                                "/early-warnings",
-                            )
-                        }
-                    >
-                        Open Warning Center
-                        <ArrowRight
-                            size={14}
-                        />
-                    </Button>
-
+                    <RiskDistribution
+                        data={riskDistribution}
+                    />
                 </Card>
 
+
+                <Card
+                    padding="lg"
+                    className="overflow-hidden"
+                >
+                    <div className="
+                        flex items-start
+                        justify-between gap-4
+                    ">
+                        <div>
+                            <div className="
+                                text-[10px]
+                                font-bold uppercase
+                                tracking-[0.08em]
+                                text-[#94A3B8]
+                            ">
+                                SCHEDULE MONITORING
+                            </div>
+
+                            <h2 className="
+                                mt-1 text-[16px]
+                                font-bold
+                                tracking-[-0.02em]
+                                text-[#172033]
+                            ">
+                                Schedule Status
+                            </h2>
+
+                            <p className="
+                                mt-1 text-[11px]
+                                leading-4
+                                text-[#64748B]
+                            ">
+                                Portfolio-wide schedule classification
+                            </p>
+                        </div>
+
+                        <div className="
+                            flex items-center gap-2
+                        ">
+                            <select
+                                value={
+                                    scheduleViewMode
+                                }
+                                onChange={(event) =>
+                                    setScheduleViewMode(
+                                        event.target.value as
+                                        | "projects"
+                                        | "percentage",
+                                    )
+                                }
+                                className="
+                                    hidden h-8
+                                    appearance-none
+                                    rounded-[8px]
+                                    border
+                                    border-[#D9E1E8]
+                                    bg-white
+                                    px-3 pr-6
+                                    text-[10px]
+                                    font-medium
+                                    text-[#64748B]
+                                    outline-none
+                                    transition-colors
+                                    hover:border-slate-300
+                                    focus:border-[#94A3B8]
+                                    focus:ring-2
+                                    focus:ring-[#102A43]/5
+                                    sm:block
+                                "
+                            >
+                                <option value="projects">
+                                    Projects
+                                </option>
+
+                                <option value="percentage">
+                                    Share (%)
+                                </option>
+                            </select>
+
+                            <ChartMenu
+                                actions={[
+                                    {
+                                        label:
+                                            "Open Project Analytics",
+                                        onClick: () =>
+                                            navigate(
+                                                "/project-analytics",
+                                            ),
+                                    },
+                                    {
+                                        label:
+                                            "Open Delay Prediction",
+                                        onClick: () =>
+                                            navigate(
+                                                "/delay-prediction",
+                                            ),
+                                    },
+                                ]}
+                            />
+                        </div>
+                    </div>
+
+                    <ScheduleStatus
+                        projects={
+                            dashboardProjects
+                        }
+                        viewMode={
+                            scheduleViewMode
+                        }
+                    />
+                </Card>
             </section>
 
 
-            {/* ==================================================
-              TOP RISK PROJECTS
-            =================================================== */}
+            <section className="mt-5">
+                <Card
+                    padding="lg"
+                    className="
+                        relative overflow-hidden
+                        border-red-100/80
+                    "
+                >
+                    <div className="
+                        absolute right-0 top-0
+                        h-28 w-28
+                        rounded-full
+                        bg-red-50/60
+                        blur-3xl
+                    " />
+
+                    <div className="relative">
+                        <div className="
+                            flex items-start
+                            justify-between gap-4
+                        ">
+                            <div className="
+                                flex items-start
+                                gap-3
+                            ">
+                                <div className="
+                                    grid h-9 w-9
+                                    shrink-0
+                                    place-items-center
+                                    rounded-[10px]
+                                    bg-red-50
+                                    text-red-600
+                                ">
+                                    <Bell
+                                        size={17}
+                                        strokeWidth={1.9}
+                                    />
+                                </div>
+
+                                <div className="min-w-0">
+                                    <div className="
+                                        flex items-center
+                                        gap-2
+                                    ">
+                                        <div className="
+                                            text-[10px]
+                                            font-bold uppercase
+                                            tracking-[0.08em]
+                                            text-[#94A3B8]
+                                        ">
+                                            LIVE MONITORING
+                                        </div>
+
+                                        {isLoadingWarnings && (
+                                            <span className="
+                                                rounded-full
+                                                bg-slate-100
+                                                px-2 py-0.5
+                                                text-[8px]
+                                                font-semibold
+                                                text-slate-400
+                                            ">
+                                                Updating
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <h2 className="
+                                        mt-1 text-[16px]
+                                        font-bold
+                                        tracking-[-0.02em]
+                                        text-[#172033]
+                                    ">
+                                        Early Warning Center
+                                    </h2>
+
+                                    <p className="
+                                        mt-1 text-[11px]
+                                        leading-4
+                                        text-[#64748B]
+                                    ">
+                                        Live ML-generated warnings requiring attention.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                    navigate(
+                                        "/early-warnings",
+                                    )
+                                }
+                                className="shrink-0"
+                            >
+                                View center
+                                <ArrowRight size={13} />
+                            </Button>
+                        </div>
+
+                        <div className="
+                            mt-6 grid
+                            grid-cols-1 gap-2
+                            sm:grid-cols-3
+                        ">
+                            <WarningRow
+                                label="Immediate"
+                                count={
+                                    filteredWarningCounts.immediate
+                                }
+                                variant="danger"
+                            />
+
+                            <WarningRow
+                                label="High Priority"
+                                count={
+                                    filteredWarningCounts.highPriority
+                                }
+                                variant="warning"
+                            />
+
+                            <WarningRow
+                                label="Active Warnings"
+                                count={
+                                    filteredWarningCounts.active
+                                }
+                                variant="info"
+                            />
+                        </div>
+                    </div>
+                </Card>
+            </section>
+
 
             <section className="mt-5">
-
-                <Card padding="none">
-
-                    <div className="flex flex-col gap-3 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-
+                <Card
+                    padding="none"
+                    className="overflow-hidden"
+                >
+                    <div className="
+                        flex flex-col gap-3
+                        border-b
+                        border-[#E7EDF2]
+                        px-5 py-4
+                        sm:flex-row
+                        sm:items-center
+                        sm:justify-between
+                        sm:px-6
+                    ">
                         <div>
+                            <div className="
+                                text-[10px]
+                                font-bold uppercase
+                                tracking-[0.08em]
+                                text-[#94A3B8]
+                            ">
+                                RISK PRIORITY
+                            </div>
 
-                            <h2 className="text-sm font-bold text-slate-900">
+                            <h2 className="
+                                mt-1 text-[15px]
+                                font-bold
+                                tracking-[-0.02em]
+                                text-[#172033]
+                            ">
                                 Highest Risk Projects
                             </h2>
 
-                            <p className="mt-1 text-[11px] text-slate-400">
-                                Top projects ranked by current ML risk score
+                            <p className="
+                                mt-1 text-[11px]
+                                leading-4
+                                text-[#64748B]
+                            ">
+                                Top projects ranked by current ML risk score.
                             </p>
-
                         </div>
 
                         <Button
@@ -1252,24 +1408,24 @@ export default function DashboardPage() {
                                     "/risk-analysis",
                                 )
                             }
+                            className="w-fit shrink-0"
                         >
                             View all
-                            <ArrowRight
-                                size={13}
-                            />
+                            <ArrowRight size={13} />
                         </Button>
-
                     </div>
 
-
                     <div className="overflow-x-auto">
-
-                        <table className="w-full min-w-[850px] border-collapse">
-
+                        <table className="
+                            w-full min-w-[850px]
+                            border-collapse
+                        ">
                             <thead>
-
-                                <tr className="border-y border-slate-100 bg-slate-50/60">
-
+                                <tr className="
+                                    border-b
+                                    border-[#E7EDF2]
+                                    bg-[#F8FAFB]
+                                ">
                                     <TableHeading>
                                         Project
                                     </TableHeading>
@@ -1297,45 +1453,39 @@ export default function DashboardPage() {
                                     <TableHeading>
                                         Progress
                                     </TableHeading>
-
                                 </tr>
-
                             </thead>
 
-
                             <tbody>
-
                                 {highestRiskProjects.length ===
                                     0 ? (
-
                                     <tr>
-
                                         <td
-                                            colSpan={
-                                                7
-                                            }
-                                            className="px-5 py-12 text-center"
+                                            colSpan={7}
+                                            className="
+                                                px-5 py-14
+                                                text-center
+                                            "
                                         >
-
-                                            <div className="text-sm font-semibold text-slate-700">
+                                            <div className="
+                                                text-[13px]
+                                                font-semibold
+                                                text-slate-700
+                                            ">
                                                 No projects found
                                             </div>
 
-                                            <div className="mt-1 text-xs text-slate-400">
+                                            <div className="
+                                                mt-1 text-[11px]
+                                                text-slate-400
+                                            ">
                                                 Try changing your filters or search.
                                             </div>
-
                                         </td>
-
                                     </tr>
-
                                 ) : (
-
                                     highestRiskProjects.map(
-                                        (
-                                            project,
-                                        ) => (
-
+                                        (project) => (
                                             <ProjectRow
                                                 key={
                                                     project.id
@@ -1351,110 +1501,92 @@ export default function DashboardPage() {
                                                     )
                                                 }
                                             />
-
                                         ),
                                     )
-
                                 )}
-
                             </tbody>
-
                         </table>
-
                     </div>
-
                 </Card>
-
             </section>
 
 
-            {/* ==================================================
-              PORTFOLIO INSIGHT
-            =================================================== */}
-
             <section className="mt-5">
-
                 <Card padding="lg">
-
-                    <div className="flex items-start gap-4">
-
-                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white">
+                    <div className="
+                        flex items-start gap-4
+                    ">
+                        <div className="
+                            grid h-10 w-10 shrink-0
+                            place-items-center
+                            rounded-[10px]
+                            bg-[#172033]
+                            text-white
+                        ">
                             <TrendingUp
                                 size={18}
+                                strokeWidth={1.8}
                             />
                         </div>
 
-                        <div>
-
-                            <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                        <div className="min-w-0">
+                            <div className="
+                                text-[10px]
+                                font-bold uppercase
+                                tracking-[0.08em]
+                                text-[#94A3B8]
+                            ">
                                 PORTFOLIO INSIGHT
                             </div>
 
-                            <h3 className="mt-1 text-sm font-bold text-slate-900">
-
+                            <h3 className="
+                                mt-1 text-[14px]
+                                font-bold
+                                tracking-[-0.015em]
+                                text-[#172033]
+                            ">
                                 {metrics.delayedProjects.toLocaleString(
                                     "en-IN",
                                 )}{" "}
-                                projects are currently showing
-                                schedule pressure.
-
+                                projects are currently showing schedule pressure.
                             </h3>
 
-                            <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">
-
-                                Projects combining elevated or
-                                high ML risk with cost and schedule
-                                pressure should receive priority
-                                monitoring.
-
+                            <p className="
+                                mt-2 max-w-3xl
+                                text-[11px]
+                                leading-5
+                                text-[#64748B]
+                            ">
+                                Projects combining elevated or high ML risk
+                                with cost and schedule pressure should receive
+                                priority monitoring.
                             </p>
-
                         </div>
-
                     </div>
-
                 </Card>
-
             </section>
 
 
-            {/* ==================================================
-              FILTER DRAWER
-            =================================================== */}
-
             <DashboardFilterDrawer
-                open={
-                    filterDrawerOpen
-                }
-                filters={
-                    filters
-                }
-                options={
-                    filterOptions
-                }
-                onChange={
-                    setFilters
-                }
-                onApply={
-                    applyFilters
-                }
+                open={filterDrawerOpen}
+                filters={filters}
+                options={filterOptions}
+                onChange={setFilters}
+                onApply={applyFilters}
                 onClose={() =>
                     setFilterDrawerOpen(
                         false,
                     )
                 }
-                onReset={
-                    resetFilters
-                }
+                onReset={resetFilters}
             />
-
         </div>
     );
 }
 
 
 /* =========================================================
-   DASHBOARD FILTER DRAWER
+   FILTER DRAWER
 ========================================================= */
 
 function DashboardFilterDrawer({
@@ -1467,19 +1599,13 @@ function DashboardFilterDrawer({
     onReset,
 }: {
     open: boolean;
-
     filters: DashboardFilters;
-
     options: DashboardFilterOptionsState;
-
     onChange: (
         filters: DashboardFilters,
     ) => void;
-
     onApply: () => void;
-
     onClose: () => void;
-
     onReset: () => void;
 }) {
     if (!open) {
@@ -1491,54 +1617,102 @@ function DashboardFilterDrawer({
             <button
                 type="button"
                 aria-label="Close filters"
-                onClick={
-                    onClose
-                }
-                className="fixed inset-0 z-[70] bg-slate-950/40"
+                onClick={onClose}
+                className="
+                    fixed inset-0 z-[70]
+                    bg-slate-950/35
+                    backdrop-blur-[2px]
+                "
             />
 
-            <div className="fixed inset-x-0 bottom-0 z-[80] max-h-[90vh] overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:w-[420px] md:rounded-none md:rounded-l-3xl">
-
-                <div className="flex items-center justify-between">
-
+            <div className="
+                fixed inset-x-0
+                bottom-0 z-[80]
+                max-h-[92vh]
+                overflow-y-auto
+                rounded-t-[20px]
+                border border-[#D9E1E8]
+                bg-white
+                shadow-[0_-12px_40px_rgba(15,23,42,0.14)]
+                md:inset-y-0
+                md:right-0
+                md:left-auto
+                md:w-[400px]
+                md:max-h-none
+                md:rounded-none
+                md:rounded-l-[18px]
+                md:border-y-0
+                md:border-r-0
+                md:border-l
+                md:shadow-[-12px_0_40px_rgba(15,23,42,0.10)]
+            ">
+                <div className="
+                    flex items-start
+                    justify-between
+                    border-b
+                    border-[#E7EDF2]
+                    px-5 py-5
+                    sm:px-6
+                ">
                     <div>
-
-                        <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                            PAIMANA AI
+                        <div className="
+                            text-[9px] font-bold
+                            uppercase
+                            tracking-[0.12em]
+                            text-[#94A3B8]
+                        ">
+                            NIRMAAN AI
                         </div>
 
-                        <h2 className="mt-1 text-lg font-bold text-slate-900">
+                        <h2 className="
+                            mt-1 text-[16px]
+                            font-bold
+                            tracking-[-0.02em]
+                            text-[#172033]
+                        ">
                             Dashboard Filters
                         </h2>
 
+                        <p className="
+                            mt-1 text-[10px]
+                            leading-4
+                            text-[#94A3B8]
+                        ">
+                            Refine the portfolio view
+                        </p>
                     </div>
 
                     <button
                         type="button"
-                        onClick={
-                            onClose
-                        }
-                        className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
+                        onClick={onClose}
+                        className="
+                            grid h-9 w-9
+                            shrink-0
+                            place-items-center
+                            rounded-[10px]
+                            text-[#64748B]
+                            transition-colors
+                            hover:bg-[#EEF2F5]
+                            hover:text-[#172033]
+                        "
                         aria-label="Close filters"
                     >
                         <X
-                            size={18}
+                            size={17}
+                            strokeWidth={1.8}
                         />
                     </button>
-
                 </div>
 
-
-                <div className="mt-6 space-y-4">
-
+                <div className="
+                    space-y-4
+                    px-5 py-5
+                    sm:px-6
+                ">
                     <Select
                         label="Reporting Period"
-                        value={
-                            filters.period
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={filters.period}
+                        onChange={(event) =>
                             onChange({
                                 ...filters,
                                 period:
@@ -1548,32 +1722,26 @@ function DashboardFilterDrawer({
                         options={[
                             {
                                 label:
-                                    "Latest / All Periods",
-                                value:
-                                    "",
+                                    "Select Month",
+                                value: "",
                             },
-                            ...options.reportingPeriods.map(
-                                (
-                                    item,
-                                ) => ({
-                                    label:
-                                        item,
-                                    value:
-                                        item,
-                                }),
-                            ),
+                            ...options
+                                .reportingPeriods
+                                .map(
+                                    (item) => ({
+                                        label:
+                                            item,
+                                        value:
+                                            item,
+                                    }),
+                                ),
                         ]}
                     />
 
-
                     <Select
                         label="Ministry"
-                        value={
-                            filters.ministry
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={filters.ministry}
+                        onChange={(event) =>
                             onChange({
                                 ...filters,
                                 ministry:
@@ -1587,28 +1755,23 @@ function DashboardFilterDrawer({
                                 value:
                                     "All Ministries",
                             },
-                            ...options.ministries.map(
-                                (
-                                    item,
-                                ) => ({
-                                    label:
-                                        item,
-                                    value:
-                                        item,
-                                }),
-                            ),
+                            ...options
+                                .ministries
+                                .map(
+                                    (item) => ({
+                                        label:
+                                            item,
+                                        value:
+                                            item,
+                                    }),
+                                ),
                         ]}
                     />
 
-
                     <Select
                         label="Sector"
-                        value={
-                            filters.sector
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={filters.sector}
+                        onChange={(event) =>
                             onChange({
                                 ...filters,
                                 sector:
@@ -1623,9 +1786,7 @@ function DashboardFilterDrawer({
                                     "All Sectors",
                             },
                             ...options.sectors.map(
-                                (
-                                    item,
-                                ) => ({
+                                (item) => ({
                                     label:
                                         item,
                                     value:
@@ -1635,15 +1796,10 @@ function DashboardFilterDrawer({
                         ]}
                     />
 
-
                     <Select
                         label="State / Region"
-                        value={
-                            filters.state
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={filters.state}
+                        onChange={(event) =>
                             onChange({
                                 ...filters,
                                 state:
@@ -1658,9 +1814,7 @@ function DashboardFilterDrawer({
                                     "All States",
                             },
                             ...options.states.map(
-                                (
-                                    item,
-                                ) => ({
+                                (item) => ({
                                     label:
                                         item,
                                     value:
@@ -1670,15 +1824,10 @@ function DashboardFilterDrawer({
                         ]}
                     />
 
-
                     <Select
                         label="Risk Level"
-                        value={
-                            filters.risk
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={filters.risk}
+                        onChange={(event) =>
                             onChange({
                                 ...filters,
                                 risk:
@@ -1692,28 +1841,23 @@ function DashboardFilterDrawer({
                                 value:
                                     "All Risk Levels",
                             },
-                            ...options.riskLevels.map(
-                                (
-                                    item,
-                                ) => ({
-                                    label:
-                                        item,
-                                    value:
-                                        item,
-                                }),
-                            ),
+                            ...options
+                                .riskLevels
+                                .map(
+                                    (item) => ({
+                                        label:
+                                            item,
+                                        value:
+                                            item,
+                                    }),
+                                ),
                         ]}
                     />
 
-
                     <Select
                         label="Project Status"
-                        value={
-                            filters.status
-                        }
-                        onChange={(
-                            event,
-                        ) =>
+                        value={filters.status}
+                        onChange={(event) =>
                             onChange({
                                 ...filters,
                                 status:
@@ -1728,9 +1872,7 @@ function DashboardFilterDrawer({
                                     "All Statuses",
                             },
                             ...options.statuses.map(
-                                (
-                                    item,
-                                ) => ({
+                                (item) => ({
                                     label:
                                         item,
                                     value:
@@ -1739,33 +1881,35 @@ function DashboardFilterDrawer({
                             ),
                         ]}
                     />
-
                 </div>
 
+                <div className="
+                    sticky bottom-0
+                    border-t
+                    border-[#E7EDF2]
+                    bg-white
+                    px-5 py-4
+                    sm:px-6
+                ">
+                    <div className="
+                        flex gap-3
+                    ">
+                        <Button
+                            variant="secondary"
+                            fullWidth
+                            onClick={onReset}
+                        >
+                            Reset
+                        </Button>
 
-                <div className="mt-7 flex gap-3 border-t border-slate-100 pt-5">
-
-                    <Button
-                        variant="secondary"
-                        fullWidth
-                        onClick={
-                            onReset
-                        }
-                    >
-                        Reset
-                    </Button>
-
-                    <Button
-                        fullWidth
-                        onClick={
-                            onApply
-                        }
-                    >
-                        Apply Filters
-                    </Button>
-
+                        <Button
+                            fullWidth
+                            onClick={onApply}
+                        >
+                            Apply Filters
+                        </Button>
+                    </div>
                 </div>
-
             </div>
         </>
     );
@@ -1784,15 +1928,11 @@ function PortfolioFinancials({
     revisedCost: number;
 }) {
     const escalation =
-        revisedCost -
-        originalCost;
+        revisedCost - originalCost;
 
     const escalationPercent =
         originalCost > 0
-            ? (
-                escalation /
-                originalCost
-            ) *
+            ? (escalation / originalCost) *
             100
             : 0;
 
@@ -1800,113 +1940,181 @@ function PortfolioFinancials({
         escalation >= 0;
 
     return (
-        <Card padding="md">
-
-            <div className="mb-4 flex items-center justify-between">
-
+        <div className="
+            overflow-hidden
+            rounded-[14px]
+            border border-[#243447]
+            bg-gradient-to-br
+            from-[#172033]
+            to-[#263548]
+            shadow-[0_10px_30px_rgba(15,23,42,0.10)]
+        ">
+            <div className="
+                flex flex-col gap-4
+                px-5 py-5
+                sm:flex-row
+                sm:items-center
+                sm:justify-between
+                sm:px-6
+            ">
                 <div>
-
-                    <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                    <div className="
+                        text-[10px]
+                        font-bold uppercase
+                        tracking-[0.1em]
+                        text-slate-400
+                    ">
                         PORTFOLIO FINANCIALS
                     </div>
 
-                    <div className="mt-1 text-xs text-slate-400">
+                    <div className="
+                        mt-1 text-[11px]
+                        leading-4
+                        text-slate-400
+                    ">
                         Financial position of the selected portfolio
                     </div>
-
                 </div>
 
-                <Badge
-                    variant={
-                        escalationPercent >
-                            10
-                            ? "warning"
-                            : "info"
-                    }
-                >
-                    {isIncrease
-                        ? "+"
-                        : ""}
-                    {escalationPercent.toFixed(
-                        1,
-                    )}
-                    %
-                </Badge>
+                <div className="
+                    inline-flex w-fit
+                    items-center
+                    rounded-full
+                    border
+                    border-amber-400/20
+                    bg-amber-400/10
+                    px-2.5 py-1
+                    text-[10px]
+                    font-semibold
+                    text-amber-300
+                ">
+                    {isIncrease ? "+" : ""}
+                    {escalationPercent.toFixed(1)}%
 
+                    <span className="
+                        ml-1
+                        font-medium
+                        opacity-70
+                    ">
+                        escalation
+                    </span>
+                </div>
             </div>
 
-
-            <div className="grid grid-cols-1 divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-
+            <div className="
+                grid grid-cols-1
+                border-t
+                border-white/10
+                sm:grid-cols-3
+            ">
                 <FinancialMetric
                     label="Original Cost"
-                    value={
-                        originalCost
+                    value={originalCost}
+                    icon={
+                        <IndianRupee
+                            size={17}
+                            strokeWidth={1.8}
+                        />
                     }
                 />
 
                 <FinancialMetric
                     label="Latest Revised Cost"
-                    value={
-                        revisedCost
+                    value={revisedCost}
+                    icon={
+                        <TrendingUp
+                            size={17}
+                            strokeWidth={1.8}
+                        />
                     }
                 />
 
                 <FinancialMetric
                     label="Cost Escalation"
-                    value={
-                        escalation
-                    }
-                    highlight={
-                        isIncrease
+                    value={escalation}
+                    highlight={isIncrease}
+                    icon={
+                        <TrendingUp
+                            size={17}
+                            strokeWidth={1.8}
+                        />
                     }
                 />
-
             </div>
-
-        </Card>
+        </div>
     );
 }
 
-
-/* =========================================================
-   FINANCIAL METRIC
-========================================================= */
 
 function FinancialMetric({
     label,
     value,
     highlight = false,
+    icon,
 }: {
     label: string;
     value: number;
     highlight?: boolean;
+    icon: ReactNode;
 }) {
     return (
-        <div className="py-3 first:pt-0 last:pb-0 sm:px-5 sm:py-1 first:sm:pl-0 last:sm:pr-0">
-
-            <div className="text-[9px] font-bold uppercase tracking-[0.05em] text-slate-400">
-                {label}
+        <div className="
+            flex min-w-0
+            items-center gap-3
+            border-b
+            border-white/10
+            px-5 py-4
+            last:border-b-0
+            sm:border-b-0
+            sm:border-r
+            sm:px-6 sm:py-5
+            sm:last:border-r-0
+        ">
+            <div className="
+                grid h-9 w-9
+                shrink-0
+                place-items-center
+                rounded-[10px]
+                bg-white/[0.08]
+                text-slate-300
+            ">
+                {icon}
             </div>
 
-            <div
-                className={[
-                    "mt-1 text-lg font-bold tracking-tight",
-                    highlight
-                        ? "text-orange-600"
-                        : "text-slate-900",
-                ].join(" ")}
-            >
-                ₹
-                {formatCrore(
-                    value,
-                )}
-            </div>
+            <div className="
+                min-w-0
+            ">
+                <div className="
+                    text-[9px]
+                    font-semibold
+                    uppercase
+                    tracking-[0.08em]
+                    text-slate-400
+                ">
+                    {label}
+                </div>
 
-            <div className="mt-0.5 text-[9px] text-slate-400">
-                crore
-            </div>
+                <div
+                    className={[
+                        "mt-1 truncate",
+                        "text-[20px] font-bold",
+                        "tracking-[-0.035em]",
+                        highlight
+                            ? "text-amber-300"
+                            : "text-white",
+                    ].join(" ")}
+                >
+                    ₹{formatCrore(value)} Cr
+                </div>
 
+                <div className="
+                    mt-0.5 text-[9px]
+                    font-medium
+                    text-slate-500
+                ">
+                    portfolio value
+                </div>
+            </div>
         </div>
     );
 }
@@ -1927,165 +2135,611 @@ function RiskDistribution({
         Low: number;
     };
 }) {
+    const [
+        hoveredIndex,
+        setHoveredIndex,
+    ] = useState<number | null>(null);
+
     const items = [
         {
             label: "Critical",
-            value:
-                Number(
-                    data.Critical ?? 0,
-                ),
-
-            color:
-                "bg-red-500",
-
-            variant:
-                "danger" as const,
+            value: Number(
+                data.Critical ?? 0,
+            ),
+            color: "#EF4444",
         },
-
         {
             label: "High",
-            value:
-                Number(
-                    data.High ?? 0,
-                ),
-
-            color:
-                "bg-orange-500",
-
-            variant:
-                "warning" as const,
+            value: Number(
+                data.High ?? 0,
+            ),
+            color: "#F97316",
         },
-
         {
             label: "Elevated",
-            value:
-                Number(
-                    data.Elevated ?? 0,
-                ),
-
-            color:
-                "bg-yellow-400",
-
-            variant:
-                "warning" as const,
+            value: Number(
+                data.Elevated ?? 0,
+            ),
+            color: "#FBBF24",
         },
-
         {
             label: "Moderate",
-            value:
-                Number(
-                    data.Moderate ?? 0,
-                ),
-
-            color:
-                "bg-blue-500",
-
-            variant:
-                "info" as const,
+            value: Number(
+                data.Moderate ?? 0,
+            ),
+            color: "#3B82F6",
         },
-
         {
             label: "Low",
-            value:
-                Number(
-                    data.Low ?? 0,
-                ),
-
-            color:
-                "bg-emerald-500",
-
-            variant:
-                "success" as const,
+            value: Number(
+                data.Low ?? 0,
+            ),
+            color: "#22C55E",
         },
     ];
 
-
     const total =
         items.reduce(
-            (
-                sum,
-                item,
-            ) =>
-                sum +
-                item.value,
+            (sum, item) =>
+                sum + item.value,
             0,
+        );
+
+    const radius = 72;
+
+    const circumference =
+        2 * Math.PI * radius;
+
+    let accumulated = 0;
+
+    const segments =
+        items.map(
+            (item, index) => {
+                const percentage =
+                    total > 0
+                        ? (item.value /
+                            total) *
+                        100
+                        : 0;
+
+                const segmentLength =
+                    (percentage / 100) *
+                    circumference;
+
+                const offset =
+                    accumulated;
+
+                accumulated +=
+                    segmentLength;
+
+                return {
+                    ...item,
+                    index,
+                    percentage,
+                    segmentLength,
+                    offset,
+                };
+            },
+        );
+
+    const hoveredItem =
+        hoveredIndex === null
+            ? null
+            : segments[hoveredIndex];
+
+
+    return (
+        <div className="mt-7">
+            <div className="
+                flex flex-col
+                items-center gap-8
+                lg:flex-row
+                lg:items-center
+            ">
+                <div className="
+                    relative shrink-0
+                    h-[210px] w-[210px]
+                ">
+                    <svg
+                        viewBox="0 0 160 160"
+                        className="
+                            h-full w-full
+                            overflow-visible
+                        "
+                    >
+                        <circle
+                            cx="80"
+                            cy="80"
+                            r={radius}
+                            fill="none"
+                            stroke="#EEF2F5"
+                            strokeWidth="26"
+                        />
+
+                        {segments.map(
+                            (segment) => (
+                                <circle
+                                    key={
+                                        segment.label
+                                    }
+                                    cx="80"
+                                    cy="80"
+                                    r={radius}
+                                    fill="none"
+                                    stroke={
+                                        segment.color
+                                    }
+                                    strokeWidth={
+                                        hoveredIndex ===
+                                            segment.index
+                                            ? 30
+                                            : 26
+                                    }
+                                    strokeDasharray={`
+                                        ${segment.segmentLength}
+                                        ${circumference -
+                                        segment.segmentLength}
+                                    `}
+                                    strokeDashoffset={
+                                        -segment.offset
+                                    }
+                                    transform="
+                                        rotate(-90 80 80)
+                                    "
+                                    className="
+                                        cursor-pointer
+                                        transition-[stroke-width,opacity]
+                                        duration-150
+                                    "
+                                    opacity={
+                                        hoveredIndex ===
+                                            null ||
+                                            hoveredIndex ===
+                                            segment.index
+                                            ? 1
+                                            : 0.4
+                                    }
+                                    onMouseEnter={() =>
+                                        setHoveredIndex(
+                                            segment.index,
+                                        )
+                                    }
+                                    onMouseLeave={() =>
+                                        setHoveredIndex(
+                                            null,
+                                        )
+                                    }
+                                />
+                            ),
+                        )}
+                    </svg>
+
+                    <div className="
+                        pointer-events-none
+                        absolute inset-[34px]
+                        rounded-full
+                        bg-white
+                        shadow-[inset_0_0_0_1px_#EEF2F5]
+                    " />
+
+                    <div className="
+                        pointer-events-none
+                        absolute inset-0
+                        flex flex-col
+                        items-center
+                        justify-center
+                    ">
+                        {hoveredItem ? (
+                            <>
+                                <div className="
+                                    text-[22px]
+                                    font-bold
+                                    leading-none
+                                    tracking-[-0.04em]
+                                    text-[#172033]
+                                ">
+                                    {formatNumber(
+                                        hoveredItem.value,
+                                    )}
+                                </div>
+
+                                <div
+                                    className="
+                                        mt-1
+                                        text-[9px]
+                                        font-semibold
+                                        uppercase
+                                        tracking-[0.08em]
+                                    "
+                                    style={{
+                                        color:
+                                            hoveredItem.color,
+                                    }}
+                                >
+                                    {
+                                        hoveredItem.label
+                                    }
+                                </div>
+
+                                <div className="
+                                    mt-0.5
+                                    text-[9px]
+                                    font-medium
+                                    text-[#94A3B8]
+                                ">
+                                    {hoveredItem.percentage.toFixed(
+                                        1,
+                                    )}
+                                    %
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="
+                                    text-[25px]
+                                    font-bold
+                                    leading-none
+                                    tracking-[-0.04em]
+                                    text-[#172033]
+                                ">
+                                    {formatNumber(
+                                        total,
+                                    )}
+                                </div>
+
+                                <div className="
+                                    mt-1
+                                    text-[9px]
+                                    font-semibold
+                                    uppercase
+                                    tracking-[0.08em]
+                                    text-[#94A3B8]
+                                ">
+                                    Projects
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+
+                <div className="
+                    grid w-full
+                    grid-cols-1
+                    gap-2
+                    sm:grid-cols-2
+                    lg:grid-cols-1
+                    lg:max-w-[240px]
+                ">
+                    {segments.map(
+                        (item) => (
+                            <button
+                                key={item.label}
+                                type="button"
+                                className="
+                                    flex w-full
+                                    items-center
+                                    justify-between
+                                    gap-4
+                                    rounded-[8px]
+                                    px-2 py-1.5
+                                    text-left
+                                    transition-colors
+                                    hover:bg-[#F8FAFB]
+                                "
+                                onMouseEnter={() =>
+                                    setHoveredIndex(
+                                        item.index,
+                                    )
+                                }
+                                onMouseLeave={() =>
+                                    setHoveredIndex(
+                                        null,
+                                    )
+                                }
+                                aria-label={`${item.label}: ${item.value} projects, ${item.percentage.toFixed(1)} percent`}
+                            >
+                                <span className="
+                                    flex min-w-0
+                                    items-center gap-2.5
+                                ">
+                                    <span
+                                        className="
+                                            h-2.5 w-2.5
+                                            shrink-0
+                                            rounded-full
+                                        "
+                                        style={{
+                                            backgroundColor:
+                                                item.color,
+                                        }}
+                                    />
+
+                                    <span className="
+                                        truncate
+                                        text-[11px]
+                                        font-medium
+                                        text-[#64748B]
+                                    ">
+                                        {item.label}
+                                    </span>
+                                </span>
+
+                                <span className="
+                                    flex shrink-0
+                                    items-center gap-3
+                                ">
+                                    <span className="
+                                        text-[10px]
+                                        font-semibold
+                                        text-[#172033]
+                                    ">
+                                        {formatNumber(
+                                            item.value,
+                                        )}
+                                    </span>
+
+                                    <span className="
+                                        w-[42px]
+                                        text-right
+                                        text-[10px]
+                                        font-medium
+                                        text-[#94A3B8]
+                                    ">
+                                        {item.percentage.toFixed(
+                                            1,
+                                        )}
+                                        %
+                                    </span>
+                                </span>
+                            </button>
+                        ),
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
+/* =========================================================
+   SCHEDULE STATUS
+========================================================= */
+
+function ScheduleStatus({
+    projects,
+    viewMode,
+}: {
+    projects: DashboardProject[];
+    viewMode:
+    | "projects"
+    | "percentage";
+}) {
+    const [
+        hoveredIndex,
+        setHoveredIndex,
+    ] = useState<number | null>(null);
+
+    const statusOrder = [
+        "Delayed",
+        "No Revised Date",
+        "On Schedule",
+        "Accelerated",
+    ];
+
+    const statusColors = [
+        "#EF4444",
+        "#94A3B8",
+        "#22C55E",
+        "#3B82F6",
+    ];
+
+    const counts =
+        statusOrder.map(
+            (status) =>
+                projects.filter(
+                    (project) =>
+                        project.status ===
+                        status,
+                ).length,
+        );
+
+    const total =
+        counts.reduce(
+            (sum, value) =>
+                sum + value,
+            0,
+        );
+
+    const values =
+        viewMode === "projects"
+            ? counts
+            : counts.map(
+                (value) =>
+                    total > 0
+                        ? (value / total) *
+                        100
+                        : 0,
+            );
+
+    const maxValue =
+        Math.max(
+            ...values,
+            1,
         );
 
 
     return (
-        <div className="mt-8">
+        <div className="mt-7">
+            <div className="
+                rounded-[10px]
+                border
+                border-[#E7EDF2]
+                bg-[#F8FAFB]
+                px-4 pt-4
+                sm:px-5
+            ">
+                <div className="
+                    grid grid-cols-4
+                    gap-3
+                ">
+                    {statusOrder.map(
+                        (status, index) => {
+                            const rawCount =
+                                counts[index];
 
-            <div className="flex h-3 overflow-hidden rounded-full bg-slate-100">
+                            const value =
+                                values[index];
 
-                {items.map(
-                    (
-                        item,
-                    ) => (
-                        <div
-                            key={
-                                item.label
-                            }
-                            className={
-                                item.color
-                            }
-                            style={{
-                                width:
-                                    total >
-                                        0
-                                        ? `${(
-                                            item.value /
-                                            total
-                                        ) *
-                                        100
-                                        }%`
-                                        : "0%",
-                            }}
-                        />
-                    ),
-                )}
+                            const percentage =
+                                total > 0
+                                    ? (rawCount /
+                                        total) *
+                                    100
+                                    : 0;
 
+                            const height =
+                                rawCount > 0
+                                    ? Math.max(
+                                        (value /
+                                            maxValue) *
+                                        100,
+                                        8,
+                                    )
+                                    : 0;
+
+                            return (
+                                <div
+                                    key={status}
+                                    className="
+                                        relative
+                                        flex min-w-0
+                                        flex-col
+                                    "
+                                    onMouseEnter={() =>
+                                        setHoveredIndex(
+                                            index,
+                                        )
+                                    }
+                                    onMouseLeave={() =>
+                                        setHoveredIndex(
+                                            null,
+                                        )
+                                    }
+                                >
+                                    {hoveredIndex ===
+                                        index && (
+                                            <div className="
+                                            pointer-events-none
+                                            absolute
+                                            left-1/2
+                                            top-0 z-30
+                                            -translate-x-1/2
+                                            -translate-y-[calc(100%+8px)]
+                                            whitespace-nowrap
+                                            rounded-[8px]
+                                            border
+                                            border-[#D9E1E8]
+                                            bg-white
+                                            px-3 py-2
+                                            shadow-[0_8px_24px_rgba(15,23,42,0.12)]
+                                        ">
+                                                <div className="
+                                                text-[10px]
+                                                font-semibold
+                                                text-[#172033]
+                                            ">
+                                                    {status}
+                                                </div>
+
+                                                <div className="
+                                                mt-1
+                                                text-[9px]
+                                                text-[#64748B]
+                                            ">
+                                                    {formatNumber(
+                                                        rawCount,
+                                                    )}{" "}
+                                                    projects
+                                                </div>
+
+                                                <div className="
+                                                mt-0.5
+                                                text-[9px]
+                                                text-[#94A3B8]
+                                            ">
+                                                    {percentage.toFixed(
+                                                        1,
+                                                    )}
+                                                    % of portfolio
+                                                </div>
+                                            </div>
+                                        )}
+
+                                    <div className="
+                                        mb-2
+                                        text-center
+                                        text-[10px]
+                                        font-bold
+                                        text-[#172033]
+                                    ">
+                                        {viewMode ===
+                                            "projects"
+                                            ? formatNumber(
+                                                rawCount,
+                                            )
+                                            : `${percentage.toFixed(
+                                                1,
+                                            )}%`}
+                                    </div>
+
+                                    <div className="
+                                        flex h-[150px]
+                                        items-end
+                                        rounded-t-[7px]
+                                        bg-[#EEF2F5]
+                                    ">
+                                        <div
+                                            className="
+                                                w-full
+                                                rounded-t-[7px]
+                                                transition-[height,opacity,filter]
+                                                duration-200
+                                            "
+                                            style={{
+                                                height:
+                                                    `${height}%`,
+                                                backgroundColor:
+                                                    statusColors[
+                                                    index
+                                                    ],
+                                                opacity:
+                                                    hoveredIndex ===
+                                                        null ||
+                                                        hoveredIndex ===
+                                                        index
+                                                        ? 1
+                                                        : 0.45,
+                                            }}
+                                        />
+                                    </div>
+
+                                    <div className="
+                                        mt-2 min-h-[28px]
+                                        text-center
+                                        text-[8px]
+                                        font-medium
+                                        leading-3
+                                        text-[#64748B]
+                                    ">
+                                        {status}
+                                    </div>
+                                </div>
+                            );
+                        },
+                    )}
+                </div>
             </div>
-
-
-            <div className="mt-7 grid grid-cols-2 gap-4 sm:grid-cols-5">
-
-                {items.map(
-                    (
-                        item,
-                    ) => (
-                        <div
-                            key={
-                                item.label
-                            }
-                        >
-
-                            <Badge
-                                variant={
-                                    item.variant
-                                }
-                                dot
-                            >
-                                {
-                                    item.label
-                                }
-                            </Badge>
-
-                            <div className="mt-2 text-xl font-bold tracking-tight text-slate-900">
-                                {formatNumber(
-                                    item.value,
-                                )}
-                            </div>
-
-                            <div className="mt-1 text-[10px] text-slate-400">
-                                projects
-                            </div>
-
-                        </div>
-                    ),
-                )}
-
-            </div>
-
         </div>
     );
 }
@@ -2102,31 +2756,81 @@ function WarningRow({
 }: {
     label: string;
     count: number;
-
     variant:
     | "success"
     | "warning"
     | "danger"
     | "info";
 }) {
+    const variantStyles = {
+        danger: {
+            dot: "bg-red-500",
+            bg: "bg-red-50/50",
+            border: "border-red-100",
+            text: "text-red-700",
+        },
+
+        warning: {
+            dot: "bg-amber-500",
+            bg: "bg-amber-50/50",
+            border: "border-amber-100",
+            text: "text-amber-700",
+        },
+
+        info: {
+            dot: "bg-blue-500",
+            bg: "bg-blue-50/40",
+            border: "border-blue-100",
+            text: "text-blue-700",
+        },
+
+        success: {
+            dot: "bg-emerald-500",
+            bg: "bg-emerald-50/40",
+            border: "border-emerald-100",
+            text: "text-emerald-700",
+        },
+    };
+
+    const styles =
+        variantStyles[variant];
+
     return (
-        <div className="flex items-center justify-between rounded-xl border border-slate-100 p-3">
+        <div className={[
+            "flex items-center",
+            "justify-between",
+            "rounded-[10px]",
+            "border px-3 py-3",
+            styles.bg,
+            styles.border,
+        ].join(" ")}>
+            <div className="
+                flex min-w-0
+                items-center gap-2.5
+            ">
+                <span className={[
+                    "h-2 w-2 shrink-0 rounded-full",
+                    styles.dot,
+                ].join(" ")} />
 
-            <Badge
-                variant={
-                    variant
-                }
-                dot
-            >
-                {label}
-            </Badge>
+                <span className={[
+                    "truncate text-[11px]",
+                    "font-semibold",
+                    styles.text,
+                ].join(" ")}>
+                    {label}
+                </span>
+            </div>
 
-            <span className="text-sm font-bold text-slate-900">
-                {formatNumber(
-                    count,
-                )}
+            <span className="
+                ml-3 shrink-0
+                text-[14px]
+                font-bold
+                tracking-tight
+                text-[#172033]
+            ">
+                {formatNumber(count)}
             </span>
-
         </div>
     );
 }
@@ -2144,8 +2848,7 @@ function ProjectRow({
     onClick: () => void;
 }) {
     const riskLevel =
-        project.riskLevel ||
-        "Low";
+        project.riskLevel || "Low";
 
     const riskScore =
         project.riskScore;
@@ -2164,14 +2867,11 @@ function ProjectRow({
 
     const delayMonths =
         Number(
-            project.delayMonths ??
-            0,
+            project.delayMonths ?? 0,
         );
 
-
     const costRisk =
-        project.costRisk ||
-        "—";
+        project.costRisk || "—";
 
 
     let costVariant:
@@ -2184,87 +2884,101 @@ function ProjectRow({
     if (
         costRisk
             .toLowerCase()
-            .includes(
-                "overrun",
-            ) ||
-        costRisk ===
-        "High"
+            .includes("overrun") ||
+        costRisk === "High"
     ) {
-        costVariant =
-            "warning";
+        costVariant = "warning";
     }
 
     if (
         costRisk
             .toLowerCase()
-            .includes(
-                "critical",
-            )
+            .includes("critical")
     ) {
-        costVariant =
-            "danger";
+        costVariant = "danger";
     }
 
     if (
-        costRisk ===
-        "Low"
+        costRisk === "Low"
     ) {
-        costVariant =
-            "success";
+        costVariant = "success";
     }
 
 
     return (
         <tr
-            onClick={
-                onClick
-            }
-            className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50/70"
+            onClick={onClick}
+            className="
+                group cursor-pointer
+                border-b
+                border-[#E7EDF2]
+                last:border-0
+                transition-colors
+                hover:bg-[#F8FAFB]
+            "
         >
-
-            <td className="px-5 py-4">
-
-                <div className="max-w-[280px] truncate text-xs font-semibold text-slate-800">
+            <td className="
+                px-5 py-4 sm:px-6
+            ">
+                <div className="
+                    max-w-[280px]
+                    truncate
+                    text-[11px]
+                    font-semibold
+                    text-[#172033]
+                    transition-colors
+                    group-hover:text-[#102A43]
+                ">
                     {project.name ||
                         "Unnamed Project"}
                 </div>
 
-                <div className="mt-1 text-[10px] text-slate-400">
+                <div className="
+                    mt-1 text-[9px]
+                    font-medium
+                    text-[#94A3B8]
+                ">
                     {project.id}
                 </div>
-
             </td>
 
-
-            <td className="px-5 py-4 text-xs text-slate-500">
+            <td className="
+                px-5 py-4 sm:px-6
+                text-[10px]
+                font-medium
+                text-[#64748B]
+            ">
                 {project.ministry ||
                     "—"}
             </td>
 
-
-            <td className="px-5 py-4 text-xs text-slate-500">
+            <td className="
+                px-5 py-4 sm:px-6
+                text-[10px]
+                font-medium
+                text-[#64748B]
+            ">
                 {project.state ||
                     "—"}
             </td>
 
-
-            <td className="px-5 py-4">
-
-                <div className="flex items-center gap-2">
-
-                    <span className="text-xs font-bold text-slate-900">
-
-                        {riskScore ===
-                            null ||
-                            riskScore ===
-                            undefined
+            <td className="
+                px-5 py-4 sm:px-6
+            ">
+                <div className="
+                    flex items-center gap-2
+                ">
+                    <span className="
+                        text-[11px]
+                        font-bold
+                        text-[#172033]
+                    ">
+                        {riskScore === null ||
+                            riskScore === undefined
                             ? "—"
                             : Number(
                                 riskScore,
-                            ).toFixed(
-                                1,
-                            )}
-
+                            ).toFixed(1)}
                     </span>
 
                     <Badge
@@ -2275,71 +2989,173 @@ function ProjectRow({
                         }
                         dot
                     >
-                        {
-                            riskLevel
-                        }
+                        {riskLevel}
                     </Badge>
-
                 </div>
-
             </td>
 
-
-            <td className="px-5 py-4">
-
+            <td className="
+                px-5 py-4 sm:px-6
+            ">
                 <Badge
                     variant={
                         costVariant
                     }
                 >
-                    {
-                        costRisk
-                    }
+                    {costRisk}
                 </Badge>
-
             </td>
 
-
-            <td className="px-5 py-4 text-xs font-semibold text-red-500">
-
-                {delayMonths >
-                    0
+            <td className="
+                px-5 py-4 sm:px-6
+                text-[10px]
+                font-semibold
+                text-red-500
+            ">
+                {delayMonths > 0
                     ? `+${delayMonths.toFixed(
                         1,
                     )} mo`
                     : "—"}
-
             </td>
 
-
-            <td className="px-5 py-4">
-
-                <div className="flex items-center gap-3">
-
-                    <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
-
+            <td className="
+                px-5 py-4 sm:px-6
+            ">
+                <div className="
+                    flex items-center gap-3
+                ">
+                    <div className="
+                        h-1.5 w-20
+                        overflow-hidden
+                        rounded-full
+                        bg-[#EEF2F5]
+                    ">
                         <div
-                            className="h-full rounded-full bg-slate-700"
+                            className="
+                                h-full
+                                rounded-full
+                                bg-[#334155]
+                                transition-[width]
+                                duration-300
+                            "
                             style={{
                                 width:
                                     `${progress}%`,
                             }}
                         />
-
                     </div>
 
-                    <span className="text-xs font-semibold text-slate-600">
+                    <span className="
+                        min-w-[38px]
+                        text-[10px]
+                        font-semibold
+                        text-[#64748B]
+                    ">
                         {progress.toFixed(
                             1,
                         )}
                         %
                     </span>
-
                 </div>
-
             </td>
-
         </tr>
+    );
+}
+
+
+/* =========================================================
+   CHART MENU
+========================================================= */
+
+function ChartMenu({
+    actions,
+}: {
+    actions: {
+        label: string;
+        onClick: () => void;
+    }[];
+}) {
+    const [open, setOpen] =
+        useState(false);
+
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                aria-label="Chart options"
+                aria-expanded={open}
+                onClick={() =>
+                    setOpen(
+                        (current) =>
+                            !current,
+                    )
+                }
+                className="
+                    grid h-8 w-8
+                    place-items-center
+                    rounded-[8px]
+                    bg-[#F3F6F8]
+                    text-[#94A3B8]
+                    transition-colors
+                    hover:bg-[#E7EDF2]
+                    hover:text-[#475569]
+                "
+            >
+                <span className="
+                    text-[15px]
+                    leading-none
+                    tracking-[0.08em]
+                ">
+                    ···
+                </span>
+            </button>
+
+            {open && (
+                <div className="
+                    absolute right-0
+                    top-10 z-50
+                    min-w-[180px]
+                    overflow-hidden
+                    rounded-[9px]
+                    border
+                    border-[#D9E1E8]
+                    bg-white
+                    py-1
+                    shadow-[0_10px_30px_rgba(15,23,42,0.12)]
+                ">
+                    {actions.map(
+                        (action) => (
+                            <button
+                                key={
+                                    action.label
+                                }
+                                type="button"
+                                onClick={() => {
+                                    setOpen(
+                                        false,
+                                    );
+                                    action.onClick();
+                                }}
+                                className="
+                                    block w-full
+                                    px-3 py-2
+                                    text-left
+                                    text-[10px]
+                                    font-medium
+                                    text-[#475569]
+                                    transition-colors
+                                    hover:bg-[#F8FAFB]
+                                    hover:text-[#172033]
+                                "
+                            >
+                                {action.label}
+                            </button>
+                        ),
+                    )}
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -2354,7 +3170,19 @@ function TableHeading({
     children: ReactNode;
 }) {
     return (
-        <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-slate-400">
+        <th className="
+            whitespace-nowrap
+            border-b
+            border-[#E7EDF2]
+            px-5 py-3
+            text-left
+            text-[9px]
+            font-bold
+            uppercase
+            tracking-[0.08em]
+            text-[#94A3B8]
+            sm:px-6
+        ">
             {children}
         </th>
     );
