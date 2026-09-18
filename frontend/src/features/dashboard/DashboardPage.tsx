@@ -1800,7 +1800,7 @@ function PortfolioFinancials({
         escalation >= 0;
 
     return (
-        <Card padding="md">
+        <Card padding="md" className="paimana-dark-summary">
 
             <div className="mb-4 flex items-center justify-between">
 
