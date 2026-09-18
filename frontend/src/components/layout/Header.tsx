@@ -46,7 +46,7 @@ export default function Header({
     }, []);
 
     return (
-        <header className="sticky top-3 z-30 mx-3 mt-3 flex h-[70px] items-center justify-between rounded-[18px] border border-slate-200/90 bg-white px-3 shadow-[0_4px_18px_rgba(20,35,55,0.06)] backdrop-blur sm:mx-5 sm:mt-4 sm:h-[76px] sm:px-5 lg:mx-6">
+        <header className="z-30 mx-3 mt-3 flex h-[70px] items-center justify-between rounded-[18px] border border-slate-200/90 bg-white px-3 shadow-[0_4px_18px_rgba(20,35,55,0.06)] backdrop-blur sm:mx-5 sm:mt-4 sm:h-[76px] sm:px-5 lg:mx-6">
 
             {/* Left */}
             <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
