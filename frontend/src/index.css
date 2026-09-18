@@ -11,20 +11,20 @@
         sans-serif;
 
     color: #171b24;
-    background: #eef0f3;
+    background: #eef3f6;
 
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
 
-    --paimana-background: #eef0f3;
-    --paimana-surface: #f7f8fa;
-    --paimana-card: #f5f6f7;
-    --paimana-border: #d7dadd;
+    --paimana-background: #eef3f6;
+    --paimana-surface: #ffffff;
+    --paimana-card: #ffffff;
+    --paimana-border: #dfe6ec;
 
-    --paimana-text: #171b24;
-    --paimana-text-secondary: #667080;
-    --paimana-text-muted: #858c96;
+    --paimana-text: #14233a;
+    --paimana-text-secondary: #6d8098;
+    --paimana-text-muted: #8798aa;
 
     --paimana-sidebar: #242528;
     --paimana-sidebar-hover: #34363a;
@@ -148,7 +148,7 @@ button {
 html,
 body {
     scrollbar-width: thin !important;
-    scrollbar-color: #70757d #eef0f3 !important;
+    scrollbar-color: #8a98a8 #eef3f6 !important;
 }
 
 body::-webkit-scrollbar {
@@ -157,13 +157,13 @@ body::-webkit-scrollbar {
 }
 
 body::-webkit-scrollbar-track {
-    background: #eef0f3 !important;
+    background: #eef3f6 !important;
 }
 
 body::-webkit-scrollbar-thumb {
     background: #70757d !important;
     border-radius: 999px !important;
-    border: 2px solid #eef0f3 !important;
+    border: 2px solid #eef3f6 !important;
 }
 
 body::-webkit-scrollbar-button,
@@ -177,7 +177,7 @@ body::-webkit-scrollbar-corner {
 }
 
 .bg-white {
-    background-color: #f7f8fa !important;
+    background-color: #ffffff !important;
 }
 
 .bg-slate-100 {
