@@ -258,7 +258,7 @@ export default function ProjectAnalyticsCharts({
         {/* Risk Distribution */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ">
           <div className="flex items-start justify-between">
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
