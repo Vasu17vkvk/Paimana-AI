@@ -279,7 +279,7 @@ export default function ProjectAnalyticsCharts({
             </button>
           </div>
 
-          <div className="mt-4 grid min-h-[320px] grid-cols-1 items-center gap-6 md:grid-cols-[minmax(280px,1fr)_minmax(320px,1fr)]">
+          <div className="mt-4 grid min-h-[320px] grid-cols-1 items-center gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             {riskData.length === 0 ? (
               <div className="flex h-full min-h-[280px] items-center justify-center text-sm text-slate-400 md:col-span-2">
                 No risk data available
@@ -298,8 +298,8 @@ export default function ProjectAnalyticsCharts({
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={122}
-                        innerRadius={78}
+                        outerRadius={100}
+                        innerRadius={64}
                         paddingAngle={1}
                         stroke="#ffffff"
                         strokeWidth={2}
@@ -344,7 +344,7 @@ export default function ProjectAnalyticsCharts({
                   </div>
                 </div>
 
-                <div className="space-y-5 pr-2">
+                <div className="min-w-0 space-y-4 pr-0">
                   {riskData.map((item) => {
                     const total = riskData.reduce(
                       (sum, entry) =>
@@ -360,7 +360,7 @@ export default function ProjectAnalyticsCharts({
                     return (
                       <div
                         key={item.name}
-                        className="grid grid-cols-[16px_minmax(0,1fr)_80px_60px] items-center gap-3"
+                        className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)_56px_42px] items-center gap-2"
                       >
                         <span
                           className="h-3 w-3 rounded-full"
@@ -369,15 +369,15 @@ export default function ProjectAnalyticsCharts({
                           }}
                         />
 
-                        <span className="text-sm font-medium text-slate-500">
+                        <span className="min-w-0 truncate text-sm font-medium text-slate-500">
                           {item.name}
                         </span>
 
-                        <span className="text-right text-sm font-semibold text-slate-700">
+                        <span className="text-right text-xs font-semibold text-slate-700">
                           {item.value.toLocaleString("en-IN")}
                         </span>
 
-                        <span className="text-right text-sm text-slate-400">
+                        <span className="text-right text-xs text-slate-400">
                           {percentage.toFixed(1)}%
                         </span>
                       </div>
