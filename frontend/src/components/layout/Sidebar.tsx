@@ -29,11 +29,11 @@ export default function Sidebar({
       ========================== */}
             <div className="flex h-[76px] shrink-0 items-center border-b border-white/10 px-4">
                 <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-sm font-extrabold text-slate-900">
+                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white text-sm font-extrabold text-slate-900">
                         <img
                             src={logo}
                             alt="My New Brand"
-                            className="h-full w-full object-contain"
+                            className="h-[90%] w-[90%] object-contain"
                         />
                     </div>
 
