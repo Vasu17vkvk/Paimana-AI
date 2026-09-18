@@ -25,11 +25,11 @@ export default function Card({
         <div
             {...props}
             className={[
-                "rounded-2xl border border-[#d7dadd] bg-[#f5f6f7]",
-                "shadow-[0_2px_8px_rgba(20,24,30,0.045)]",
+                "rounded-2xl border border-[#3b3d42] bg-[#292a2d]",
+                "shadow-[0_2px_8px_rgba(0,0,0,0.18)]",
                 paddingStyles[padding],
                 hoverable
-                    ? "transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(20,24,30,0.08)]"
+                    ? "transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.28)]"
                     : "",
                 className,
             ]
