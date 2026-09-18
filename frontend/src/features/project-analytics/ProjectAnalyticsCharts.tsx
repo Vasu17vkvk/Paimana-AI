@@ -12,11 +12,9 @@ import {
   YAxis,
 } from "recharts";
 
-import type { ProjectAnalyticsProject } from "../../services/api";
+import { MoreHorizontal } from "lucide-react";
 
-interface ProjectAnalyticsChartsProps {
-  projects: ProjectAnalyticsProject[];
-}
+import type { ProjectAnalyticsProject } from "../../services/api";
 
 // ============================================================
 // CHART COLORS
@@ -87,34 +85,63 @@ function countByField(
 function getRiskData(
   projects: ProjectAnalyticsProject[],
 ) {
-  const order = [
-    "LOW",
-    "MEDIUM",
-    "HIGH",
-    "CRITICAL",
-  ];
-
-  const counts = new Map<string, number>();
+  const counts = {
+    Critical: 0,
+    High: 0,
+    Elevated: 0,
+    Moderate: 0,
+    Low: 0,
+  };
 
   projects.forEach((project) => {
-    const value =
-      project.risk_level || "UNKNOWN";
-
-    counts.set(
-      value,
-      (counts.get(value) ?? 0) + 1,
+    const score = Number(
+      project.overall_risk_score,
     );
+
+    if (!Number.isFinite(score)) {
+      return;
+    }
+
+    if (score >= 85) {
+      counts.Critical += 1;
+    } else if (score >= 70) {
+      counts.High += 1;
+    } else if (score >= 55) {
+      counts.Elevated += 1;
+    } else if (score >= 40) {
+      counts.Moderate += 1;
+    } else {
+      counts.Low += 1;
+    }
   });
 
-  return order
-    .map((name) => ({
-      name,
-      value: counts.get(name) ?? 0,
-    }))
-    .filter(
-      (item) =>
-        item.value > 0,
-    );
+  return [
+    {
+      name: "Critical",
+      value: counts.Critical,
+      color: "#ef4444",
+    },
+    {
+      name: "High",
+      value: counts.High,
+      color: "#f97316",
+    },
+    {
+      name: "Elevated",
+      value: counts.Elevated,
+      color: "#fbbf24",
+    },
+    {
+      name: "Moderate",
+      value: counts.Moderate,
+      color: "#3b82f6",
+    },
+    {
+      name: "Low",
+      value: counts.Low,
+      color: "#22c55e",
+    },
+  ];
 }
 
 function getSectorDelayData(
@@ -233,70 +260,134 @@ export default function ProjectAnalyticsCharts({
         {/* Risk Distribution */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
-          <div className="mb-4">
-            <h3 className="text-base font-semibold text-slate-900">
-              Risk Distribution
-            </h3>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+                Risk Distribution
+              </h3>
 
-            <p className="text-sm text-slate-500">
-              Current model-based risk classification
-            </p>
+              <p className="mt-2 text-lg font-semibold text-slate-900">
+                Current model-based risk classification
+              </p>
+            </div>
+
+            <button
+              type="button"
+              aria-label="Risk distribution options"
+              className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-400"
+            >
+              <MoreHorizontal size={18} />
+            </button>
           </div>
 
-          <div className="h-[320px]">
-
+          <div className="mt-4 grid min-h-[320px] grid-cols-1 items-center gap-6 md:grid-cols-[minmax(280px,1fr)_minmax(320px,1fr)]">
             {riskData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+              <div className="flex h-full min-h-[280px] items-center justify-center text-sm text-slate-400 md:col-span-2">
                 No risk data available
               </div>
             ) : (
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-              >
-                <PieChart>
-
-                  <Pie
-                    data={riskData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={105}
-                    innerRadius={65}
-                    paddingAngle={3}
+              <>
+                <div className="relative flex h-[280px] items-center justify-center">
+                  <ResponsiveContainer
+                    width="100%"
+                    height="100%"
                   >
+                    <PieChart>
+                      <Pie
+                        data={riskData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={122}
+                        innerRadius={78}
+                        paddingAngle={1}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                        isAnimationActive={false}
+                      >
+                        {riskData.map(
+                          (entry, index) => (
+                            <Cell
+                              key={`risk-${entry.name}-${index}`}
+                              fill={
+                                entry.color ??
+                                CATEGORY_COLORS[
+                                  index %
+                                    CATEGORY_COLORS.length
+                                ]
+                              }
+                            />
+                          ),
+                        )}
+                      </Pie>
 
-                    {riskData.map(
-                      (entry, index) => (
-                        <Cell
-                          key={`risk-${entry.name}-${index}`}
-                          fill={
-                            RISK_COLORS[
-                              entry.name
-                            ] ??
-                            CATEGORY_COLORS[
-                              index %
-                                CATEGORY_COLORS.length
-                            ]
-                          }
+                      <Tooltip
+                        formatter={(value) => [
+                          Number(value ?? 0).toLocaleString("en-IN"),
+                          "Projects",
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <div className="text-3xl font-bold tracking-tight text-slate-900">
+                      {riskData.reduce(
+                        (total, item) =>
+                          total + item.value,
+                        0,
+                      ).toLocaleString("en-IN")}
+                    </div>
+                    <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                      Projects
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-5 pr-2">
+                  {riskData.map((item) => {
+                    const total = riskData.reduce(
+                      (sum, entry) =>
+                        sum + entry.value,
+                      0,
+                    );
+
+                    const percentage =
+                      total > 0
+                        ? (item.value / total) * 100
+                        : 0;
+
+                    return (
+                      <div
+                        key={item.name}
+                        className="grid grid-cols-[16px_minmax(0,1fr)_80px_60px] items-center gap-3"
+                      >
+                        <span
+                          className="h-3 w-3 rounded-full"
+                          style={{
+                            backgroundColor: item.color,
+                          }}
                         />
-                      ),
-                    )}
 
-                  </Pie>
+                        <span className="text-sm font-medium text-slate-500">
+                          {item.name}
+                        </span>
 
-                  <Tooltip />
+                        <span className="text-right text-sm font-semibold text-slate-700">
+                          {item.value.toLocaleString("en-IN")}
+                        </span>
 
-                  <Legend
-                    verticalAlign="bottom"
-                  />
-
-                </PieChart>
-              </ResponsiveContainer>
+                        <span className="text-right text-sm text-slate-400">
+                          {percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
-
           </div>
         </div>
 
