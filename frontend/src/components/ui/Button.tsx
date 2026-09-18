@@ -18,11 +18,11 @@ export default function Button({
     ...props
 }: ButtonProps) {
     const baseStyles =
-        "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50";
+        "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50";
 
     const variants = {
         primary:
-            "bg-slate-900 text-white hover:bg-slate-800 active:bg-slate-950",
+            "bg-[#30343b] text-white shadow-sm hover:bg-[#25282e] active:bg-[#1d2025]",
         secondary:
             "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 active:bg-slate-100",
         ghost:
