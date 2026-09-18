@@ -23,30 +23,30 @@ interface ProjectAnalyticsChartsProps {
 // ============================================================
 
 const RISK_COLORS: Record<string, string> = {
-  LOW: "#22c55e",
-  MEDIUM: "#f59e0b",
-  HIGH: "#f97316",
-  CRITICAL: "#ef4444",
+  LOW: "#2fbd73",
+  MEDIUM: "#e5a11b",
+  HIGH: "#e08a35",
+  CRITICAL: "#df4b4b",
 };
 
 const SCHEDULE_COLORS: Record<string, string> = {
-  Delayed: "#ef4444",
-  "No Revised Date": "#94a3b8",
-  "On Schedule": "#22c55e",
-  Accelerated: "#2563eb",
+  Delayed: "#df4b4b",
+  "No Revised Date": "#8794a5",
+  "On Schedule": "#2fbd73",
+  Accelerated: "#4d83d9",
 };
 
 const CATEGORY_COLORS = [
-  "#2563eb",
-  "#16a34a",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#06b6d4",
-  "#f97316",
-  "#14b8a6",
-  "#e11d48",
-  "#64748b",
+  "#4d83d9",
+  "#2fbd73",
+  "#e5a11b",
+  "#df4b4b",
+  "#8b7fc2",
+  "#5a9eac",
+  "#e08a35",
+  "#5a9e8f",
+  "#bd667d",
+  "#7b8492",
 ];
 
 // ============================================================
@@ -233,7 +233,7 @@ export default function ProjectAnalyticsCharts({
         {/* Risk Distribution */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
           <div className="mb-4">
             <h3 className="text-base font-semibold text-slate-900">
               Risk Distribution
@@ -304,7 +304,7 @@ export default function ProjectAnalyticsCharts({
         {/* Schedule Status */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
 
           <div className="mb-4">
 
@@ -391,7 +391,7 @@ export default function ProjectAnalyticsCharts({
         {/* Projects by Sector */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
 
           <div className="mb-4">
 
@@ -476,7 +476,7 @@ export default function ProjectAnalyticsCharts({
         {/* Projects by Ministry */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
 
           <div className="mb-4">
 
@@ -563,7 +563,7 @@ export default function ProjectAnalyticsCharts({
       {/* ROW 3 */}
       {/* ================================================== */}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
 
         <div className="mb-4">
 
@@ -635,11 +635,11 @@ export default function ProjectAnalyticsCharts({
                       key={`delay-${entry.sector}-${index}`}
                       fill={
                         index === 0
-                          ? "#ef4444"
+                          ? "#df4b4b"
                           : index === 1
-                            ? "#f97316"
+                            ? "#e08a35"
                             : index === 2
-                              ? "#f59e0b"
+                              ? "#e5a11b"
                               : CATEGORY_COLORS[
                                   index %
                                     CATEGORY_COLORS.length
