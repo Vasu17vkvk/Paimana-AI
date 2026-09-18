@@ -258,7 +258,7 @@ export default function ProjectAnalyticsCharts({
         {/* Risk Distribution */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ">
+        <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between">
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
@@ -279,7 +279,7 @@ export default function ProjectAnalyticsCharts({
             </button>
           </div>
 
-          <div className="mt-4 grid min-h-[320px] grid-cols-1 items-center gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="mt-4 grid min-h-[320px] min-w-0 grid-cols-1 items-center gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             {riskData.length === 0 ? (
               <div className="flex h-full min-h-[280px] items-center justify-center text-sm text-slate-400 md:col-span-2">
                 No risk data available
