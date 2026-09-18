@@ -72,8 +72,8 @@ export default function AppLayout() {
                 className={[
                     "min-h-screen transition-[margin] duration-200 ease-out",
                     collapsed
-                        ? "md:ml-[96px]"
-                        : "md:ml-[318px]"
+                        ? "md:ml-[88px]"
+                        : "md:ml-[292px]"
                 ].join(" ")}
             >
                 <Header
