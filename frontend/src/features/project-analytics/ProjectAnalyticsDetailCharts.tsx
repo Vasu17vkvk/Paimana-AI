@@ -109,7 +109,7 @@ function ChartCard({
     children: React.ReactNode;
 }) {
     return (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
             <div className="mb-4">
                 <h3 className="text-base font-semibold text-slate-900">
                     {title}
@@ -133,7 +133,7 @@ function EmptyChartState({
     message: string;
 }) {
     return (
-        <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
+        <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-[#d7dadd] bg-[#eef0f3]">
             <div className="px-6 text-center">
                 <p className="text-sm font-medium text-slate-600">
                     No chart data available
@@ -459,7 +459,7 @@ export default function ProjectAnalyticsDetailCharts({
     return (
         <section className="mt-6 space-y-5">
             {/* Header */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <h2 className="text-lg font-semibold text-slate-900">
