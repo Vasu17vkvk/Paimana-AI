@@ -16,16 +16,14 @@ import { MoreHorizontal } from "lucide-react";
 
 import type { ProjectAnalyticsProject } from "../../services/api";
 
+interface ProjectAnalyticsChartsProps {
+  projects: ProjectAnalyticsProject[];
+}
+
 // ============================================================
 // CHART COLORS
 // ============================================================
 
-const RISK_COLORS: Record<string, string> = {
-  LOW: "#2fbd73",
-  MEDIUM: "#e5a11b",
-  HIGH: "#e08a35",
-  CRITICAL: "#df4b4b",
-};
 
 const SCHEDULE_COLORS: Record<string, string> = {
   Delayed: "#df4b4b",
