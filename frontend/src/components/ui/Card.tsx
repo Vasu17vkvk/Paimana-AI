@@ -16,17 +16,17 @@ export default function Card({
 }: CardProps) {
     const paddingStyles = {
         none: "p-0",
-        sm: "p-3",
-        md: "p-4 sm:p-5",
-        lg: "p-5 sm:p-6",
+        sm: "p-3.5",
+        md: "p-5",
+        lg: "p-6",
     };
 
     return (
         <div
             {...props}
             className={[
-                "rounded-2xl border border-[#3b3d42] bg-[#292a2d]",
-                "shadow-[0_2px_8px_rgba(0,0,0,0.18)]",
+                "min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white",
+                "shadow-[0_3px_12px_rgba(30,55,80,0.055)]",
                 paddingStyles[padding],
                 hoverable
                     ? "transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.28)]"
