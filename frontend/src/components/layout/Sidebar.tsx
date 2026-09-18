@@ -25,9 +25,9 @@ export default function Sidebar({
             {/* =========================
           BRAND
       ========================== */}
-            <div className="flex min-h-[88px] shrink-0 items-center border-b border-white/[0.08] px-4">
-                <div className="flex min-w-0 items-center gap-2.5">
-                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white shadow-sm">
+            <div className="flex min-h-[74px] shrink-0 items-center border-b border-white/[0.08] px-3.5">
+                <div className="flex min-w-0 items-center gap-2">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white shadow-sm">
                         <img
                             src={logo}
                             alt="My New Brand"
@@ -37,11 +37,11 @@ export default function Sidebar({
 
                     {!collapsed && (
                         <div className="min-w-0">
-                            <div className="truncate text-[16px] font-bold tracking-[-0.02em]">
+                            <div className="truncate text-[15px] font-bold tracking-[-0.02em]">
                                 NIRMAAN AI
                             </div>
 
-                            <div className="truncate text-[11px] font-medium text-slate-400">
+                            <div className="truncate text-[10px] font-medium text-slate-400">
                                 Infrastructure Intelligence
                             </div>
                         </div>
@@ -52,11 +52,11 @@ export default function Sidebar({
             {/* =========================
           NAVIGATION
       ========================== */}
-            <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+            <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2.5">
                 {navigationSections.map((section, index) => (
                     <div
                         key={`${section.title ?? "main"}-${index}`}
-                        className="mb-4"
+                        className="mb-2"
                     >
                         {section.title && !collapsed && (
                             <div className="mb-2.5 px-2.5 text-[10px] font-bold tracking-[0.14em] text-slate-500">
@@ -75,7 +75,7 @@ export default function Sidebar({
                                     onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
-                                            "mb-1 flex h-10 items-center gap-2.5 rounded-xl px-3 text-[12px] font-semibold transition-all",
+                                            "mb-0.5 flex h-9 items-center gap-2 rounded-lg px-2.5 text-[11px] font-semibold transition-all",
                                             collapsed
                                                 ? "justify-center px-0"
                                                 : "px-3",
@@ -86,7 +86,7 @@ export default function Sidebar({
                                     }
                                 >
                                     <Icon
-                                        size={18}
+                                        size={17}
                                         strokeWidth={1.8}
                                     />
 
@@ -105,12 +105,12 @@ export default function Sidebar({
             {/* =========================
           FIXED BOTTOM CONTROL
       ========================== */}
-            <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/[0.08] p-3">
+            <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/[0.08] p-2">
                 <button
                     type="button"
                     onClick={onToggle}
                     className={[
-                        "flex h-10 w-full items-center justify-center rounded-xl",
+                        "flex h-8 w-full items-center justify-center rounded-xl",
                         "text-xs text-slate-400 transition-colors",
                         "hover:bg-slate-800 hover:text-white",
                         collapsed ? "" : "gap-2",
