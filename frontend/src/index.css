@@ -1,6 +1,5 @@
 @import "tailwindcss";
 
-
 :root {
     font-family:
         Inter,
@@ -11,12 +10,29 @@
         "Segoe UI",
         sans-serif;
 
-    color: #0f172a;
-    background: #f8fafc;
+    color: #171b24;
+    background: #eef0f3;
 
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+
+    --paimana-background: #eef0f3;
+    --paimana-surface: #f7f8fa;
+    --paimana-card: #f5f6f7;
+    --paimana-border: #d7dadd;
+
+    --paimana-text: #171b24;
+    --paimana-text-secondary: #667080;
+    --paimana-text-muted: #858c96;
+
+    --paimana-sidebar: #242528;
+    --paimana-sidebar-hover: #34363a;
+
+    --paimana-success: #20b866;
+    --paimana-warning: #e9a11b;
+    --paimana-danger: #df4b4b;
+    --paimana-info: #4d83d9;
 }
 
 * {
@@ -33,7 +49,7 @@ body,
 
 body {
     min-height: 100vh;
-    background: #f8fafc;
+    background: var(--paimana-background);
 }
 
 button,
@@ -47,75 +63,31 @@ button {
     cursor: pointer;
 }
 
-/* ==============================
-   PAIMANA DESIGN TOKENS
-================================= */
-
-:root {
-    --paimana-background: #f8fafc;
-    --paimana-surface: #ffffff;
-    --paimana-border: #e2e8f0;
-
-    --paimana-text: #0f172a;
-    --paimana-text-secondary: #475569;
-    --paimana-text-muted: #94a3b8;
-
-    --paimana-sidebar: #0f172a;
-    --paimana-sidebar-hover: #1e293b;
-
-    --paimana-success: #16a34a;
-    --paimana-warning: #f59e0b;
-    --paimana-danger: #dc2626;
-    --paimana-info: #2563eb;
-}
-
-/* ==============================
-   APPLICATION
-================================= */
-
 .paimana-app {
     min-height: 100vh;
     background: var(--paimana-background);
 }
 
-/* ==============================
-   SIDEBAR
-================================= */
-
 .paimana-sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-
     z-index: 50;
-
     width: 256px;
     height: 100vh;
-
     display: flex;
     flex-direction: column;
-
-    background: var(--paimana-sidebar);
-
+    background: var(--paimana-sidebar) !important;
     border-right: 1px solid rgba(255, 255, 255, 0.06);
-
-    transition:
-        width 180ms ease,
-        transform 180ms ease;
+    transition: width 180ms ease, transform 180ms ease;
 }
 
 .paimana-sidebar-collapsed {
     width: 76px;
 }
 
-/* ==============================
-   CONTENT AREA
-================================= */
-
 .paimana-main {
     min-height: 100vh;
-
     margin-left: 256px;
-
     transition: margin-left 180ms ease;
 }
 
@@ -123,14 +95,9 @@ button {
     margin-left: 76px;
 }
 
-/* ==============================
-   MOBILE
-================================= */
-
 @media (max-width: 768px) {
     .paimana-sidebar {
         width: 256px;
-
         transform: translateX(-100%);
     }
 
@@ -144,64 +111,44 @@ button {
     }
 }
 
-/* =========================================================
-   PAIMANA CUSTOM SCROLLBARS
-========================================================= */
-
 /* Sidebar navigation */
 .paimana-sidebar nav {
     overflow-y: auto !important;
-
-    /* Firefox */
     scrollbar-width: thin !important;
-    scrollbar-color: #3b82f6 #ffffff !important;
+    scrollbar-color: #55585d #242528 !important;
 }
 
-/* Chrome / Edge / Safari */
 .paimana-sidebar nav::-webkit-scrollbar {
     width: 7px !important;
     height: 7px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-track {
-    background: #ffffff !important;
+    background: #242528 !important;
     border-radius: 999px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-thumb {
-    background: #3b82f6 !important;
+    background: #55585d !important;
     border-radius: 999px !important;
-    border: 1px solid #ffffff !important;
+    border: 1px solid #242528 !important;
     min-height: 40px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-thumb:hover {
-    background: #2563eb !important;
+    background: #6a6d72 !important;
 }
 
-.paimana-sidebar nav::-webkit-scrollbar-button {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-}
-
+.paimana-sidebar nav::-webkit-scrollbar-button,
 .paimana-sidebar nav::-webkit-scrollbar-corner {
-    background: #ffffff !important;
+    display: none !important;
 }
 
-
-/* =========================================================
-   MAIN PAGE SCROLLBAR
-========================================================= */
-
-html {
-    scrollbar-width: thin !important;
-    scrollbar-color: #010a35ee #ffffff !important;
-}
-
+/* Main scrollbar */
+html,
 body {
     scrollbar-width: thin !important;
-    scrollbar-color: #010a35ee #ffffff !important;
+    scrollbar-color: #70757d #eef0f3 !important;
 }
 
 body::-webkit-scrollbar {
@@ -210,25 +157,174 @@ body::-webkit-scrollbar {
 }
 
 body::-webkit-scrollbar-track {
-    background: #ffffff !important;
+    background: #eef0f3 !important;
 }
 
 body::-webkit-scrollbar-thumb {
-    background: #010a35ee !important;
+    background: #70757d !important;
     border-radius: 999px !important;
-    border: 2px solid #ffffff !important;
+    border: 2px solid #eef0f3 !important;
 }
 
-body::-webkit-scrollbar-thumb:hover {
-    background: #010a35ee !important;
-}
-
-body::-webkit-scrollbar-button {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-}
-
+body::-webkit-scrollbar-button,
 body::-webkit-scrollbar-corner {
-    background: #ffffff !important;
+    display: none !important;
+}
+
+/* Global theme helpers */
+.bg-slate-50 {
+    background-color: #eef0f3 !important;
+}
+
+.bg-white {
+    background-color: #f7f8fa !important;
+}
+
+.bg-slate-100 {
+    background-color: #e8ebee !important;
+}
+
+.bg-slate-200 {
+    background-color: #dfe2e6 !important;
+}
+
+.bg-slate-950 {
+    background-color: #242528 !important;
+}
+
+.bg-slate-900 {
+    background-color: #303236 !important;
+}
+
+.bg-slate-800 {
+    background-color: #3a3c40 !important;
+}
+
+.text-slate-950 {
+    color: #11151d !important;
+}
+
+.text-slate-900 {
+    color: #171b24 !important;
+}
+
+.text-slate-800 {
+    color: #242a35 !important;
+}
+
+.text-slate-700 {
+    color: #3f4754 !important;
+}
+
+.text-slate-600 {
+    color: #667080 !important;
+}
+
+.text-slate-500 {
+    color: #7b8492 !important;
+}
+
+.text-slate-400 {
+    color: #858c96 !important;
+}
+
+.text-slate-300 {
+    color: #aab1bb !important;
+}
+
+.border-slate-200 {
+    border-color: #d7dadd !important;
+}
+
+.border-slate-300 {
+    border-color: #d1d5da !important;
+}
+
+.border-slate-800 {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Project Analytics visual treatment */
+.paimana-project-analytics {
+    background: #eef0f3 !important;
+}
+
+.paimana-project-analytics .rounded-xl.border.border-slate-200.bg-white,
+.paimana-project-analytics .rounded-2xl.border.border-slate-200.bg-white {
+    background: #f5f6f7 !important;
+    border-color: #d7dadd !important;
+    box-shadow:
+        0 1px 2px rgba(20, 24, 30, 0.035),
+        0 5px 16px rgba(20, 24, 30, 0.035) !important;
+}
+
+.paimana-project-analytics input,
+.paimana-project-analytics select,
+.paimana-project-analytics button.bg-white,
+.paimana-project-analytics .bg-white {
+    border-color: #d7dadd;
+}
+
+.paimana-project-analytics input,
+.paimana-project-analytics select {
+    background-color: #f8f9fa !important;
+}
+
+.paimana-project-analytics input:focus,
+.paimana-project-analytics select:focus {
+    background-color: #ffffff !important;
+}
+
+.paimana-project-analytics .recharts-cartesian-grid line {
+    stroke: #d9dde2 !important;
+}
+
+.paimana-project-analytics .recharts-cartesian-axis-line {
+    stroke: #cbd0d6 !important;
+}
+
+.paimana-project-analytics .recharts-cartesian-axis-tick-line {
+    stroke: #d0d4d9 !important;
+}
+
+.paimana-project-analytics .recharts-cartesian-axis-tick-value {
+    fill: #707985 !important;
+    font-size: 11px;
+}
+
+.paimana-project-analytics .recharts-legend-item-text {
+    color: #626a75 !important;
+    font-size: 11px !important;
+}
+
+.paimana-project-analytics .recharts-tooltip-wrapper {
+    outline: none !important;
+}
+
+.paimana-project-analytics .recharts-default-tooltip {
+    background: #f8f9fa !important;
+    border: 1px solid #d7dadd !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 24px rgba(20, 24, 30, 0.08) !important;
+}
+
+.paimana-project-analytics .recharts-text {
+    fill: #707985;
+}
+
+/* Keep the dark summary treatment available for the dashboard */
+.paimana-dark-summary {
+    background: #292a2d !important;
+    border-color: #3a3b3f !important;
+    color: #ffffff !important;
+}
+
+.paimana-dark-summary .text-slate-900,
+.paimana-dark-summary .text-slate-800 {
+    color: #ffffff !important;
+}
+
+.paimana-dark-summary .text-slate-500,
+.paimana-dark-summary .text-slate-400 {
+    color: #aeb3ba !important;
 }
