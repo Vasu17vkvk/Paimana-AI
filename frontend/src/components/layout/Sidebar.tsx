@@ -19,15 +19,15 @@ export default function Sidebar({
         <aside
             className={[
                 "flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 bg-[#292a2d] text-white shadow-[0_8px_28px_rgba(15,23,42,0.18)]",
-                collapsed ? "w-[76px]" : "w-[332px]",
+                collapsed ? "w-[70px]" : "w-[290px]",
             ].join(" ")}
         >
             {/* =========================
           BRAND
       ========================== */}
-            <div className="flex min-h-[88px] shrink-0 items-center border-b border-white/[0.08] px-5">
-                <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white shadow-sm">
+            <div className="flex min-h-[88px] shrink-0 items-center border-b border-white/[0.08] px-4">
+                <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white shadow-sm">
                         <img
                             src={logo}
                             alt="My New Brand"
@@ -37,7 +37,7 @@ export default function Sidebar({
 
                     {!collapsed && (
                         <div className="min-w-0">
-                            <div className="truncate text-[17px] font-bold tracking-[-0.02em]">
+                            <div className="truncate text-[16px] font-bold tracking-[-0.02em]">
                                 NIRMAAN AI
                             </div>
 
@@ -52,11 +52,11 @@ export default function Sidebar({
             {/* =========================
           NAVIGATION
       ========================== */}
-            <nav className="min-h-0 flex-1 overflow-y-auto px-3.5 py-5">
+            <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
                 {navigationSections.map((section, index) => (
                     <div
                         key={`${section.title ?? "main"}-${index}`}
-                        className="mb-6"
+                        className="mb-4"
                     >
                         {section.title && !collapsed && (
                             <div className="mb-2.5 px-2.5 text-[10px] font-bold tracking-[0.14em] text-slate-500">
@@ -75,7 +75,7 @@ export default function Sidebar({
                                     onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
-                                            "mb-1 flex h-11 items-center gap-3 rounded-xl px-3.5 text-[12px] font-semibold transition-all",
+                                            "mb-1 flex h-10 items-center gap-2.5 rounded-xl px-3 text-[12px] font-semibold transition-all",
                                             collapsed
                                                 ? "justify-center px-0"
                                                 : "px-3",
