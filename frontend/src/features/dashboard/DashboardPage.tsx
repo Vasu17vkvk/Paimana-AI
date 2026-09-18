@@ -916,7 +916,7 @@ export default function DashboardPage() {
               SEARCH
             =================================================== */}
 
-            <div className="mb-4 max-w-md">
+            <div className="mb-4 max-w-[680px]">
 
                 <div className="relative">
 
@@ -950,7 +950,7 @@ export default function DashboardPage() {
               ACTIVE FILTER CHIPS
             =================================================== */}
 
-            <div className="mb-5">
+            <div className="mb-3">
 
                 <FilterChips
                     filters={
@@ -1073,7 +1073,7 @@ export default function DashboardPage() {
               FINANCIALS
             =================================================== */}
 
-            <section className="mt-5">
+            <section className="mt-4">
 
                 <PortfolioFinancials
                     originalCost={
@@ -1091,7 +1091,7 @@ export default function DashboardPage() {
               RISK + EARLY WARNING
             =================================================== */}
 
-            <section className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
+            <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
 
                 {/* Risk Overview */}
                 <Card padding="lg">
@@ -1226,7 +1226,7 @@ export default function DashboardPage() {
               TOP RISK PROJECTS
             =================================================== */}
 
-            <section className="mt-5">
+            <section className="mt-4">
 
                 <Card padding="none">
 
