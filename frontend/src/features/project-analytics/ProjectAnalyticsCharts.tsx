@@ -259,13 +259,13 @@ export default function ProjectAnalyticsCharts({
         {/* ================================================== */}
 
         <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
               <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
                 Risk Distribution
               </h3>
 
-              <p className="mt-2 text-lg font-semibold text-slate-900">
+              <p className="mt-2 truncate text-lg font-semibold text-slate-900">
                 Current model-based risk classification
               </p>
             </div>
@@ -273,13 +273,13 @@ export default function ProjectAnalyticsCharts({
             <button
               type="button"
               aria-label="Risk distribution options"
-              className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-400"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-400"
             >
               <MoreHorizontal size={18} />
             </button>
           </div>
 
-          <div className="mt-4 grid min-h-[320px] min-w-0 grid-cols-1 items-center gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="mt-4 grid min-w-0 grid-cols-1 items-center gap-2 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] md:gap-3">
             {riskData.length === 0 ? (
               <div className="flex h-full min-h-[280px] items-center justify-center text-sm text-slate-400 md:col-span-2">
                 No risk data available
@@ -298,8 +298,8 @@ export default function ProjectAnalyticsCharts({
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={100}
-                        innerRadius={64}
+                        outerRadius={86}
+                        innerRadius={55}
                         paddingAngle={1}
                         stroke="#ffffff"
                         strokeWidth={2}
@@ -344,7 +344,7 @@ export default function ProjectAnalyticsCharts({
                   </div>
                 </div>
 
-                <div className="min-w-0 space-y-4 pr-0">
+                <div className="min-w-0 space-y-3 pr-0">
                   {riskData.map((item) => {
                     const total = riskData.reduce(
                       (sum, entry) =>
@@ -360,10 +360,10 @@ export default function ProjectAnalyticsCharts({
                     return (
                       <div
                         key={item.name}
-                        className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)_56px_42px] items-center gap-2"
+                        className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)_44px_38px] items-center gap-1.5"
                       >
                         <span
-                          className="h-3 w-3 rounded-full"
+                          className="h-3 w-3 shrink-0 rounded-full"
                           style={{
                             backgroundColor: item.color,
                           }}
@@ -393,21 +393,21 @@ export default function ProjectAnalyticsCharts({
         {/* Schedule Status */}
         {/* ================================================== */}
 
-        <div className="rounded-2xl border border-[#d7dadd] bg-[#f5f6f7] p-5 shadow-[0_2px_8px_rgba(20,24,30,0.045)]">
+        <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
-          <div className="mb-4">
+          <div className="mb-4 min-w-0">
 
             <h3 className="text-base font-semibold text-slate-900">
               Schedule Status
             </h3>
 
-            <p className="text-sm text-slate-500">
+            <p className="truncate text-sm text-slate-500">
               Portfolio-wise schedule classification
             </p>
 
           </div>
 
-          <div className="h-[320px]">
+          <div className="h-[320px] min-w-0">
 
             <ResponsiveContainer
               width="100%"
@@ -494,7 +494,7 @@ export default function ProjectAnalyticsCharts({
 
           </div>
 
-          <div className="h-[360px]">
+          <div className="h-[360px] min-w-0">
 
             <ResponsiveContainer
               width="100%"
@@ -666,7 +666,7 @@ export default function ProjectAnalyticsCharts({
 
         </div>
 
-        <div className="h-[380px]">
+        <div className="h-[380px] min-w-0">
 
           <ResponsiveContainer
             width="100%"
