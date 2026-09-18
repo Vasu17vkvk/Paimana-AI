@@ -14,20 +14,20 @@ export default function PageHeader({
     action,
 }: PageHeaderProps) {
     return (
-        <div className="mb-6 flex flex-col gap-4 sm:mb-7 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mb-7 flex flex-col gap-5 border-b border-slate-200/70 pb-6 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
                 {eyebrow && (
-                    <div className="mb-2 text-[10px] font-bold tracking-[0.12em] text-slate-400">
+                    <div className="mb-2 text-[10px] font-bold tracking-[0.15em] text-[#7890ac]">
                         {eyebrow}
                     </div>
                 )}
 
-                <h1 className="text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-[30px]">
+                <h1 className="text-[28px] font-bold tracking-[-0.045em] text-[#14233a] sm:text-[32px]">
                     {title}
                 </h1>
 
                 {description && (
-                    <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500 sm:text-sm sm:leading-6">
+                    <p className="mt-2 max-w-3xl text-xs leading-5 text-[#6d8098] sm:text-sm sm:leading-6">
                         {description}
                     </p>
                 )}
