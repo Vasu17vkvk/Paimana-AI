@@ -633,7 +633,7 @@ export default function ProjectAnalyticsPage() {
     whatIfResult?.change;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <div className="paimana-project-analytics min-h-screen bg-slate-50 p-6">
       <div className="mx-auto max-w-[1600px] space-y-6">
 
         {/* Header */}
