@@ -46,7 +46,7 @@ export default function Header({
     }, []);
 
     return (
-        <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-3 backdrop-blur sm:h-[76px] sm:px-5 lg:px-7">
+        <header className="sticky top-3 z-30 mx-3 mt-3 flex h-[70px] items-center justify-between rounded-[18px] border border-slate-200/90 bg-white px-3 shadow-[0_4px_18px_rgba(20,35,55,0.06)] backdrop-blur sm:mx-5 sm:mt-4 sm:h-[76px] sm:px-5 lg:mx-6">
 
             {/* Left */}
             <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
@@ -60,7 +60,7 @@ export default function Header({
                     <Menu size={20} />
                 </button>
 
-                <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 sm:max-w-[360px]">
+                <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 sm:max-w-[500px]">
 
                     <Search
                         size={16}
@@ -70,10 +70,10 @@ export default function Header({
                     <input
                         type="search"
                         placeholder="Search projects..."
-                        className="min-w-0 w-full bg-transparent py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                        className="min-w-0 w-full bg-transparent py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
                     />
 
-                    <span className="hidden h-6 min-w-6 shrink-0 place-items-center rounded border border-slate-200 bg-white px-1.5 text-[10px] font-medium text-slate-400 sm:grid">
+                    <span className="hidden h-7 min-w-7 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white px-1.5 text-[10px] font-medium text-slate-400 sm:grid">
                         /
                     </span>
                 </div>
