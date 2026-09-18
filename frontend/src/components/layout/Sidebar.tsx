@@ -19,7 +19,7 @@ export default function Sidebar({
         <aside
             className={[
                 "flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 bg-[#292a2d] text-white shadow-[0_8px_28px_rgba(15,23,42,0.18)]",
-                collapsed ? "w-[70px]" : "w-[290px]",
+                collapsed ? "w-[64px]" : "w-[270px]",
             ].join(" ")}
         >
             {/* =========================
