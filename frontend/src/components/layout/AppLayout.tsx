@@ -31,7 +31,7 @@ export default function AppLayout() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50">
+        <div className="min-h-screen bg-[#eef3f6]">
             {/* =========================
           MOBILE OVERLAY
       ========================== */}
@@ -49,11 +49,11 @@ export default function AppLayout() {
       ========================== */}
             <div
                 className={[
-                    "fixed inset-y-0 left-0 z-50",
+                    "fixed left-[14px] top-[14px] bottom-[14px] z-50",
                     "transition-transform duration-200 ease-out",
                     mobileOpen
                         ? "translate-x-0"
-                        : "-translate-x-full md:translate-x-0",
+                        : "-translate-x-[calc(100%+20px)] md:translate-x-0",
                 ].join(" ")}
             >
                 <Sidebar
@@ -70,17 +70,17 @@ export default function AppLayout() {
       ========================== */}
             <div
                 className={[
-                    "min-h-screen transition-[margin] duration-200",
+                    "min-h-screen transition-[margin] duration-200 ease-out",
                     collapsed
-                        ? "md:ml-[68px]"
-                        : "md:ml-[220px]"
+                        ? "md:ml-[114px]"
+                        : "md:ml-[360px]"
                 ].join(" ")}
             >
                 <Header
                     onMobileMenu={() => setMobileOpen(true)}
                 />
 
-                <main className="px-3 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-7">
+                <main className="px-4 pb-8 pt-5 sm:px-6 sm:pb-10 sm:pt-6 lg:px-6 lg:pb-12 lg:pt-7">
                     <Outlet />
                 </main>
             </div>
