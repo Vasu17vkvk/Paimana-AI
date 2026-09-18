@@ -18,32 +18,30 @@ export default function Sidebar({
     return (
         <aside
             className={[
-                "flex h-screen flex-col",
-                "border-r border-slate-800",
-                "bg-slate-950 text-white",
-                collapsed ? "w-[68px]" : "w-[220px]",
+                "flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 bg-[#292a2d] text-white shadow-[0_8px_28px_rgba(15,23,42,0.18)]",
+                collapsed ? "w-[76px]" : "w-[332px]",
             ].join(" ")}
         >
             {/* =========================
           BRAND
       ========================== */}
-            <div className="flex h-[76px] shrink-0 items-center border-b border-white/10 px-4">
+            <div className="flex min-h-[88px] shrink-0 items-center border-b border-white/[0.08] px-5">
                 <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white text-sm font-extrabold text-slate-900">
+                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white shadow-sm">
                         <img
                             src={logo}
                             alt="My New Brand"
-                            className="h-[90%] w-[90%] object-contain"
+                            className="h-[88%] w-[88%] object-contain"
                         />
                     </div>
 
                     {!collapsed && (
                         <div className="min-w-0">
-                            <div className="truncate text-sm font-bold tracking-tight">
+                            <div className="truncate text-[17px] font-bold tracking-[-0.02em]">
                                 NIRMAAN AI
                             </div>
 
-                            <div className="truncate text-[10px] text-slate-400">
+                            <div className="truncate text-[11px] font-medium text-slate-400">
                                 Infrastructure Intelligence
                             </div>
                         </div>
@@ -54,14 +52,14 @@ export default function Sidebar({
             {/* =========================
           NAVIGATION
       ========================== */}
-            <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-5">
+            <nav className="min-h-0 flex-1 overflow-y-auto px-3.5 py-5">
                 {navigationSections.map((section, index) => (
                     <div
                         key={`${section.title ?? "main"}-${index}`}
                         className="mb-6"
                     >
                         {section.title && !collapsed && (
-                            <div className="mb-2 px-3 text-[10px] font-bold tracking-[0.1em] text-slate-500">
+                            <div className="mb-2.5 px-2.5 text-[10px] font-bold tracking-[0.14em] text-slate-500">
                                 {section.title}
                             </div>
                         )}
@@ -77,14 +75,13 @@ export default function Sidebar({
                                     onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
-                                            "mb-1 flex h-10 items-center gap-3 rounded-lg",
-                                            "text-xs font-medium transition-colors",
+                                            "mb-1 flex h-11 items-center gap-3 rounded-xl px-3.5 text-[12px] font-semibold transition-all",
                                             collapsed
                                                 ? "justify-center px-0"
                                                 : "px-3",
                                             isActive
-                                                ? "bg-white text-slate-900"
-                                                : "text-slate-400 hover:bg-slate-800 hover:text-white",
+                                                ? "border border-white/10 bg-[#505155] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]"
+                                                : "text-slate-400 hover:bg-white/[0.06] hover:text-white",
                                         ].join(" ")
                                     }
                                 >
@@ -108,12 +105,12 @@ export default function Sidebar({
             {/* =========================
           FIXED BOTTOM CONTROL
       ========================== */}
-            <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/10 bg-slate-950 p-3">
+            <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/[0.08] p-3">
                 <button
                     type="button"
                     onClick={onToggle}
                     className={[
-                        "flex h-10 w-full items-center justify-center rounded-lg",
+                        "flex h-10 w-full items-center justify-center rounded-xl",
                         "text-xs text-slate-400 transition-colors",
                         "hover:bg-slate-800 hover:text-white",
                         collapsed ? "" : "gap-2",
