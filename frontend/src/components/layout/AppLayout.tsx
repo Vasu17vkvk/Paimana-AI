@@ -64,7 +64,7 @@ export default function AppLayout() {
                     "min-h-screen transition-[margin] duration-200 ease-out",
                     collapsed
                         ? "md:ml-[74px]"
-                        : "md:ml-[260px]",
+                        : "md:ml-[354px]",
                 ].join(" ")}
             >
                 <Header
