@@ -54,7 +54,7 @@ export default function Sidebar({
                     >
                         {section.title && !collapsed && (
                             <div className="mb-3 flex items-center gap-3 px-2.5 pt-2">
-                                <div className="shrink-0 text-[11px] font-bold tracking-[0.12em] text-white">
+                                <div className="shrink-0 text-[12px] font-bold tracking-[0.12em] text-white">
                                     {section.title}
                                 </div>
                                 <div className="h-px flex-1 bg-white/[0.14]" />
@@ -72,7 +72,7 @@ export default function Sidebar({
                                     onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
-                                            "mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 text-[14px] font-semibold text-white transition-all",
+                                            "mb-1 flex h-10 items-center gap-2 rounded-lg px-2.5 text-[16px] font-semibold text-white transition-all",
                                             collapsed
                                                 ? "justify-center px-0"
                                                 : "px-2.5",
@@ -82,7 +82,7 @@ export default function Sidebar({
                                         ].join(" ")
                                     }
                                 >
-                                    <Icon size={18} strokeWidth={1.8} />
+                                    <Icon size={20} strokeWidth={1.8} />
 
                                     {!collapsed && (
                                         <span className="truncate text-white">
