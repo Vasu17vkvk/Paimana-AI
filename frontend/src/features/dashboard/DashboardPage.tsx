@@ -836,7 +836,7 @@ export default function DashboardPage() {
                                     }),
                                 ),
                             ]}
-                            className="w-[160px] !border-white/10 !bg-[#292a2d] !text-white focus:!border-white/20 focus:!bg-[#292a2d]"
+                            className="w-[160px] !border-white/10 !bg-[#292a2d] !text-white hover:!bg-[#3a3b3e] focus:!border-white/20 focus:!bg-[#3a3b3e]"
                         />
 
                         <Button
@@ -894,7 +894,7 @@ export default function DashboardPage() {
                             }),
                         ),
                     ]}
-                    className="flex-1 !border-white/10 !bg-[#292a2d] !text-white focus:!border-white/20 focus:!bg-[#292a2d]"
+                    className="flex-1 !border-white/10 !bg-[#292a2d] !text-white hover:!bg-[#3a3b3e] focus:!border-white/20 focus:!bg-[#3a3b3e]"
                 />
 
                 <Button
