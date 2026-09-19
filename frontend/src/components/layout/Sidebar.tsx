@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { navigationSections } from "../../app/navigation";
@@ -15,6 +16,68 @@ export default function Sidebar({
     onToggle,
     onNavigate,
 }: SidebarProps) {
+    const navRef = useRef<HTMLElement | null>(null);
+    const [scrollbar, setScrollbar] = useState({ top: 0, height: 0, visible: false });
+
+    useEffect(() => {
+        const nav = navRef.current;
+        if (!nav) return;
+
+        const updateScrollbar = () => {
+            const { scrollTop, scrollHeight, clientHeight } = nav;
+            const visible = scrollHeight > clientHeight + 1;
+            const height = visible
+                ? Math.max(34, (clientHeight / scrollHeight) * clientHeight)
+                : 0;
+            const maxTop = Math.max(0, clientHeight - height);
+            const top =
+                scrollHeight > clientHeight
+                    ? (scrollTop / (scrollHeight - clientHeight)) * maxTop
+                    : 0;
+
+            setScrollbar({ top, height, visible });
+        };
+
+        updateScrollbar();
+        nav.addEventListener("scroll", updateScrollbar, { passive: true });
+
+        const resizeObserver = new ResizeObserver(updateScrollbar);
+        resizeObserver.observe(nav);
+        resizeObserver.observe(nav.firstElementChild ?? nav);
+
+        return () => {
+            nav.removeEventListener("scroll", updateScrollbar);
+            resizeObserver.disconnect();
+        };
+    }, []);
+
+    const handleScrollbarDrag = (event: React.MouseEvent<HTMLDivElement>) => {
+        const nav = navRef.current;
+        if (!nav || !scrollbar.visible) return;
+
+        event.preventDefault();
+
+        const startY = event.clientY;
+        const startScrollTop = nav.scrollTop;
+        const trackHeight = nav.clientHeight;
+        const maxThumbTop = trackHeight - scrollbar.height;
+
+        const onMove = (moveEvent: MouseEvent) => {
+            const delta = moveEvent.clientY - startY;
+            const ratio = maxThumbTop > 0 ? delta / maxThumbTop : 0;
+            nav.scrollTop =
+                startScrollTop + ratio * (nav.scrollHeight - nav.clientHeight);
+        };
+
+        const onUp = () => {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+        };
+
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+    };
+
     return (
         <aside
             className={[
@@ -46,7 +109,12 @@ export default function Sidebar({
                 </div>
             </div>
 
-            <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-4">
+            <div className="relative min-h-0 flex-1">
+                <nav
+                    ref={navRef}
+                    className="min-h-0 h-full overflow-y-auto px-2 py-4"
+                    style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                >
                 {navigationSections.map((section, index) => (
                     <div
                         key={`${section.title ?? "main"}-${index}`}
@@ -99,7 +167,24 @@ export default function Sidebar({
                         })}
                     </div>
                 ))}
-            </nav>
+                </nav>
+
+                {scrollbar.visible && (
+                    <div
+                        aria-hidden="true"
+                        onMouseDown={handleScrollbarDrag}
+                        className="absolute right-[4px] top-1 bottom-1 z-20 w-[4px] cursor-pointer"
+                    >
+                        <div
+                            className="absolute left-0 w-full rounded-full bg-[#697b91] transition-[top,height] duration-75"
+                            style={{
+                                top: scrollbar.top,
+                                height: scrollbar.height,
+                            }}
+                        />
+                    </div>
+                )}
+            </div>
 
             <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/[0.08] p-1.5">
                 <button
