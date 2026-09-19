@@ -59,7 +59,7 @@ export default function Sidebar({
                     >
                         {section.title && !collapsed && (
                             <div className="mb-3 flex items-center gap-3 px-2.5 pt-2">
-                                <div className="shrink-0 text-[12px] font-bold tracking-[0.12em] text-white">
+                                <div className="shrink-0 bg-gradient-to-r from-white via-slate-300 to-slate-500 bg-clip-text text-[12px] font-bold tracking-[0.12em] text-transparent">
                                     {section.title}
                                 </div>
                                 <div className="h-px flex-1 bg-white/[0.14]" />
