@@ -53,8 +53,11 @@ export default function Sidebar({
                         className="mb-5"
                     >
                         {section.title && !collapsed && (
-                            <div className="mb-2.5 px-2.5 text-[11px] font-bold tracking-[0.12em] text-white">
-                                {section.title}
+                            <div className="mb-3 flex items-center gap-3 px-2.5 pt-2">
+                                <div className="shrink-0 text-[11px] font-bold tracking-[0.12em] text-white">
+                                    {section.title}
+                                </div>
+                                <div className="h-px flex-1 bg-white/[0.14]" />
                             </div>
                         )}
 
