@@ -69,7 +69,7 @@ export default function Sidebar({
                                     onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
-                                            "mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 text-[12px] font-semibold text-white transition-all",
+                                            "mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 text-[14px] font-semibold text-white transition-all",
                                             collapsed
                                                 ? "justify-center px-0"
                                                 : "px-2.5",
