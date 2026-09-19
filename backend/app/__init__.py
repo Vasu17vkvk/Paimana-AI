@@ -13,6 +13,7 @@ from app.routes.delay import delay_bp
 from app.routes.warnings import warnings_bp
 from app.routes.sector_ministry import sector_ministry_bp
 from app.routes.project_analytics import project_analytics_bp
+from app.routes.assistant import assistant_bp
 
 from app.routes.dashboard import dashboard_bp
 
@@ -148,5 +149,10 @@ def create_app() -> Flask:
     geographic_bp,
     url_prefix="/api",
     )
+
+    app.register_blueprint(
+    assistant_bp,
+    url_prefix="/api/assistant",
+)
 
     return app

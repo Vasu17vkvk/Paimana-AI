@@ -9,6 +9,8 @@ import {
 
 import AppLayout from "../components/layout/AppLayout";
 
+import AIAssistantPage from "../features/ai-assistant/AIAssistantPage";
+
 
 /* =========================================================
    LAZY FEATURE PAGES
@@ -246,12 +248,7 @@ export const router = createBrowserRouter([
 
             {
                 path: "ai-assistant",
-
-                element: (
-                    <ModulePlaceholder
-                        title="AI Project Assistant"
-                    />
-                ),
+                element: <AIAssistantPage />,
             },
 
             {
