@@ -173,7 +173,7 @@ export default function Sidebar({
                     <div
                         aria-hidden="true"
                         onMouseDown={handleScrollbarDrag}
-                        className="absolute right-[4px] top-1 bottom-1 z-20 w-[4px] cursor-pointer"
+                        className="absolute right-[4px] top-1 bottom-1 z-20 w-[6px] cursor-pointer"
                     >
                         <div
                             className="absolute left-0 w-full rounded-full bg-[#697b91] transition-[top,height] duration-75"
