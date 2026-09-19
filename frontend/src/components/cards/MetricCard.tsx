@@ -5,8 +5,6 @@ interface MetricCardProps {
     value: string;
     description?: string;
     icon: ReactNode;
-    trend?: string;
-    trendPositive?: boolean;
     onClick?: () => void;
     sparkline?: number[];
 }
@@ -16,8 +14,6 @@ export default function MetricCard({
     value,
     description,
     icon,
-    trend,
-    trendPositive,
     onClick,
     sparkline = [],
 }: MetricCardProps) {
