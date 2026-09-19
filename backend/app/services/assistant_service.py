@@ -302,13 +302,41 @@ def classify_query(
         FACT
         RAG
         GENERAL
+
+    Important behavior:
+
+    A project selected in the UI does not automatically make a general
+    knowledge question a HYBRID query.
+
+    Examples:
+
+        Selected project: 400005
+        "What are the common causes of infrastructure delays?"
+            -> RAG_QUERY
+
+        Selected project: 400005
+        "Why is this project delayed?"
+            -> HYBRID_QUERY
+
+        Selected project: 400005
+        "What is the risk score?"
+            -> ML_QUERY
+
+        Selected project: 400005
+        "What is the physical progress?"
+            -> FACT_QUERY
     """
 
-    normalized = _normalise_query(query)
+    normalized = _normalise_query(
+        query
+    )
 
     resolved_project_code = (
-        project_code
-        or extract_project_code(normalized)
+        str(project_code).strip()
+        if project_code
+        else extract_project_code(
+            normalized
+        )
     )
 
     has_project = bool(
@@ -334,6 +362,10 @@ def classify_query(
         normalized,
         RAG_KEYWORDS,
     )
+
+    # ------------------------------------------------------------------
+    # Project-specific reasoning signals.
+    # ------------------------------------------------------------------
 
     cause_words = (
         "why",
@@ -361,20 +393,79 @@ def classify_query(
         "fix",
     )
 
-    project_reasoning = has_project and (
-        _contains_any(
-            normalized,
-            cause_words,
-        )
+    # ------------------------------------------------------------------
+    # Determine whether the USER'S QUESTION explicitly refers to a
+    # particular project.
+    #
+    # IMPORTANT:
+    # A project selected in the UI is NOT enough.
+    #
+    # This prevents:
+    #
+    #   Project = 400005
+    #   "What are the common causes of infrastructure delays?"
+    #
+    # from incorrectly becoming HYBRID_QUERY.
+    # ------------------------------------------------------------------
+
+    explicit_project_reference = (
+        extract_project_code(
+            normalized
+        ) is not None
         or _contains_any(
             normalized,
-            mitigation_words,
+            (
+                "this project",
+                "the project",
+                "my project",
+                "this project's",
+                "the project's",
+                "my project's",
+                "for this project",
+                "for the project",
+                "for my project",
+                "its risk",
+                "its delay",
+                "its progress",
+                "its cost",
+                "its schedule",
+                "it is delayed",
+                "it is at risk",
+                "why is it delayed",
+                "why is it at risk",
+                "why has it been delayed",
+                "what is causing it",
+                "what caused it",
+                "how can it be mitigated",
+            ),
         )
     )
 
+    project_reasoning = (
+        has_project
+        and explicit_project_reference
+        and (
+            _contains_any(
+                normalized,
+                cause_words,
+            )
+            or _contains_any(
+                normalized,
+                mitigation_words,
+            )
+        )
+    )
+
+    # ------------------------------------------------------------------
     # HYBRID
+    #
+    # Requires an actual project reference in the question when a project
+    # code is supplied separately by the UI.
+    # ------------------------------------------------------------------
+
     if (
-        explicit_project_reference
+        has_project
+        and explicit_project_reference
         and (
             is_hybrid
             or project_reasoning
@@ -382,7 +473,10 @@ def classify_query(
     ):
         return HYBRID_QUERY
 
+    # ------------------------------------------------------------------
     # ML
+    # ------------------------------------------------------------------
+
     if (
         has_project
         and is_ml
@@ -390,7 +484,10 @@ def classify_query(
     ):
         return ML_QUERY
 
+    # ------------------------------------------------------------------
     # FACT
+    # ------------------------------------------------------------------
+
     if (
         has_project
         and is_fact
@@ -399,23 +496,43 @@ def classify_query(
     ):
         return FACT_QUERY
 
-    # HYBRID wording without explicit project code
-    if is_hybrid:
+    # ------------------------------------------------------------------
+    # HYBRID wording without a selected project.
+    #
+    # The main orchestration will ask for project code.
+    # ------------------------------------------------------------------
+
+    if (
+        is_hybrid
+        and not has_project
+    ):
         return HYBRID_QUERY
 
+    # ------------------------------------------------------------------
     # RAG
+    # ------------------------------------------------------------------
+
     if is_rag:
         return RAG_QUERY
 
+    # ------------------------------------------------------------------
     # ML fallback
+    # ------------------------------------------------------------------
+
     if has_project and is_ml:
         return ML_QUERY
 
+    # ------------------------------------------------------------------
     # FACT fallback
+    # ------------------------------------------------------------------
+
     if has_project and is_fact:
         return FACT_QUERY
 
+    # ------------------------------------------------------------------
     # GENERAL
+    # ------------------------------------------------------------------
+
     return GENERAL_QUERY
 
 
@@ -439,6 +556,7 @@ def _format_number(
 
     try:
         number = float(value)
+
     except (
         TypeError,
         ValueError,
@@ -456,12 +574,14 @@ def _format_probability(
 
     try:
         number = float(value)
-        return f"{number:.1f}%"
+
     except (
         TypeError,
         ValueError,
     ):
         return str(value)
+
+    return f"{number:.1f}%"
 
 
 def _json_compact(
@@ -511,12 +631,13 @@ def _compact_list_items(
 
     compact: list[str] = []
 
-    # Keep the most recent records.
     for item in items[-limit:]:
+
         if isinstance(
             item,
             dict,
         ):
+
             cleaned = {
                 str(key): value
                 for key, value in item.items()
@@ -531,6 +652,7 @@ def _compact_list_items(
             value = _json_compact(
                 cleaned
             )
+
         else:
             value = str(item)
 
@@ -540,7 +662,9 @@ def _compact_list_items(
         )
 
         if value:
-            compact.append(value)
+            compact.append(
+                value
+            )
 
     return compact
 
@@ -875,6 +999,7 @@ def _fact_response(
     ]
 
     for label, value in fields:
+
         display_value = (
             "unavailable"
             if value is None
@@ -1033,6 +1158,7 @@ def _build_rag_citations(
         chunks,
         start=1,
     ):
+
         citations.append(
             {
                 "type": "rag_source",
@@ -1124,9 +1250,9 @@ def _build_project_prompt(
         ]
     ) or "- none supplied"
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # RAG context
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     rag_parts: list[str] = []
 
@@ -1138,6 +1264,7 @@ def _build_project_prompt(
         rag_chunks,
         start=1,
     ):
+
         content = _trim_text(
             chunk.get(
                 "chunk_text"
@@ -1200,9 +1327,9 @@ def _build_project_prompt(
         else "No RAG passages were retrieved."
     )
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Compact prompt
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     return (
         "QUESTION\n"
@@ -1273,9 +1400,9 @@ def answer_query(
             "question is required."
         )
 
-    # ---------------------------------------------------------------
-    # Resolve project code
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Resolve project code.
+    # ------------------------------------------------------------------
 
     resolved_project_code = (
         str(project_code).strip()
@@ -1285,22 +1412,22 @@ def answer_query(
         )
     )
 
-    # ---------------------------------------------------------------
-    # Classify query
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Classify query.
+    # ------------------------------------------------------------------
 
     query_type = classify_query(
         query,
         resolved_project_code,
     )
 
-    # ---------------------------------------------------------------
-    # Load project context only when needed.
+    # ------------------------------------------------------------------
+    # Load project context only for:
     #
     # FACT
     # ML
     # HYBRID
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     context: dict[
         str,
@@ -1346,11 +1473,12 @@ def answer_query(
                 "source": "postgresql",
             }
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # FACT QUERY
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if query_type == FACT_QUERY:
+
         assert context is not None
 
         return _fact_response(
@@ -1358,23 +1486,24 @@ def answer_query(
             query,
         )
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # ML QUERY
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if query_type == ML_QUERY:
+
         assert context is not None
 
         return _ml_response(
             context
         )
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # RAG QUERY
     #
     # Retrieval is local.
     # answer_from_knowledge_base performs one Gemini call.
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if query_type == RAG_QUERY:
 
@@ -1416,7 +1545,7 @@ def answer_query(
             ),
         }
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # HYBRID QUERY
     #
     # PostgreSQL project data
@@ -1426,24 +1555,24 @@ def answer_query(
     # local RAG
     # +
     # one Gemini call
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if query_type == HYBRID_QUERY:
 
         assert context is not None
 
-        # -----------------------------------------------------------
-        # Local RAG retrieval
-        # -----------------------------------------------------------
+        # --------------------------------------------------------------
+        # Local RAG retrieval.
+        # --------------------------------------------------------------
 
         rag_chunks = retrieve_knowledge(
             query,
             top_k=RAG_TOP_K,
         )
 
-        # -----------------------------------------------------------
-        # Compact combined prompt
-        # -----------------------------------------------------------
+        # --------------------------------------------------------------
+        # Compact combined prompt.
+        # --------------------------------------------------------------
 
         prompt = _build_project_prompt(
             query,
@@ -1451,9 +1580,9 @@ def answer_query(
             rag_chunks,
         )
 
-        # -----------------------------------------------------------
-        # Exactly ONE Gemini generation call
-        # -----------------------------------------------------------
+        # --------------------------------------------------------------
+        # Exactly ONE Gemini generation call.
+        # --------------------------------------------------------------
 
         response = generate_grounded_response(
             prompt,
@@ -1534,9 +1663,9 @@ def answer_query(
             "source": "postgresql_pgvector",
         }
 
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
     # GENERAL QUERY
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     response = generate_grounded_response(
         _general_prompt(
