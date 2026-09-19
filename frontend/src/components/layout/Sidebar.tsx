@@ -19,7 +19,7 @@ export default function Sidebar({
         <aside
             className={[
                 "flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 bg-[#292a2d] text-white shadow-[0_8px_28px_rgba(15,23,42,0.18)]",
-                collapsed ? "w-[60px]" : "w-[238px]",
+                collapsed ? "w-[60px]" : "w-[332px]",
             ].join(" ")}
         >
             <div className="flex min-h-[68px] shrink-0 items-center border-b border-white/[0.08] px-3">
