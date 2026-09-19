@@ -32,6 +32,25 @@ export default function MetricCard({
             return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
         }).join(" ");
     })();
+    const previous = sparkline.length >= 2 ? sparkline[sparkline.length - 2] : null;
+    const current = sparkline.length >= 1 ? sparkline[sparkline.length - 1] : null;
+    const trendType =
+        previous === null || current === null
+            ? "No change"
+            : current > previous
+                ? "Increase"
+                : current < previous
+                    ? "Decrease"
+                    : "No change";
+    const trendPercent =
+        previous !== null && current !== null && previous !== 0
+            ? Math.abs(((current - previous) / previous) * 100)
+            : 0;
+    const trendLabel =
+        trendType === "No change"
+            ? "No change"
+            : `${trendType} ${trendPercent.toFixed(1)}%`;
+
     const accent =
         label.toLowerCase().includes("cost")
             ? "bg-amber-400"
@@ -65,16 +84,18 @@ export default function MetricCard({
                     {icon}
                 </div>
 
-                {trend && (
+                {sparkline.length >= 2 && (
                     <span
                         className={[
-                            "max-w-[110px] truncate rounded-full px-2 py-1 text-[9px] font-bold leading-none sm:text-[10px]",
-                            trendPositive || trend.toLowerCase().includes("no change")
+                            "max-w-[120px] truncate rounded-full px-2 py-1 text-[9px] font-bold leading-none sm:text-[10px]",
+                            trendType === "Increase"
                                 ? "bg-emerald-50 text-emerald-600"
-                                : "bg-red-50 text-red-500",
+                                : trendType === "Decrease"
+                                    ? "bg-red-50 text-red-500"
+                                    : "bg-slate-100 text-slate-500",
                         ].join(" ")}
                     >
-                        {trend}
+                        {trendLabel}
                     </span>
                 )}
             </div>
