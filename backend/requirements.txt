@@ -26,4 +26,4 @@ gunicorn==23.0.0
 
 google-genai==2.24.0
 
-sentence-transformers==6.1.0
+fastembed==0.8.0

@@ -58,7 +58,8 @@ import re
 from functools import lru_cache
 from typing import Any
 
-from sentence_transformers import SentenceTransformer
+import numpy as np
+from fastembed import TextEmbedding
 from sqlalchemy import text
 
 from app.extensions import db
@@ -361,14 +362,16 @@ If evidence is insufficient, say so.
 # ============================================================================
 
 @lru_cache(maxsize=1)
-def get_embedding_model() -> SentenceTransformer:
+def get_embedding_model() -> TextEmbedding:
     """
     Load the local BGE embedding model once per Python process.
 
-    This runs locally and consumes no Gemini tokens.
+    FastEmbed uses the same BAAI/bge-small-en-v1.5 model family
+    through an ONNX-based CPU runtime, avoiding the large
+    PyTorch/CUDA dependency chain.
     """
-    return SentenceTransformer(
-        EMBEDDING_MODEL_NAME
+    return TextEmbedding(
+        model_name=EMBEDDING_MODEL_NAME
     )
 
 
@@ -378,6 +381,7 @@ def _embed_query(
     """
     Convert a user question into a normalized BGE embedding.
     """
+
     model = get_embedding_model()
 
     retrieval_query = (
@@ -385,12 +389,29 @@ def _embed_query(
         + query
     )
 
-    embedding = model.encode(
-        retrieval_query,
-        normalize_embeddings=True,
+    embedding = next(
+        model.embed(
+            [retrieval_query]
+        )
     )
 
-    return embedding.tolist()
+    vector = np.asarray(
+        embedding,
+        dtype=np.float32,
+    )
+
+    norm = np.linalg.norm(
+        vector
+    )
+
+    if norm == 0:
+        raise ValueError(
+            "Embedding model returned a zero-length vector."
+        )
+
+    vector = vector / norm
+
+    return vector.tolist()
 
 
 def _embedding_to_pgvector(
