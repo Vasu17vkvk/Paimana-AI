@@ -50,7 +50,12 @@ export default function Sidebar({
                 {navigationSections.map((section, index) => (
                     <div
                         key={`${section.title ?? "main"}-${index}`}
-                        className="mb-5"
+                        className={[
+                            "mb-5",
+                            section.title && !collapsed
+                                ? "rounded-xl bg-gradient-to-r from-slate-400/[0.07] via-slate-400/[0.025] to-transparent px-1.5 py-1"
+                                : "",
+                        ].join(" ")}
                     >
                         {section.title && !collapsed && (
                             <div className="mb-3 flex items-center gap-3 px-2.5 pt-2">
