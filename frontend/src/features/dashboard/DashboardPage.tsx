@@ -833,7 +833,7 @@ export default function DashboardPage() {
                                     }),
                                 ),
                             ]}
-                            className="w-[160px]"
+                            className="w-[160px] !border-slate-700 !bg-slate-900 !text-white focus:!border-slate-600 focus:!bg-slate-900"
                         />
 
                         <Button
@@ -891,7 +891,7 @@ export default function DashboardPage() {
                             }),
                         ),
                     ]}
-                    className="flex-1"
+                    className="flex-1 !border-slate-700 !bg-slate-900 !text-white focus:!border-slate-600 focus:!bg-slate-900"
                 />
 
                 <Button
