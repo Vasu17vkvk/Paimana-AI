@@ -8,6 +8,7 @@ interface MetricCardProps {
     trend?: string;
     trendPositive?: boolean;
     onClick?: () => void;
+    sparkline?: number[];
 }
 
 export default function MetricCard({
@@ -18,7 +19,19 @@ export default function MetricCard({
     trend,
     trendPositive,
     onClick,
+    sparkline = [],
 }: MetricCardProps) {
+    const sparklinePath = (() => {
+        if (sparkline.length < 2) return "";
+        const min = Math.min(...sparkline);
+        const max = Math.max(...sparkline);
+        const range = max - min || 1;
+        return sparkline.map((point, index) => {
+            const x = 1 + (index / (sparkline.length - 1)) * 94;
+            const y = 25 - ((point - min) / range) * 20;
+            return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+        }).join(" ");
+    })();
     const accent =
         label.toLowerCase().includes("cost")
             ? "bg-amber-400"
@@ -89,9 +102,15 @@ export default function MetricCard({
                 preserveAspectRatio="none"
             >
                 <path
-                    d="M1 25 C 14 25, 18 25, 28 24 S 43 24, 49 18 S 58 7, 69 7 S 83 8, 95 5"
+                    d={sparklinePath || "M1 25 L95 25"}
                     fill="none"
-                    stroke="currentColor"
+                    stroke={
+                        label.toLowerCase().includes("cost")
+                            ? "#f59e0b"
+                            : label.toLowerCase().includes("risk") || label.toLowerCase().includes("delay")
+                                ? "#fb7185"
+                                : "#94a3b8"
+                    }
                     strokeWidth="2"
                     strokeLinecap="round"
                 />
