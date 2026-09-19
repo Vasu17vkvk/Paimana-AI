@@ -480,6 +480,9 @@ export default function DashboardPage() {
             delayedProjects: 0,
         };
 
+    const monthlyPortfolioData =
+        dashboardData?.monthlyPortfolioData ?? [];
+
 
     /* =====================================================
        BACKEND RISK DISTRIBUTION
@@ -1005,6 +1008,9 @@ export default function DashboardPage() {
                             size={18}
                         />
                     }
+                    sparkline={monthlyPortfolioData.map(
+                        (point) => point.projects,
+                    )}
                     onClick={() =>
                         navigate(
                             "/project-analytics",
@@ -1023,6 +1029,9 @@ export default function DashboardPage() {
                             size={18}
                         />
                     }
+                    sparkline={monthlyPortfolioData.map(
+                        (point) => point.highRisk,
+                    )}
                     onClick={() =>
                         navigate(
                             "/risk-analysis",
@@ -1041,6 +1050,9 @@ export default function DashboardPage() {
                             size={18}
                         />
                     }
+                    sparkline={monthlyPortfolioData.map(
+                        (point) => point.costRisk,
+                    )}
                     onClick={() =>
                         navigate(
                             "/cost-prediction",
@@ -1059,6 +1071,9 @@ export default function DashboardPage() {
                             size={18}
                         />
                     }
+                    sparkline={monthlyPortfolioData.map(
+                        (point) => point.delayed,
+                    )}
                     onClick={() =>
                         navigate(
                             "/delay-prediction",
