@@ -22,9 +22,9 @@ export default function Sidebar({
                 collapsed ? "w-[60px]" : "w-[332px]",
             ].join(" ")}
         >
-            <div className="flex min-h-[68px] shrink-0 items-center border-b border-white/[0.08] px-3">
-                <div className="flex min-w-0 items-center gap-2">
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
+            <div className="flex min-h-[76px] shrink-0 items-center border-b border-white/[0.08] px-3">
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white shadow-sm">
                         <img
                             src={logo}
                             alt="My New Brand"
@@ -34,11 +34,11 @@ export default function Sidebar({
 
                     {!collapsed && (
                         <div className="min-w-0">
-                            <div className="truncate text-[14px] font-bold tracking-[-0.02em] text-white">
+                            <div className="truncate text-[17px] font-bold tracking-[-0.02em] text-white">
                                 NIRMAAN AI
                             </div>
 
-                            <div className="truncate text-[9px] font-medium text-white">
+                            <div className="truncate text-[11px] font-medium text-white">
                                 Infrastructure Intelligence
                             </div>
                         </div>
@@ -53,7 +53,7 @@ export default function Sidebar({
                         className="mb-1.5"
                     >
                         {section.title && !collapsed && (
-                            <div className="mb-1.5 px-2.5 text-[9px] font-bold tracking-[0.12em] text-white">
+                            <div className="mb-1.5 px-2.5 text-[11px] font-bold tracking-[0.12em] text-white">
                                 {section.title}
                             </div>
                         )}
@@ -69,7 +69,7 @@ export default function Sidebar({
                                     onClick={onNavigate}
                                     className={({ isActive }) =>
                                         [
-                                            "mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 text-[10px] font-semibold text-white transition-all",
+                                            "mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 text-[12px] font-semibold text-white transition-all",
                                             collapsed
                                                 ? "justify-center px-0"
                                                 : "px-2.5",
@@ -79,7 +79,7 @@ export default function Sidebar({
                                         ].join(" ")
                                     }
                                 >
-                                    <Icon size={16} strokeWidth={1.8} />
+                                    <Icon size={18} strokeWidth={1.8} />
 
                                     {!collapsed && (
                                         <span className="truncate text-white">
@@ -99,12 +99,12 @@ export default function Sidebar({
                     onClick={onToggle}
                     className={[
                         "flex h-7 w-full items-center justify-center rounded-lg",
-                        "text-[10px] text-white transition-colors",
+                        "text-[12px] text-white transition-colors",
                         "hover:bg-slate-800 hover:text-white",
                         collapsed ? "" : "gap-1.5",
                     ].join(" ")}
                 >
-                    <span className="text-xs">
+                    <span className="text-sm">
                         {collapsed ? "→" : "←"}
                     </span>
 
