@@ -32,9 +32,6 @@ export default function AppLayout() {
 
     return (
         <div className="min-h-screen bg-[#eef3f6]">
-            {/* =========================
-          MOBILE OVERLAY
-      ========================== */}
             {mobileOpen && (
                 <button
                     type="button"
@@ -44,9 +41,6 @@ export default function AppLayout() {
                 />
             )}
 
-            {/* =========================
-          SIDEBAR
-      ========================== */}
             <div
                 className={[
                     "fixed left-[14px] top-[14px] bottom-[14px] z-50",
@@ -65,15 +59,12 @@ export default function AppLayout() {
                 />
             </div>
 
-            {/* =========================
-          MAIN CONTENT
-      ========================== */}
             <div
                 className={[
                     "min-h-screen transition-[margin] duration-200 ease-out",
                     collapsed
-                        ? "md:ml-[88px]"
-                        : "md:ml-[292px]"
+                        ? "md:ml-[74px]"
+                        : "md:ml-[260px]",
                 ].join(" ")}
             >
                 <Header
