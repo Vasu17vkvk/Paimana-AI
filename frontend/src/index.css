@@ -115,8 +115,8 @@ button {
 /* Sidebar navigation */
 .paimana-sidebar nav {
     overflow-y: auto !important;
-    scrollbar-width: thin !important;
-    scrollbar-color: #697b91 transparent !important;
+    scrollbar-width: none !important;
+    scrollbar-color: transparent transparent !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar {
