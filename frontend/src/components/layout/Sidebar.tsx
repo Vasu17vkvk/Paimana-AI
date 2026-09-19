@@ -19,7 +19,7 @@ export default function Sidebar({
         <aside
             className={[
                 "flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 bg-[#292a2d] text-white shadow-[0_8px_28px_rgba(15,23,42,0.18)]",
-                collapsed ? "w-[60px]" : "w-[332px]",
+                collapsed ? "w-[60px]" : "w-[300px]",
             ].join(" ")}
         >
             <div className="flex min-h-[76px] shrink-0 items-center border-b border-white/[0.08] px-3">
@@ -46,14 +46,14 @@ export default function Sidebar({
                 </div>
             </div>
 
-            <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-4">
                 {navigationSections.map((section, index) => (
                     <div
                         key={`${section.title ?? "main"}-${index}`}
-                        className="mb-1.5"
+                        className="mb-5"
                     >
                         {section.title && !collapsed && (
-                            <div className="mb-1.5 px-2.5 text-[11px] font-bold tracking-[0.12em] text-white">
+                            <div className="mb-2.5 px-2.5 text-[11px] font-bold tracking-[0.12em] text-white">
                                 {section.title}
                             </div>
                         )}
