@@ -114,49 +114,36 @@ button {
 
 /* Sidebar navigation */
 .paimana-sidebar nav {
-    overflow-y: auto !important;
-    scrollbar-width: auto !important;
+    overflow-y: scroll !important;
+    scrollbar-width: thin !important;
     scrollbar-color: #697b91 transparent !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar {
-    width: 12px !important;
-    height: 12px !important;
+    width: 6px !important;
+    height: 6px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-track {
     background: transparent !important;
+    border: 0 !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-thumb {
     background: #697b91 !important;
     border-radius: 999px !important;
-    border: 3px solid transparent !important;
-    background-clip: content-box !important;
+    border: 1px solid transparent !important;
+    background-clip: padding-box !important;
     min-height: 40px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-thumb:hover {
     background: #7b8da3 !important;
-    background-clip: content-box !important;
+    background-clip: padding-box !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-button {
-    display: block !important;
-    height: 14px !important;
-    width: 12px !important;
-    background-color: transparent !important;
-    background-repeat: no-repeat !important;
-    background-position: center !important;
-    background-size: 9px 9px !important;
-}
-
-.paimana-sidebar nav::-webkit-scrollbar-button:single-button:vertical:decrement {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 9 9'%3E%3Cpath d='M1 6L4.5 2L8 6' fill='%23697b91'/%3E%3C/svg%3E") !important;
-}
-
-.paimana-sidebar nav::-webkit-scrollbar-button:single-button:vertical:increment {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9' viewBox='0 0 9 9'%3E%3Cpath d='M1 3L4.5 7L8 3' fill='%23697b91'/%3E%3C/svg%3E") !important;
+    display: none !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-corner {
