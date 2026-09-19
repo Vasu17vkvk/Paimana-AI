@@ -73,7 +73,7 @@ button {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 50;
-    width: 256px;
+    width: 250px;
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -88,7 +88,7 @@ button {
 
 .paimana-main {
     min-height: 100vh;
-    margin-left: 256px;
+    margin-left: 250px;
     transition: margin-left 180ms ease;
 }
 
@@ -98,7 +98,7 @@ button {
 
 @media (max-width: 768px) {
     .paimana-sidebar {
-        width: 256px;
+        width: 250px;
         transform: translateX(-100%);
     }
 
