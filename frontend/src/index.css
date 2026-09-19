@@ -116,28 +116,28 @@ button {
 .paimana-sidebar nav {
     overflow-y: auto !important;
     scrollbar-width: thin !important;
-    scrollbar-color: #55585d #242528 !important;
+    scrollbar-color: #697b91 transparent !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar {
-    width: 7px !important;
-    height: 7px !important;
+    width: 3px !important;
+    height: 3px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-track {
-    background: #242528 !important;
+    background: transparent !important;
     border-radius: 999px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-thumb {
-    background: #55585d !important;
+    background: #697b91 !important;
     border-radius: 999px !important;
-    border: 1px solid #242528 !important;
+    border: 0 !important;
     min-height: 40px !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-thumb:hover {
-    background: #6a6d72 !important;
+    background: #7b8da3 !important;
 }
 
 .paimana-sidebar nav::-webkit-scrollbar-button,
