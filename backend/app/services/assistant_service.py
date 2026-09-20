@@ -41,6 +41,10 @@ import json
 import re
 from typing import Any
 
+from sqlalchemy import text
+
+from app.extensions import db
+
 from app.services.assistant_context_service import (
     get_project_context,
 )
@@ -63,6 +67,7 @@ FACT_QUERY = "FACT_QUERY"
 ML_QUERY = "ML_QUERY"
 RAG_QUERY = "RAG_QUERY"
 HYBRID_QUERY = "HYBRID_QUERY"
+ANALYTICS_QUERY = "ANALYTICS_QUERY"
 GENERAL_QUERY = "GENERAL_QUERY"
 
 
@@ -289,6 +294,47 @@ def extract_project_code(
 
     return match.group(0) if match else None
 
+def _is_analytics_intent(
+    normalized: str,
+) -> bool:
+    """
+    Detect portfolio-level questions that require PostgreSQL
+    aggregation rather than project context or Gemini.
+    """
+
+    count_pattern = (
+        r"\b(how many|number of|count of|total number of|"
+        r"total)\b.*\bprojects?\b"
+    )
+
+    dimension_pattern = (
+        r"\b(all|which|list|show)\b.*\b"
+        r"(states?|ministr(?:y|ies)|sectors?)\b"
+    )
+
+    portfolio_pattern = (
+        r"\bprojects?\b.*\b"
+        r"(by state|by ministry|by sector|in each state|"
+        r"in each ministry|in each sector)\b"
+    )
+
+    return (
+        re.search(
+            count_pattern,
+            normalized,
+        )
+        is not None
+        or re.search(
+            dimension_pattern,
+            normalized,
+        )
+        is not None
+        or re.search(
+            portfolio_pattern,
+            normalized,
+        )
+        is not None
+    )
 
 def classify_query(
     query: str,
@@ -331,6 +377,10 @@ def classify_query(
     normalized = _normalise_query(
         query
     )
+
+    is_analytics = _is_analytics_intent(
+    normalized
+)
 
     resolved_project_code = (
         str(project_code).strip()
@@ -505,6 +555,17 @@ def classify_query(
         )
     ):
         return HYBRID_QUERY
+
+    # ------------------------------------------------------------------
+    # ANALYTICS
+    #
+    # Portfolio-level questions are answered from PostgreSQL.
+    # A selected project does not turn a portfolio question into
+    # a project-specific question.
+    # ------------------------------------------------------------------
+
+    if is_analytics:
+        return ANALYTICS_QUERY    
 
     # ------------------------------------------------------------------
     # ML
@@ -1500,6 +1561,532 @@ def _general_prompt(
         "Be concise, accurate, professional, and practical."
     )
 
+# ============================================================================
+# PORTFOLIO STATE NORMALIZATION
+# ============================================================================
+
+INDIA_STATES_AND_UTS = [
+    "Andaman & Nicobar",
+    "Andhra Pradesh",
+    "Arunachal Pradesh",
+    "Assam",
+    "Bihar",
+    "Chandigarh",
+    "Chhattisgarh",
+    "Dadra & Nagar Haveli and Daman & Diu",
+    "Delhi",
+    "Goa",
+    "Gujarat",
+    "Haryana",
+    "Himachal Pradesh",
+    "Jammu and Kashmir",
+    "Jharkhand",
+    "Karnataka",
+    "Kerala",
+    "Ladakh",
+    "Madhya Pradesh",
+    "Maharashtra",
+    "Manipur",
+    "Meghalaya",
+    "Mizoram",
+    "Nagaland",
+    "Odisha",
+    "Puducherry",
+    "Punjab",
+    "Rajasthan",
+    "Sikkim",
+    "Tamil Nadu",
+    "Telangana",
+    "Tripura",
+    "Uttar Pradesh",
+    "Uttarakhand",
+    "West Bengal",
+]
+
+def _extract_project_states(
+    raw_value: Any,
+) -> list[str]:
+    """
+    Convert the project's raw flash_state value into canonical
+    Indian state/UT names.
+    """
+
+    if raw_value is None:
+        return []
+
+    raw = str(raw_value).strip()
+
+    if not raw:
+        return []
+
+    normalized_raw = raw.lower()
+
+    # These are geographic categories, not individual states/UTs.
+    if normalized_raw in {
+        "pan india",
+        "offshore",
+    }:
+        return []
+
+    found: list[str] = []
+
+    # Match longer names first so compound names are handled correctly.
+    canonical_states = sorted(
+        INDIA_STATES_AND_UTS,
+        key=len,
+        reverse=True,
+    )
+
+    for state_name in canonical_states:
+        if state_name.lower() in normalized_raw:
+            found.append(
+                state_name
+            )
+
+    # Handle truncated source values.
+    if normalized_raw.strip(" (),") == "uttar":
+        found.append(
+            "Uttar Pradesh"
+        )
+
+    if normalized_raw.strip(" (),") == "west":
+        found.append(
+            "West Bengal"
+        )
+
+    if normalized_raw.strip(" (),") == "jammu and":
+        found.append(
+            "Jammu and Kashmir"
+        )
+
+    return list(
+        dict.fromkeys(found)
+    )
+
+
+def _analytics_response(
+    question: str,
+) -> dict[str, Any]:
+    """
+    Answer portfolio-level analytics questions directly from PostgreSQL.
+
+    This path never calls Gemini.
+    """
+
+    normalized = _normalise_query(
+        question
+    )
+
+        # ---------------------------------------------------------------
+    # LIST ALL MINISTRIES / SECTORS
+    # ---------------------------------------------------------------
+
+    asks_ministry = bool(
+        re.search(
+            r"\b(?:all|which|list|show)\b.*\bministr(?:y|ies)\b",
+            normalized,
+        )
+    )
+
+    asks_sector = bool(
+        re.search(
+            r"\b(?:all|which|list|show)\b.*\bsectors?\b",
+            normalized,
+        )
+    )
+
+    if asks_ministry or asks_sector:
+        response_parts: list[str] = []
+
+        if asks_ministry:
+            ministry_result = db.session.execute(
+                text(
+                    """
+                    SELECT DISTINCT
+                        TRIM(ministry) AS ministry
+                    FROM project_master
+                    WHERE ministry IS NOT NULL
+                      AND TRIM(ministry) <> ''
+                    ORDER BY TRIM(ministry)
+                    """
+                )
+            )
+
+            ministries = sorted(
+                {
+                    str(row["ministry"]).strip()
+                    for row in ministry_result.mappings()
+                    if row["ministry"]
+                },
+                key=str.lower,
+            )
+
+            if ministries:
+                response_parts.append(
+                    "Project ministries:\n"
+                    + "\n".join(
+                        f"- {ministry}"
+                        for ministry in ministries
+                    )
+                )
+            else:
+                response_parts.append(
+                    "No ministry information is available."
+                )
+
+        if asks_sector:
+            sector_result = db.session.execute(
+                text(
+                    """
+                    SELECT DISTINCT
+                        TRIM(sector) AS sector
+                    FROM project_master
+                    WHERE sector IS NOT NULL
+                      AND TRIM(sector) <> ''
+                    ORDER BY TRIM(sector)
+                    """
+                )
+            )
+
+            sectors = sorted(
+                {
+                    str(row["sector"]).strip()
+                    for row in sector_result.mappings()
+                    if row["sector"]
+                },
+                key=str.lower,
+            )
+
+            if sectors:
+                response_parts.append(
+                    "Project sectors:\n"
+                    + "\n".join(
+                        f"- {sector}"
+                        for sector in sectors
+                    )
+                )
+            else:
+                response_parts.append(
+                    "No sector information is available."
+                )
+
+        return {
+            "text": "\n\n".join(
+                response_parts
+            ),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+        # ---------------------------------------------------------------
+    # LIST ALL STATES
+    # ---------------------------------------------------------------
+
+    if (
+        "all the states" in normalized
+        or "all states" in normalized
+        or (
+            "which states" in normalized
+            and "projects" in normalized
+        )
+        or "states where the projects are" in normalized
+    ):
+        result = db.session.execute(
+            text(
+                """
+                SELECT DISTINCT
+                    flash_state
+                FROM project_master
+                WHERE flash_state IS NOT NULL
+                """
+            )
+        )
+
+        states: set[str] = set()
+
+        for row in result:
+            states.update(
+                _extract_project_states(
+                    row[0]
+                )
+            )
+
+        ordered_states = sorted(
+            states,
+            key=str.lower,
+        )
+
+        if not ordered_states:
+            return {
+                "text": "No project state information is available.",
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        return {
+            "text": (
+                "Project states/UTs:\n"
+                + "\n".join(
+                    f"- {state}"
+                    for state in ordered_states
+                )
+            ),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+        # ---------------------------------------------------------------
+    # PROJECT COUNT BY STATE
+    # ---------------------------------------------------------------
+
+    count_by_state = bool(
+        re.search(
+            r"\b(?:how many|number of|count of|total)\b.*"
+            r"\bprojects?\b.*"
+            r"\b(?:each|every)\s+states?\b",
+            normalized,
+        )
+        or re.search(
+            r"\bprojects?\b.*\b(?:by|across)\s+states?\b",
+            normalized,
+        )
+    )
+
+    if count_by_state:
+        result = db.session.execute(
+            text(
+                """
+                SELECT flash_state
+                FROM project_master
+                WHERE flash_state IS NOT NULL
+                """
+            )
+        )
+
+        state_counts: dict[str, int] = {}
+
+        for row in result:
+            project_states = _extract_project_states(
+                row[0]
+            )
+
+            for state in project_states:
+                state_counts[state] = (
+                    state_counts.get(state, 0) + 1
+                )
+
+        ordered_counts = sorted(
+            state_counts.items(),
+            key=lambda item: (
+                -item[1],
+                item[0].lower(),
+            ),
+        )
+
+        lines = [
+            "Project count by state/UT:"
+        ]
+
+        lines.extend(
+            f"- {state}: {count}"
+            for state, count in ordered_counts
+        )
+
+        return {
+            "text": "\n".join(lines),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }   
+
+        # ---------------------------------------------------------------
+    # PROJECT COUNT BY MINISTRY
+    # ---------------------------------------------------------------
+
+    count_by_ministry = bool(
+        re.search(
+            r"\b(?:how many|number of|count of|total)\b.*"
+            r"\bprojects?\b.*"
+            r"\b(?:each|every)\s+ministr(?:y|ies)\b",
+            normalized,
+        )
+        or re.search(
+            r"\bprojects?\b.*\bby\s+ministr(?:y|ies)\b",
+            normalized,
+        )
+    )
+
+    if count_by_ministry:
+        result = db.session.execute(
+            text(
+                """
+                SELECT
+                    TRIM(ministry) AS ministry,
+                    COUNT(*) AS project_count
+                FROM project_master
+                WHERE ministry IS NOT NULL
+                  AND TRIM(ministry) <> ''
+                GROUP BY TRIM(ministry)
+                ORDER BY project_count DESC, TRIM(ministry)
+                """
+            )
+        )
+
+        lines = [
+            "Project count by ministry:"
+        ]
+
+        for row in result.mappings():
+            lines.append(
+                f"- {row['ministry']}: {int(row['project_count'])}"
+            )
+
+        return {
+            "text": "\n".join(lines),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+    # ---------------------------------------------------------------
+    # PROJECT COUNT BY SECTOR
+    # ---------------------------------------------------------------
+
+    count_by_sector = bool(
+        re.search(
+            r"\b(?:how many|number of|count of|total)\b.*"
+            r"\bprojects?\b.*"
+            r"\b(?:each|every)\s+sectors?\b",
+            normalized,
+        )
+        or re.search(
+            r"\bprojects?\b.*\bby\s+sectors?\b",
+            normalized,
+        )
+    )
+
+    if count_by_sector:
+        result = db.session.execute(
+            text(
+                """
+                SELECT
+                    TRIM(sector) AS sector,
+                    COUNT(*) AS project_count
+                FROM project_master
+                WHERE sector IS NOT NULL
+                  AND TRIM(sector) <> ''
+                GROUP BY TRIM(sector)
+                ORDER BY project_count DESC, TRIM(sector)
+                """
+            )
+        )
+
+        lines = [
+            "Project count by sector:"
+        ]
+
+        for row in result.mappings():
+            lines.append(
+                f"- {row['sector']}: {int(row['project_count'])}"
+            )
+
+        return {
+            "text": "\n".join(lines),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }     
+
+    # ---------------------------------------------------------------
+    # HOW MANY PROJECTS IN <STATE>
+    # ---------------------------------------------------------------
+
+    state_match = re.search(
+        r"\b(?:how many|number of|count of|total number of)"
+        r"\s+projects?\s+(?:are\s+)?in\s+(.+?)\s*$",
+        normalized,
+    )
+
+    if state_match:
+        state = state_match.group(1).strip()
+
+        # Keep the user-supplied state as a parameter.
+        result = db.session.execute(
+            text(
+                """
+                SELECT COUNT(*) AS project_count
+                FROM project_master
+                WHERE LOWER(
+                    COALESCE(
+                        flash_state,
+                        ''
+                    )
+                ) LIKE :state_pattern
+                """
+            ),
+            {
+                "state_pattern": f"%{state.lower()}%",
+            },
+        )
+
+        row = result.mappings().first()
+
+        count = int(
+            row["project_count"]
+            if row and row["project_count"] is not None
+            else 0
+        )
+
+        return {
+            "text": (
+                f"Projects in {state.title()}: {count}"
+            ),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+    # ---------------------------------------------------------------
+    # FALLBACK
+    # ---------------------------------------------------------------
+
+    return {
+        "text": (
+            "I can currently answer portfolio-level project count "
+            "questions directly from the NIRMAAN project database."
+        ),
+        "query_type": ANALYTICS_QUERY,
+        "project_code": None,
+        "citations": [],
+        "retrieved_chunks": [],
+        "model_used": False,
+        "source": "postgresql",
+    }    
+
 
 # ============================================================================
 # MAIN ORCHESTRATION
@@ -1596,6 +2183,15 @@ def answer_query(
                 "model_used": False,
                 "source": "postgresql",
             }
+
+    # ------------------------------------------------------------------
+    # ANALYTICS QUERY
+    # ------------------------------------------------------------------
+
+    if query_type == ANALYTICS_QUERY:
+        return _analytics_response(
+            query
+        )        
 
     # ------------------------------------------------------------------
     # FACT QUERY
