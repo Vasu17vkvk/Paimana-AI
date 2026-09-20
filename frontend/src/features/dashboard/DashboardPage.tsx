@@ -1097,6 +1097,10 @@ export default function DashboardPage() {
                     revisedCost={
                         financials.revisedCost
                     }
+                    snapshot={{
+                        filters: appliedFilters,
+                        financials,
+                    }}
                 />
 
             </section>
@@ -1125,20 +1129,33 @@ export default function DashboardPage() {
 
                         </div>
 
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                                navigate(
-                                    "/risk-analysis",
-                                )
-                            }
-                        >
-                            View analysis
-                            <ArrowRight
-                                size={13}
+                        <div className="flex items-center gap-1">
+                            <SaveToReport
+                                id="dashboard-risk-overview"
+                                type="risk"
+                                title="Risk Assessment"
+                                description="Current ML risk distribution for the selected portfolio."
+                                snapshot={{
+                                    filters: appliedFilters,
+                                    riskDistribution,
+                                    metrics,
+                                }}
                             />
-                        </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                    navigate(
+                                        "/risk-analysis",
+                                    )
+                                }
+                            >
+                                View analysis
+                                <ArrowRight
+                                    size={13}
+                                />
+                            </Button>
+                        </div>
 
                     </div>
 
@@ -1259,20 +1276,32 @@ export default function DashboardPage() {
 
                         </div>
 
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                                navigate(
-                                    "/risk-analysis",
-                                )
-                            }
-                        >
-                            View all
-                            <ArrowRight
-                                size={13}
+                        <div className="flex items-center gap-1">
+                            <SaveToReport
+                                id="dashboard-highest-risk"
+                                type="warnings"
+                                title="Highest Risk Projects"
+                                description="Top projects ranked by current ML risk score."
+                                snapshot={{
+                                    filters: appliedFilters,
+                                    projects: highestRiskProjects,
+                                }}
                             />
-                        </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                    navigate(
+                                        "/risk-analysis",
+                                    )
+                                }
+                            >
+                                View all
+                                <ArrowRight
+                                    size={13}
+                                />
+                            </Button>
+                        </div>
 
                     </div>
 
@@ -1794,9 +1823,11 @@ function DashboardFilterDrawer({
 function PortfolioFinancials({
     originalCost,
     revisedCost,
+    snapshot,
 }: {
     originalCost: number;
     revisedCost: number;
+    snapshot: unknown;
 }) {
     const escalation =
         revisedCost -
@@ -1831,9 +1862,17 @@ function PortfolioFinancials({
 
                 </div>
 
-                <Badge
-                    variant={
-                        escalationPercent >
+                <div className="flex items-center gap-1">
+                    <SaveToReport
+                        id="dashboard-cost-analysis"
+                        type="cost"
+                        title="Cost Analysis"
+                        description="Portfolio original, revised and cost escalation position."
+                        snapshot={snapshot}
+                    />
+                    <Badge
+                        variant={
+                            escalationPercent >
                             10
                             ? "warning"
                             : "info"
