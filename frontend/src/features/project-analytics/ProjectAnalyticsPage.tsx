@@ -1366,6 +1366,7 @@ export default function ProjectAnalyticsPage() {
                       projectDetail.risk_trajectory
                     }
                   />
+                  </div>
 
                   <div className="mb-2">
                     <SaveToReport
