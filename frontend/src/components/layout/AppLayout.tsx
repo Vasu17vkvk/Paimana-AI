@@ -1,5 +1,4 @@
 import { FileText } from "lucide-react";
-import { FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, Outlet } from "react-router-dom";
 import { useReportsStore } from "../../features/reports/reportsStore";
@@ -8,8 +7,6 @@ import Header from "./Header";
 import Sidebar from "./Sidebar";
 
 export default function AppLayout() {
-    const navigate = useNavigate();
-    const reportCount = useReportsStore((state) => state.sections.length);
     const navigate = useNavigate();
     const reportCount = useReportsStore((state) => state.sections.length);
     const [collapsed, setCollapsed] = useState(false);
