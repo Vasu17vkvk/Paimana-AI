@@ -1,10 +1,10 @@
-import { ArrowDown, ArrowUp, Check, Copy, Download, Eye, FileText, History, Pencil, Plus, Printer, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, Download, Eye, FileText, GripVertical, History, Pencil, Plus, Printer, Sparkles, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
 import PageHeader from "../../components/layout/PageHeader";
-import { defaultReportParts, reportSectionCatalog, useReportsStore, type ReportPart, type ReportScope, type ReportSection, type SavedReport } from "./reportsStore";
+import { defaultReportParts, reportSectionCatalog, useReportsStore, type ReportPart, type ReportScope, type SavedReport } from "./reportsStore";
 import { generateReportExecutiveSummary } from "../../services/api";
 
 type ReportExportData = Pick<SavedReport, "title" | "description" | "observation" | "scope" | "projectCode" | "projectName" | "filters" | "sections" | "executiveSummary"> & { createdAt?: number };
@@ -26,7 +26,7 @@ function partLabel(part: ReportPart) {
     return ({summary:"Summary",risk_breakdown:"Risk Breakdown",contributing_factors:"Contributing Factors",chart:"Chart",table:"Table",recommendations:"Recommendations"} as Record<ReportPart,string>)[part];
 }
 function exportXlsx(report: ReportExportData) {
-    const rows:any[][]=[["PAIMANA REPORT",""],["Report Title",report.title],["Scope",report.scope],["Project Code",report.projectCode],["Project Name",report.projectName],["Description",report.description],["Observation",report.observation],["Created At","createdAt" in report?new Date(report.createdAt).toLocaleString("en-IN"):new Date().toLocaleString("en-IN")],[],["Filter","Value"]];
+    const rows:any[][]=[["PAIMANA REPORT",""],["Report Title",report.title],["Scope",report.scope],["Project Code",report.projectCode],["Project Name",report.projectName],["Description",report.description],["Observation",report.observation],["Created At","createdAt" in report?new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN"):new Date().toLocaleString("en-IN")],[],["Filter","Value"]];
     Object.entries(report.filters).forEach(([k,v])=>rows.push([k,v]));
     rows.push([],["Section","Description","Captured At","Selected Parts","Observation","Snapshot"]);
     report.sections.forEach(s=>rows.push([s.title,s.description,new Date(s.capturedAt??s.addedAt).toLocaleString("en-IN"),(s.selectedParts??defaultReportParts).join(", "),s.observation||"",valueText(s.snapshot)]));
@@ -52,7 +52,7 @@ export default function ReportsPage(){
     async function aiSummary(){
         setAiLoading(true);setAiError("");
         try{
-            const result=await generateReportExecutiveSummary({title,scope,projectCode,projectName,filters,sections:sections.map(s=>({title:s.title,description:s.description,selectedParts:s.selectedParts,snapshot:s.snapshot,observation:s.observation}))});
+            const result=await generateReportExecutiveSummary({title,scope,projectCode,projectName,filters: { ...filters },sections:sections.map(s=>({title:s.title,description:s.description,selectedParts:s.selectedParts,snapshot:s.snapshot,observation:s.observation}))});
             setExecutiveSummary(result.summary);
         }catch(e){setAiError(e instanceof Error?e.message:"Failed to generate AI Executive Summary.");}finally{setAiLoading(false);}
     }
