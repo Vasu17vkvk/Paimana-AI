@@ -53,7 +53,12 @@ function uniqueRows(rows: Array<[string, string]>): Array<[string, string]> {
 }
 
 function sectionRows(section: SavedReport["sections"][number]): Array<[string, string]> {
-    const snapshot = section.snapshot as Record<string, unknown>;
+    const rawSnapshot = section.snapshot as Record<string, unknown>;
+    // Project-specific captures wrap the original analytics snapshot inside "data".
+    // Unwrap it here so PDF/Excel exports read the actual saved project analytics.
+    const snapshot = rawSnapshot && rawSnapshot.data && typeof rawSnapshot.data === "object" && !Array.isArray(rawSnapshot.data)
+        ? rawSnapshot.data as Record<string, unknown>
+        : rawSnapshot;
     const preferred = section.type === "overview" ? ["project", "key_facts"]
         : section.type === "risk" ? ["risk", "selectedRiskScore", "selectedRiskLevel"]
         : section.type === "cost" ? ["project", "key_facts", "cost_risk"]
@@ -69,7 +74,10 @@ function sectionRows(section: SavedReport["sections"][number]): Array<[string, s
 }
 
 function trendTableRows(section: SavedReport["sections"][number]): Array<Record<string, string>> {
-    const snapshot = section.snapshot as Record<string, unknown>;
+    const rawSnapshot = section.snapshot as Record<string, unknown>;
+    const snapshot = rawSnapshot && rawSnapshot.data && typeof rawSnapshot.data === "object" && !Array.isArray(rawSnapshot.data)
+        ? rawSnapshot.data as Record<string, unknown>
+        : rawSnapshot;
     const arrays = Object.entries(snapshot).filter(([, value]) => Array.isArray(value)) as Array<[string, unknown[]]>;
     const source = arrays.find(([, value]) => value.length && value.every((item) => item && typeof item === "object"))?.[1];
     if (!source) return [];
@@ -99,7 +107,7 @@ function chartRowsForSection(section: SavedReport["sections"][number]): Array<[s
 function formatReportValue(value: string): string {
     return value
         .replace(/\\u20b9/g, "₹")
-        .replace(/\\s+/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 }
 
