@@ -96,105 +96,6 @@ function chartRowsForSection(section: SavedReport["sections"][number]): Array<[s
         return [label as string, found ? (numericValue(found[1]) ?? 0) : NaN] as [string, number];
     }).filter(([, value]) => Number.isFinite(value));
 }
-function writeTable(pdf: jsPDF, headers: string[], rows: string[][], x: number, y: number, widths: number[], fontSize = 7.2): number {
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const totalWidth = widths.reduce((a, b) => a + b, 0);
-    const rowHeight = 7.5;
-    let cursorY = y;
-    const drawRow = (values: string[], header = false) => {
-        let cursorX = x;
-        pdf.setFillColor(header ? 239 : 255, header ? 242 : 255, header ? 246 : 255);
-        pdf.setDrawColor(220, 225, 231);
-        pdf.rect(x, cursorY, totalWidth, rowHeight, "FD");
-        values.forEach((value, index) => {
-            const cellWidth = widths[index];
-            pdf.setFont("helvetica", header ? "bold" : "normal");
-            pdf.setFontSize(fontSize);
-            pdf.setTextColor(header ? 51 : 67, header ? 65 : 78, header ? 85 : 92);
-            pdf.text(pdf.splitTextToSize(String(value || "—"), cellWidth - 4).slice(0, 2), cursorX + 2, cursorY + 4.6);
-            cursorX += cellWidth;
-            if (index < values.length - 1) pdf.line(cursorX, cursorY, cursorX, cursorY + rowHeight);
-        });
-        cursorY += rowHeight;
-    };
-    drawRow(headers, true);
-    rows.forEach((row) => {
-        if (cursorY + rowHeight > pageHeight - 18) {
-            pdf.addPage();
-            cursorY = 16;
-            drawRow(headers, true);
-        }
-        drawRow(row);
-    });
-    return cursorY;
-}
-function drawBarChart(pdf: jsPDF, title: string, items: Array<[string, number]>, x: number, y: number, width: number, height: number, suffix = ""): number {
-    if (!items.length) return y;
-    const max = Math.max(...items.map(([, value]) => value), 1);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
-    pdf.setTextColor(51, 65, 85);
-    pdf.text(title, x, y);
-    const top = y + 6;
-    const labelWidth = 34;
-    const barWidth = width - labelWidth - 18;
-    const gap = 7;
-    const barHeight = Math.min(9, Math.max(5, (height - 12 - (items.length - 1) * gap) / items.length));
-    items.forEach(([label, value], index) => {
-        const yy = top + index * (barHeight + gap);
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(6.8);
-        pdf.setTextColor(71, 84, 103);
-        pdf.text(label.slice(0, 22), x, yy + barHeight - 1);
-        pdf.setFillColor(235, 239, 243);
-        pdf.roundedRect(x + labelWidth, yy, barWidth, barHeight, 1.2, 1.2, "F");
-        pdf.setFillColor(71, 85, 105);
-        pdf.roundedRect(x + labelWidth, yy, Math.max(1, barWidth * Math.max(0, value) / max), barHeight, 1.2, 1.2, "F");
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(6.8);
-        pdf.setTextColor(51, 65, 85);
-        pdf.text(String(value.toFixed(1)) + suffix, x + labelWidth + barWidth + 2, yy + barHeight - 1);
-    });
-    return top + items.length * (barHeight + gap) + 2;
-}
-function drawLineChart(pdf: jsPDF, title: string, points: Array<[string, number]>, x: number, y: number, width: number, height: number): number {
-    if (points.length < 2) return y;
-    const values = points.map(([, value]) => value);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = max - min || 1;
-    const left = x + 12;
-    const top = y + 8;
-    const chartWidth = width - 18;
-    const chartHeight = height - 22;
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
-    pdf.setTextColor(51, 65, 85);
-    pdf.text(title, x, y);
-    pdf.setDrawColor(210, 216, 223);
-    pdf.line(left, top, left, top + chartHeight);
-    pdf.line(left, top + chartHeight, left + chartWidth, top + chartHeight);
-    const coords = points.map(([, value], index) => {
-        const px = left + (index / (points.length - 1)) * chartWidth;
-        const py = top + chartHeight - ((value - min) / range) * chartHeight;
-        return [px, py] as [number, number];
-    });
-    pdf.setDrawColor(71, 85, 105);
-    coords.slice(1).forEach((point, index) => pdf.line(coords[index][0], coords[index][1], point[0], point[1]));
-    coords.forEach(([px, py], index) => {
-        pdf.setFillColor(71, 85, 105);
-        pdf.circle(px, py, 1.3, "F");
-        if (index === 0 || index === points.length - 1 || points.length <= 6) {
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(5.7);
-            pdf.setTextColor(100, 112, 128);
-            pdf.text(points[index][0].slice(0, 12), px, top + chartHeight + 7, { align: "center" });
-        }
-    });
-    return top + chartHeight + 15;
-}
-
-
 function formatReportValue(value: string): string {
     return value
         .replace(/\\u20b9/g, "₹")
@@ -231,8 +132,6 @@ function exportXlsx(report: ReportExportData) {
     const risk = report.sections.find((s) => s.type === "risk");
     const cost = report.sections.find((s) => s.type === "cost");
     const schedule = report.sections.find((s) => s.type === "schedule");
-    const simulation = report.sections.find((s) => s.type === "prediction");
-    const recommendation = report.sections.find((s) => s.type === "recommendations");
 
     const rows: any[][] = [
         ["PAIMANA", "PROJECT MONITORING REPORT"],
@@ -374,9 +273,7 @@ function downloadPdf(report: ReportExportData) {
             const value = formatReportValue(rawValue);
             const valueLines = pdf.splitTextToSize(value || "—", col2 - 5);
             const rowHeight = Math.max(7, valueLines.length * lineHeight + 3);
-            if (y + rowHeight > bottom) {
-                y = addPage();
-            }
+            if (y + rowHeight > bottom) y = addPage();
             pdf.setFillColor(index % 2 === 0 ? 248 : 255, index % 2 === 0 ? 249 : 255, index % 2 === 0 ? 250 : 255);
             pdf.setDrawColor(225, 229, 234);
             pdf.rect(margin, y, col1, rowHeight, "FD");
@@ -395,6 +292,7 @@ function downloadPdf(report: ReportExportData) {
     };
 
     const cards = (items: Array<[string, string]>, y: number) => {
+        if (!items.length) return y;
         const gap = 3;
         const cardWidth = (contentWidth - gap * 3) / 4;
         const cardHeight = 18;
@@ -409,29 +307,28 @@ function downloadPdf(report: ReportExportData) {
             pdf.text(label.toUpperCase().slice(0, 20), x + 3, y + 5);
             pdf.setFontSize(10);
             pdf.setTextColor(25, 35, 47);
-            pdf.text(pdf.splitTextToSize(value, cardWidth - 6).slice(0, 2), x + 3, y + 11);
+            pdf.text(pdf.splitTextToSize(value || "—", cardWidth - 6).slice(0, 2), x + 3, y + 11);
         });
         return y + cardHeight + 7;
     };
 
     const chart = (title: string, items: Array<[string, number]>, y: number, suffix = "") => {
-        if (!items.length) return y;
         const valid = items.filter(([, value]) => Number.isFinite(value));
         if (!valid.length) return y;
         const max = Math.max(...valid.map(([, value]) => Math.abs(value)), 1);
+        if (y + 18 + valid.length * 10 > bottom) y = addPage();
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(8.5);
         pdf.setTextColor(45, 58, 72);
         pdf.text(title, margin, y);
         y += 6;
         valid.forEach(([label, value]) => {
-            if (y + 11 > bottom) y = addPage();
-            const barX = margin + 43;
-            const barW = contentWidth - 66;
             pdf.setFont("helvetica", "normal");
             pdf.setFontSize(6.8);
             pdf.setTextColor(75, 87, 101);
             pdf.text(label.slice(0, 22), margin, y + 4.5);
+            const barX = margin + 43;
+            const barW = contentWidth - 66;
             pdf.setFillColor(235, 238, 241);
             pdf.roundedRect(barX, y, barW, 6, 1, 1, "F");
             pdf.setFillColor(78, 91, 105);
@@ -449,7 +346,6 @@ function downloadPdf(report: ReportExportData) {
     const cost = report.sections.find((s) => s.type === "cost");
     const schedule = report.sections.find((s) => s.type === "schedule");
     const simulation = report.sections.find((s) => s.type === "prediction");
-    const recommendation = report.sections.find((s) => s.type === "recommendations");
 
     pdf.setProperties({
         title: report.title || "PAIMANA Project Monitoring Report",
@@ -461,11 +357,13 @@ function downloadPdf(report: ReportExportData) {
     pdf.setFillColor(31, 38, 46);
     pdf.rect(0, 0, pageWidth, 8, "F");
     let y = 20;
+
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(8);
     pdf.setTextColor(92, 105, 119);
     pdf.text("PAIMANA | PROJECT MONITORING & ANALYTICS", margin, y);
     y += 9;
+
     pdf.setFontSize(19);
     pdf.setTextColor(24, 34, 46);
     pdf.text(pdf.splitTextToSize(report.title || "Project Monitoring Report", contentWidth), margin, y);
@@ -478,86 +376,112 @@ function downloadPdf(report: ReportExportData) {
     pdf.text(projectLines, margin, y);
     y += projectLines.length * 4.5 + 5;
 
+    const overviewRows = overview ? sectionRows(overview) : [];
+    const riskRows = risk ? sectionRows(risk) : [];
+    const costRows = cost ? sectionRows(cost) : [];
+    const scheduleRows = schedule ? sectionRows(schedule) : [];
+    const simulationRows = simulation ? sectionRows(simulation) : [];
+
+    const status = findMetric(overviewRows, [/schedule status/i])?.[1]
+        || findMetric(scheduleRows, [/schedule status/i])?.[1]
+        || "—";
+    const riskLevel = findMetric(riskRows, [/risk level/i])?.[1] || "—";
+    const riskScore = findMetric(riskRows, [/risk score/i])?.[1] || "—";
+    const progress = findMetric([...overviewRows, ...scheduleRows, ...costRows], [/physical progress/i])?.[1] || "—";
+    const expenditure = findMetric([...costRows, ...overviewRows], [/expenditure/i])?.[1] || "—";
+    const delay = findMetric([...scheduleRows, ...overviewRows], [/delay.*days|schedule slippage/i])?.[1] || "—";
+
     y = cards([
         ["PROJECT CODE", report.projectCode || "—"],
-        ["REPORT TYPE", report.scope === "project" ? "Project Report" : "Portfolio Report"],
-        ["STATUS", findMetric(overview ? sectionRows(overview) : [], [/schedule status/i])?.[1] || "—"],
-        ["RISK", findMetric(risk ? sectionRows(risk) : [], [/risk level/i])?.[1] || "—"],
+        ["STATUS", status],
+        ["RISK", riskLevel],
+        ["RISK SCORE", riskScore],
     ], y);
 
-    y = sectionTitle("01", "Project Identity & Current Position", y);
-    const identityRows = overview ? sectionRows(overview).filter(([label]) =>
+    y = sectionTitle("01", "Project Overview & Current Position", y);
+    const identityRows = uniqueRows(overviewRows.filter(([label]) =>
         !/project code|project name/i.test(label) &&
-        /ministry|sector|state|implementing agency|schedule status|completion|physical progress|data completeness|data quality/i.test(label)
-    ) : [];
-    y = table(identityRows.slice(0, 14), y, "Project overview");
+        /ministry|sector|state|implementing agency|schedule status|completion|physical progress|data completeness|data quality|cost status/i.test(label)
+    ));
+    y = table(identityRows.slice(0, 18), y, "Project profile");
 
-    const kpis: Array<[string, string]> = [];
-    if (schedule) sectionRows(schedule).filter(([l]) => /delay|physical progress|completion/i.test(l)).forEach((r) => kpis.push(r));
-    if (cost) sectionRows(cost).filter(([l]) => /original cost|revised cost|expenditure/i.test(l)).forEach((r) => kpis.push(r));
-    if (risk) sectionRows(risk).filter(([l]) => /risk score|risk level|future delay|progress stall/i.test(l)).forEach((r) => kpis.push(r));
-    if (kpis.length) y = cards(uniqueRows(kpis).slice(0, 4), y);
+    const overviewTextRows = uniqueRows(overviewRows.filter(([label]) =>
+        /current position|summary|status|progress|expenditure|delay|risk/i.test(label)
+    ));
+    if (overviewTextRows.length) y = table(overviewTextRows.slice(0, 10), y, "Current monitoring position");
 
-    y = addPage();
-    y = sectionTitle("02", "Risk & Schedule Monitoring", y);
-    if (risk) {
-        y = table(sectionRows(risk).slice(0, 14), y, "Risk assessment");
-        const riskChart = chartRowsForSection(risk).map(([label, value]) => [label, value] as [string, number]);
-        y = chart("Risk indicator profile", riskChart, y, "%");
-    }
-    if (schedule) {
-        y = table(sectionRows(schedule).slice(0, 14), y, "Schedule & delay analysis");
-    }
+    const keyCards: Array<[string, string]> = [];
+    if (progress !== "—") keyCards.push(["PHYSICAL PROGRESS", progress]);
+    if (expenditure !== "—") keyCards.push(["EXPENDITURE", expenditure]);
+    if (delay !== "—") keyCards.push(["DELAY / SLIPPAGE", delay]);
+    const originalCost = findMetric(costRows, [/original cost/i])?.[1];
+    if (originalCost) keyCards.push(["ORIGINAL COST", originalCost]);
+    if (keyCards.length) y = cards(keyCards.slice(0, 4), y);
 
-    y = addPage();
-    y = sectionTitle("03", "Cost & Progress Monitoring", y);
-    if (cost) {
-        y = table(sectionRows(cost).slice(0, 14), y, "Financial position");
-        const costChart = chartRowsForSection(cost).map(([label, value]) => [label, value] as [string, number]);
-        y = chart("Cost position", costChart, y, " Cr");
-    }
-    if (overview) {
-        const progressRows = sectionRows(overview).filter(([label]) => /physical progress|expenditure|progress/i.test(label));
-        y = table(uniqueRows(progressRows).slice(0, 8), y, "Progress indicators");
+    if (riskRows.length || scheduleRows.length) {
+        if (y + 45 > bottom) y = addPage();
+        y = sectionTitle("02", "Risk & Schedule Analysis", y);
+        if (riskRows.length) {
+            y = table(riskRows.filter(([label]) => /risk|probability|score|cost/i.test(label)).slice(0, 12), y, "Risk assessment");
+            y = chart("Risk indicators", chartRowsForSection(risk!).map(([label, value]) => [label, value] as [string, number]), y, "%");
+        }
+        if (scheduleRows.length) {
+            y = table(scheduleRows.filter(([label]) => /delay|completion|schedule|progress/i.test(label)).slice(0, 12), y, "Schedule & delay position");
+        }
     }
 
-    y = addPage();
-    y = sectionTitle("04", "What-If Risk Simulation", y);
-    if (simulation) {
-        y = table(sectionRows(simulation), y, "Scenario inputs & result");
-        if (simulation.observation) y = wrappedText("Observation: " + simulation.observation, margin, y, contentWidth);
-    } else {
-        y = wrappedText("No What-If simulation was included in this report snapshot.", margin, y, contentWidth);
+    if (costRows.length || overviewRows.some(([label]) => /physical progress|expenditure/i.test(label))) {
+        if (y + 45 > bottom) y = addPage();
+        y = sectionTitle("03", "Cost & Progress Monitoring", y);
+        if (costRows.length) {
+            y = table(costRows.filter(([label]) => /cost|expenditure|financial|risk/i.test(label)).slice(0, 14), y, "Financial position");
+            y = chart("Cost position", chartRowsForSection(cost!).map(([label, value]) => [label, value] as [string, number]), y, " Cr");
+        }
+        const progressRows = uniqueRows([...overviewRows, ...scheduleRows].filter(([label]) => /physical progress|expenditure|progress/i.test(label)));
+        if (progressRows.length) y = table(progressRows.slice(0, 8), y, "Progress indicators");
     }
 
-    y = addPage();
-    y = sectionTitle("05", "Executive Summary & Officer Record", y);
-    if (report.observation) {
-        y = table([["Officer Observation", report.observation]], y);
-    }
-    if (recommendation?.observation) {
-        y = table([["Section Observation", recommendation.observation]], y);
+    if (simulationRows.length) {
+        if (y + 45 > bottom) y = addPage();
+        y = sectionTitle("04", "What-If Risk Simulation", y);
+        y = table(simulationRows, y, "Scenario inputs & simulated result");
+        if (simulation?.observation) y = wrappedText("Officer observation: " + simulation.observation, margin, y, contentWidth);
     }
 
     const groups = splitSummary(report.executiveSummary || "");
-    groups.forEach((group) => {
-        if (y + 18 > bottom) y = addPage();
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.setTextColor(42, 54, 68);
-        pdf.text(group.heading, margin, y);
-        y += 6;
-        group.bullets.forEach((bullet) => {
-            const lines = pdf.splitTextToSize("• " + bullet, contentWidth - 4);
-            if (y + lines.length * 4 + 4 > bottom) y = addPage();
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(8);
-            pdf.setTextColor(57, 68, 82);
-            pdf.text(lines, margin + 2, y);
-            y += lines.length * 4 + 3;
+    if (report.observation || groups.length) {
+        if (y + 45 > bottom) y = addPage();
+        y = sectionTitle("05", "Executive Summary & Officer Record", y);
+
+        if (report.observation) {
+            y = table([["Officer Observation", report.observation]], y);
+        }
+
+        groups.forEach((group) => {
+            if (y + 16 > bottom) y = addPage();
+            pdf.setFont("helvetica", "bold");
+            pdf.setFontSize(9);
+            pdf.setTextColor(42, 54, 68);
+            pdf.text(group.heading, margin, y);
+            y += 5;
+            group.bullets.forEach((bullet) => {
+                const lines = pdf.splitTextToSize("• " + bullet, contentWidth - 4);
+                if (y + lines.length * 4 + 4 > bottom) y = addPage();
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(8);
+                pdf.setTextColor(57, 68, 82);
+                pdf.text(lines, margin + 2, y);
+                y += lines.length * 4 + 3;
+            });
+            y += 2;
         });
-        y += 3;
-    });
+    }
+
+    if (report.description) {
+        if (y + 24 > bottom) y = addPage();
+        y = sectionTitle("06", "Report Scope & Note", y);
+        y = wrappedText(report.description, margin, y, contentWidth);
+    }
 
     footer();
     pdf.save((report.title || "PAIMANA_Project_Report").replace(/[^a-z0-9_-]+/gi, "_") + ".pdf");
