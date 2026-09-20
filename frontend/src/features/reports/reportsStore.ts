@@ -137,7 +137,7 @@ export const useReportsStore = create<ReportsState>()(
                     projectCode: state.projectCode,
                     projectName: state.projectName,
                     filters: { ...state.filters },
-                    sections: state.sections.map((section) => ({ ...section, selectedParts: [...section.selectedParts] })),
+                    sections: state.sections.map((section) => ({ ...section, selectedParts: [...(section.selectedParts ?? defaultReportParts)] })),
                     executiveSummary: state.executiveSummary,
                     createdAt: now,
                     updatedAt: now,
