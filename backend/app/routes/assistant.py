@@ -8,6 +8,9 @@ from sqlalchemy import text
 from app.extensions import db
 from app.services.assistant_service import answer_query
 
+from app.services.query_understanding_service import (
+    understand_query,
+)
 
 assistant_bp = Blueprint(
     "assistant",
@@ -65,6 +68,84 @@ def assistant_query():
 
         if not project_code:
             project_code = None
+
+    def _query_from_understanding_plan(
+        original_query: str,
+        plan: dict[str, Any],
+    ) -> str:
+        """
+        Convert Gemini's structured query plan into a canonical query
+        understood by the existing deterministic backend.
+
+        Gemini decides WHAT the user wants.
+        The existing backend decides HOW to retrieve the data.
+        """
+
+        intent = str(
+            plan.get("intent")
+            or ""
+        ).upper()
+
+        operation = str(
+            plan.get("operation")
+            or ""
+        ).upper()
+
+        filters = plan.get(
+            "filters"
+        ) or {}
+
+        # ---------------------------------------------------------------
+        # ANALYTICS
+        # ---------------------------------------------------------------
+
+        if intent == "ANALYTICS":
+
+            state = str(
+                filters.get("state")
+                or ""
+            ).strip()
+
+            schedule_status = str(
+                filters.get("schedule_status")
+                or ""
+            ).strip()
+
+            if (
+                operation == "LIST_PROJECTS"
+                and state
+                and schedule_status
+            ):
+                return (
+                    f"list {schedule_status.lower()} "
+                    f"projects in {state}"
+                )
+
+            if (
+                operation == "COUNT_PROJECTS"
+                and state
+            ):
+                return (
+                    f"how many projects are in {state}"
+                )
+
+        # ---------------------------------------------------------------
+        # RAG
+        # ---------------------------------------------------------------
+
+        if intent == "RAG":
+
+            retrieval_query = str(
+                plan.get(
+                    "retrieval_query"
+                )
+                or ""
+            ).strip()
+
+            if retrieval_query:
+                return retrieval_query
+
+        return original_query        
 
     # --------------------------------------------------------
     # Run assistant

@@ -58,6 +58,16 @@ from app.services.rag_service import (
     retrieve_knowledge,
 )
 
+from app.services.query_understanding_service import (
+    understand_query,
+)
+
+from app.services.project_analytics_service import (
+    load_master,
+    load_ml_ready,
+    model_scores_from_features_batch,
+)
+
 
 # ============================================================================
 # QUERY CLASSES
@@ -280,10 +290,13 @@ def _contains_any(
     keywords: tuple[str, ...],
 ) -> bool:
     return any(
-        keyword in query
+        re.search(
+            rf"(?<!\w){re.escape(keyword)}(?!\w)",
+            query,
+        )
+        is not None
         for keyword in keywords
     )
-
 
 def extract_project_code(
     query: str,
@@ -294,6 +307,25 @@ def extract_project_code(
 
     return match.group(0) if match else None
 
+def extract_project_codes(
+    query: str,
+) -> list[str]:
+    """
+    Extract all project codes from a user query.
+
+    Returns unique project codes in the order they appear.
+    """
+    matches = PROJECT_CODE_PATTERN.findall(
+        str(query)
+    )
+
+    return list(
+        dict.fromkeys(
+            match.strip()
+            for match in matches
+        )
+    )
+
 def _is_analytics_intent(
     normalized: str,
 ) -> bool:
@@ -303,7 +335,7 @@ def _is_analytics_intent(
     """
 
     count_pattern = (
-        r"\b(how many|number of|count of|total number of|"
+        r"\b(how many|how much|number of|count of|total number of|"
         r"total)\b.*\bprojects?\b"
     )
 
@@ -656,7 +688,13 @@ def classify_query(
         has_project
         and explicit_project_reference
     ):
-        return FACT_QUERY
+        # A bare project code should still open the project facts.
+        # Other ambiguous project questions should go through Gemini
+        # query understanding before choosing FACT / ML / HYBRID.
+        if normalized.strip() == str(resolved_project_code).strip():
+            return FACT_QUERY
+
+        return GENERAL_QUERY
 
     # ------------------------------------------------------------------
     # PROJECT-SPECIFIC FACT QUESTION WITHOUT PROJECT CODE
@@ -877,6 +915,644 @@ def _compact_predictions_for_prompt(
         )
     }
 
+def _multi_project_response(
+    question: str,
+    project_codes: list[str],
+) -> dict[str, Any]:
+    """
+    Build a deterministic response for questions involving
+    multiple explicitly referenced projects.
+
+    PostgreSQL remains the source of truth.
+    Gemini is not required for these fact/comparison requests.
+    """
+
+    contexts: list[dict[str, Any]] = []
+
+    for code in project_codes:
+        context = get_project_context(
+            code
+        )
+
+        if context:
+            contexts.append(
+                context
+            )
+
+    if not contexts:
+        return {
+            "text": (
+                "I could not find the requested projects "
+                "in the NIRMAAN project database."
+            ),
+            "query_type": FACT_QUERY,
+            "project_code": ", ".join(
+                project_codes
+            ),
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+    normalized = _normalise_query(
+        question
+    )
+
+    compare_requested = bool(
+        re.search(
+            r"\b(?:compare|comparison|versus|vs)\b",
+            normalized,
+        )
+    )
+
+    lines: list[str] = []
+
+    if compare_requested:
+        lines.append(
+            "Project comparison"
+        )
+    else:
+        lines.append(
+            "Project overviews"
+        )
+
+    lines.append("")
+
+    for index, context in enumerate(
+        contexts
+    ):
+        project = (
+            context.get("project")
+            or {}
+        )
+
+        predictions = (
+            context.get("predictions")
+            or {}
+        )
+
+        if index > 0:
+            lines.append("")
+            lines.append(
+                "----------------------------------------"
+            )
+            lines.append("")
+
+        code = project.get(
+            "project_code"
+        )
+
+        lines.append(
+            f"Project {code}"
+        )
+
+        lines.append(
+            f"Name: "
+            f"{project.get('project_name') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Ministry: "
+            f"{project.get('ministry') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Sector: "
+            f"{project.get('sector') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"State: "
+            f"{project.get('state') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Implementing agency: "
+            f"{project.get('implementing_agency') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Schedule status: "
+            f"{project.get('schedule_status') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Cost status: "
+            f"{project.get('cost_status') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Original completion: "
+            f"{project.get('original_completion') or 'unavailable'}"
+        )
+
+        lines.append(
+            f"Revised completion: "
+            f"{project.get('revised_completion') or 'unavailable'}"
+        )
+
+        delay_days = project.get(
+            "delay_days"
+        )
+
+        lines.append(
+            "Recorded delay: "
+            + (
+                f"{_format_number(delay_days, 0)} days"
+                if delay_days is not None
+                else "unavailable"
+            )
+        )
+
+        physical_progress = project.get(
+            "physical_progress_pct"
+        )
+
+        lines.append(
+            "Physical progress: "
+            + (
+                f"{_format_number(physical_progress, 1)}%"
+                if physical_progress is not None
+                else "unavailable"
+            )
+        )
+
+        original_cost = project.get(
+            "original_cost_cr"
+        )
+
+        lines.append(
+            "Original cost: "
+            + (
+                f"₹{_format_number(original_cost)} Cr"
+                if original_cost is not None
+                else "unavailable"
+            )
+        )
+
+        expenditure = project.get(
+            "expenditure_cr"
+        )
+
+        lines.append(
+            "Expenditure: "
+            + (
+                f"₹{_format_number(expenditure)} Cr"
+                if expenditure is not None
+                else "unavailable"
+            )
+        )
+
+        overall_risk = predictions.get(
+            "overall_risk"
+        )
+
+        risk_level = predictions.get(
+            "risk_level"
+        )
+
+        if (
+            overall_risk is not None
+            or risk_level
+        ):
+            lines.append(
+                "Overall risk: "
+                + (
+                    _format_number(
+                        overall_risk,
+                        2,
+                    )
+                    if overall_risk is not None
+                    else "unavailable"
+                )
+                + (
+                    f" ({risk_level})"
+                    if risk_level
+                    else ""
+                )
+            )
+
+        future_delay = predictions.get(
+            "future_delay_probability"
+        )
+
+        if future_delay is not None:
+            lines.append(
+                "Future delay probability: "
+                f"{_format_probability(future_delay)}"
+            )
+
+        stall_probability = predictions.get(
+            "progress_stall_probability"
+        )
+
+        if stall_probability is not None:
+            lines.append(
+                "Progress stall probability: "
+                f"{_format_probability(stall_probability)}"
+            )
+
+        cost_risk = predictions.get(
+            "cost_risk"
+        )
+
+        if cost_risk is not None:
+            lines.append(
+                "Cost risk: "
+                f"{_format_number(cost_risk, 1)}%"
+            )
+
+    return {
+        "text": "\n".join(
+            lines
+        ),
+        "query_type": FACT_QUERY,
+        "project_code": ", ".join(
+            project_codes
+        ),
+        "citations": [],
+        "retrieved_chunks": [],
+        "model_used": False,
+        "source": "postgresql",
+    }
+
+def _multi_project_ml_response(
+    question: str,
+    project_codes: list[str],
+) -> dict[str, Any]:
+    """
+    Return ML/prediction information for multiple projects.
+
+    PostgreSQL + existing NIRMAAN ML engine remain the source of truth.
+    """
+
+    lines = [
+        "Project risk comparison",
+        "",
+    ]
+
+    found_any = False
+
+    for index, code in enumerate(project_codes):
+        context = get_project_context(
+            code
+        )
+
+        if not context:
+            continue
+
+        found_any = True
+
+        project = (
+            context.get("project")
+            or {}
+        )
+
+        predictions = (
+            context.get("predictions")
+            or {}
+        )
+
+        if index > 0 and found_any:
+            lines.append(
+                "----------------------------------------"
+            )
+            lines.append("")
+
+        lines.append(
+            f"Project {project.get('project_code', code)}"
+        )
+
+        lines.append(
+            f"Name: "
+            f"{project.get('project_name') or 'unavailable'}"
+        )
+
+        lines.append(
+            "Overall risk score: "
+            + (
+                _format_number(
+                    predictions.get(
+                        "overall_risk"
+                    ),
+                    2,
+                )
+                if predictions.get(
+                    "overall_risk"
+                ) is not None
+                else "unavailable"
+            )
+        )
+
+        lines.append(
+            "Risk level: "
+            f"{predictions.get('risk_level') or 'unavailable'}"
+        )
+
+        lines.append(
+            "Future delay probability: "
+            + (
+                _format_probability(
+                    predictions.get(
+                        "future_delay_probability"
+                    )
+                )
+                if predictions.get(
+                    "future_delay_probability"
+                ) is not None
+                else "unavailable"
+            )
+        )
+
+        lines.append(
+            "Progress stall probability: "
+            + (
+                _format_probability(
+                    predictions.get(
+                        "progress_stall_probability"
+                    )
+                )
+                if predictions.get(
+                    "progress_stall_probability"
+                ) is not None
+                else "unavailable"
+            )
+        )
+
+        lines.append(
+            "Cost risk: "
+            + (
+                f"{_format_number(predictions.get('cost_risk'), 1)}%"
+                if predictions.get(
+                    "cost_risk"
+                ) is not None
+                else "unavailable"
+            )
+        )
+
+    if not found_any:
+        return {
+            "text": (
+                "I could not find the requested projects "
+                "in the NIRMAAN project database."
+            ),
+            "query_type": ML_QUERY,
+            "project_code": ", ".join(
+                project_codes
+            ),
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+    return {
+        "text": "\n".join(lines),
+        "query_type": ML_QUERY,
+        "project_code": ", ".join(
+            project_codes
+        ),
+        "citations": [],
+        "retrieved_chunks": [],
+        "model_used": False,
+        "source": "postgresql",
+    }
+
+
+def _multi_project_hybrid_response(
+    question: str,
+    project_codes: list[str],
+) -> dict[str, Any]:
+    """
+    Answer a multi-project reasoning question using:
+
+        PostgreSQL project context
+        +
+        ML predictions
+        +
+        local RAG
+        +
+        one final Gemini call
+    """
+
+    project_contexts: list[dict[str, Any]] = []
+
+    for code in project_codes:
+        context = get_project_context(
+            code
+        )
+
+        if context:
+            project_contexts.append(
+                context
+            )
+
+    if not project_contexts:
+        return {
+            "text": (
+                "I could not find the requested projects "
+                "in the NIRMAAN project database."
+            ),
+            "query_type": HYBRID_QUERY,
+            "project_code": ", ".join(
+                project_codes
+            ),
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+    # ---------------------------------------------------------------
+    # Local RAG retrieval.
+    # ---------------------------------------------------------------
+
+    rag_chunks = retrieve_knowledge(
+        question,
+        top_k=RAG_TOP_K,
+    )
+
+    # ---------------------------------------------------------------
+    # Build compact multi-project context.
+    # ---------------------------------------------------------------
+
+    project_sections: list[str] = []
+
+    for context in project_contexts:
+        compact = _compact_project_context(
+            context
+        )
+
+        project_sections.append(
+            _json_compact(
+                {
+                    "project": compact["project"],
+                    "predicted": compact["predicted"],
+                    "indicators": compact["indicators"],
+                    "history": compact["history"],
+                    "progress": compact["progress"],
+                }
+            )
+        )
+
+    serialized_projects = "\n\n".join(
+        project_sections
+    )
+
+    rag_parts: list[str] = []
+
+    for index, chunk in enumerate(
+        rag_chunks,
+        start=1,
+    ):
+        content = str(
+            chunk.get(
+                "chunk_text"
+            )
+            or ""
+        ).strip()
+
+        if not content:
+            continue
+
+        rag_parts.append(
+            f"[Source {index}]\n{content}"
+        )
+
+    rag_text = (
+        "\n\n".join(
+            rag_parts
+        )
+        if rag_parts
+        else
+        "No RAG passages were retrieved."
+    )
+
+    prompt = f"""
+USER QUESTION:
+
+{question}
+
+
+==================================================
+OBSERVED PROJECTS
+==================================================
+
+{serialized_projects}
+
+
+==================================================
+GENERAL KNOWLEDGE
+==================================================
+
+{rag_text}
+
+
+==================================================
+ANSWERING RULES
+==================================================
+
+1. Use the supplied PostgreSQL project context for observed facts.
+
+2. Use the supplied ML values exactly as provided.
+
+3. Use retrieved RAG passages only for general knowledge,
+   explanations, and mitigation guidance.
+
+4. Do not invent project-specific causes.
+
+5. Do not treat a general cause as a confirmed cause of either
+   project unless the supplied project evidence supports it.
+
+6. Clearly distinguish observed facts, predicted values,
+   and general knowledge.
+
+7. When using RAG knowledge, cite it as [Source N].
+
+8. Answer the user's comparison/reasoning question directly.
+
+9. Keep the answer concise and practical.
+""".strip()
+
+    response = generate_grounded_response(
+        prompt,
+        system_instruction=(
+            HYBRID_SYSTEM_INSTRUCTION
+        ),
+    )
+
+    return {
+        "text": response.get(
+            "text",
+            "",
+        ),
+        "query_type": HYBRID_QUERY,
+        "project_code": ", ".join(
+            project_codes
+        ),
+        "citations": _build_rag_citations(
+            rag_chunks
+        ),
+        "retrieved_chunks": [
+            {
+                "id": chunk.get("id"),
+                "document_name": chunk.get(
+                    "document_name"
+                ),
+                "document_type": chunk.get(
+                    "document_type"
+                ),
+                "source": chunk.get(
+                    "source"
+                ),
+                "page_number": chunk.get(
+                    "page_number"
+                ),
+                "section_title": chunk.get(
+                    "section_title"
+                ),
+                "topic": chunk.get(
+                    "topic"
+                ),
+                "country": chunk.get(
+                    "country"
+                ),
+                "document_year": chunk.get(
+                    "document_year"
+                ),
+                "vector_score": chunk.get(
+                    "vector_score"
+                ),
+                "keyword_score": chunk.get(
+                    "keyword_score"
+                ),
+                "rrf_score": chunk.get(
+                    "rrf_score"
+                ),
+                "vector_rank": chunk.get(
+                    "vector_rank"
+                ),
+                "keyword_rank": chunk.get(
+                    "keyword_rank"
+                ),
+            }
+            for chunk in rag_chunks
+        ],
+        "model_used": bool(
+            response.get(
+                "model"
+            )
+        ),
+        "model": response.get(
+            "model"
+        ),
+        "usage": response.get(
+            "usage",
+            {},
+        ),
+        "source": "postgresql_pgvector",
+    }    
 
 # ============================================================================
 # DETERMINISTIC FACT RESPONSE
@@ -1747,6 +2423,446 @@ def _analytics_response(
     )
 
         # ---------------------------------------------------------------
+    # HIGHEST-RISK SECTOR
+    # ---------------------------------------------------------------
+
+        # ---------------------------------------------------------------
+    # HIGHEST-RISK SECTOR
+    # ---------------------------------------------------------------
+
+    highest_risk_sector_requested = (
+        re.search(
+            r"\b(?:which|what)\b.*"
+            r"\bsectors?\b.*"
+            r"\b(?:highest|most|greatest)\b.*"
+            r"\brisk\b",
+            normalized,
+        )
+        is not None
+        or re.search(
+            r"\b(?:highest|most|greatest)\s+risk\b.*"
+            r"\bsectors?\b",
+            normalized,
+        )
+        is not None
+    )
+
+    if highest_risk_sector_requested:
+        ml_ready = load_ml_ready()
+        master = load_master()
+
+        if (
+            ml_ready is None
+            or ml_ready.empty
+            or master is None
+            or master.empty
+        ):
+            return {
+                "text": (
+                    "Project ML or master data is unavailable."
+                ),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        latest_rows = ml_ready.copy()
+
+        sort_columns = [
+            column
+            for column in [
+                "project_code",
+                "snapshot_year",
+                "snapshot_month_num",
+            ]
+            if column in latest_rows.columns
+        ]
+
+        if (
+            "project_code" in latest_rows.columns
+            and len(sort_columns) >= 2
+        ):
+            latest_rows = latest_rows.sort_values(
+                sort_columns
+            )
+
+            latest_rows = (
+                latest_rows
+                .drop_duplicates(
+                    subset=["project_code"],
+                    keep="last",
+                )
+            )
+
+        scores = model_scores_from_features_batch(
+            latest_rows
+        )
+
+        master_for_merge = master[
+            [
+                "project_code",
+                "sector",
+            ]
+        ].copy()
+
+        master_for_merge["project_code"] = (
+            master_for_merge["project_code"]
+            .astype(str)
+            .str.strip()
+        )
+
+        scores["project_code"] = (
+            scores["project_code"]
+            .astype(str)
+            .str.strip()
+        )
+
+        scored_projects = scores.merge(
+            master_for_merge,
+            on="project_code",
+            how="left",
+        )
+
+        scored_projects = scored_projects[
+            scored_projects["sector"].notna()
+        ]
+
+        scored_projects = scored_projects[
+            scored_projects["sector"]
+            .astype(str)
+            .str.strip()
+            .ne("")
+        ]
+
+        if scored_projects.empty:
+            return {
+                "text": (
+                    "No sector risk data is available."
+                ),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        sector_risk = (
+            scored_projects
+            .groupby("sector", as_index=False)
+            .agg(
+                average_risk_score=(
+                    "overall_risk_score",
+                    "mean",
+                ),
+                project_count=(
+                    "project_code",
+                    "count",
+                ),
+            )
+            .sort_values(
+                [
+                    "average_risk_score",
+                    "sector",
+                ],
+                ascending=[
+                    False,
+                    True,
+                ],
+            )
+        )
+
+        row = sector_risk.iloc[0]
+
+        return {
+            "text": (
+                "Sector with highest average risk score: "
+                f"{row['sector']}\n"
+                "Average risk score: "
+                f"{float(row['average_risk_score']):.2f}\n"
+                "Projects in sector: "
+                f"{int(row['project_count'])}"
+            ),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+
+    # ---------------------------------------------------------------
+    # LIST PROJECTS BY MINISTRY
+    # ---------------------------------------------------------------
+
+    project_ministry_match = re.search(
+        r"\bprojects?\b.*"
+        r"\b(?:of|under|from)\s+"
+        r"((?:ministry|department)\b.+?)\s*$",
+        normalized,
+    )
+
+    if project_ministry_match:
+        requested_ministry = (
+            project_ministry_match
+            .group(1)
+            .strip()
+        )
+
+        result = db.session.execute(
+            text(
+                """
+                SELECT
+                    project_code,
+                    project_name,
+                    ministry,
+                    sector,
+                    flash_state
+                FROM project_master
+                WHERE LOWER(TRIM(ministry))
+                      = LOWER(:ministry)
+                ORDER BY project_code
+                """
+            ),
+            {
+                "ministry": requested_ministry,
+            },
+        )
+
+        projects = [
+            dict(row)
+            for row in result.mappings()
+        ]
+
+        if not projects:
+            return {
+                "text": (
+                    f"No projects were found under "
+                    f"{requested_ministry}."
+                ),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        lines = [
+            (
+                f"Projects under {requested_ministry}: "
+                f"{len(projects)}"
+            )
+        ]
+
+        for project in projects:
+            lines.append(
+                f"- {project['project_code']}: "
+                f"{project['project_name']}"
+            )
+
+        return {
+            "text": "\n".join(lines),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+
+    # ---------------------------------------------------------------
+    # COUNT CRITICAL PROJECTS
+    # ---------------------------------------------------------------
+
+        # ---------------------------------------------------------------
+    # COUNT CRITICAL PROJECTS
+    # ---------------------------------------------------------------
+
+    critical_project_requested = (
+        re.search(
+            r"\b(?:how many|how much|number of|count of|total)\b.*"
+            r"\bprojects?\b.*\bcritical\b",
+            normalized,
+        )
+        is not None
+        or re.search(
+            r"\bcritical\b.*\bprojects?\b",
+            normalized,
+        )
+        is not None
+    )
+
+    if critical_project_requested:
+        ml_ready = load_ml_ready()
+
+        if ml_ready is None or ml_ready.empty:
+            return {
+                "text": "ML project data is unavailable.",
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        latest_rows = ml_ready.copy()
+
+        sort_columns = [
+            column
+            for column in [
+                "project_code",
+                "snapshot_year",
+                "snapshot_month_num",
+            ]
+            if column in latest_rows.columns
+        ]
+
+        if (
+            "project_code" in latest_rows.columns
+            and len(sort_columns) >= 2
+        ):
+            latest_rows = latest_rows.sort_values(
+                sort_columns
+            )
+
+            latest_rows = (
+                latest_rows
+                .drop_duplicates(
+                    subset=["project_code"],
+                    keep="last",
+                )
+            )
+
+        scores = model_scores_from_features_batch(
+            latest_rows
+        )
+
+        critical_count = int(
+            (
+                scores["risk_level"]
+                .astype(str)
+                .str.upper()
+                .eq("CRITICAL")
+            ).sum()
+        )
+
+        return {
+            "text": (
+                f"Critical projects: {critical_count}"
+            ),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }
+
+
+    # ---------------------------------------------------------------
+    # LIST PROJECTS BY STATE
+    # ---------------------------------------------------------------
+
+    project_list_requested = bool(
+        re.search(
+            r"\b(?:give|show|list|get|which|what)\b",
+            normalized,
+        )
+    ) and "projects" in normalized
+
+    requested_state = None
+
+    if project_list_requested and "delayed" not in normalized:
+        canonical_states = sorted(
+            INDIA_STATES_AND_UTS,
+            key=len,
+            reverse=True,
+        )
+
+        for state_name in canonical_states:
+            if re.search(
+                rf"(?<!\w){re.escape(state_name.lower())}(?!\w)",
+                normalized,
+            ):
+                requested_state = state_name
+                break
+
+        if requested_state:
+            result = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        project_code,
+                        project_name,
+                        ministry,
+                        sector,
+                        flash_state
+                    FROM project_master
+                    WHERE flash_state IS NOT NULL
+                    """
+                )
+            )
+
+            projects = []
+
+            for row in result.mappings():
+                project_states = _extract_project_states(
+                    row["flash_state"]
+                )
+
+                if requested_state in project_states:
+                    projects.append(
+                        {
+                            "project_code": row["project_code"],
+                            "project_name": row["project_name"],
+                        }
+                    )
+
+            if not projects:
+                return {
+                    "text": (
+                        f"No projects were found in "
+                        f"{requested_state}."
+                    ),
+                    "query_type": ANALYTICS_QUERY,
+                    "project_code": None,
+                    "citations": [],
+                    "retrieved_chunks": [],
+                    "model_used": False,
+                    "source": "postgresql",
+                }
+
+            lines = [
+                (
+                    f"Projects in {requested_state}: "
+                    f"{len(projects)}"
+                )
+            ]
+
+            for project in projects:
+                lines.append(
+                    f"- {project['project_code']}: "
+                    f"{project['project_name']}"
+                )
+
+            return {
+                "text": "\n".join(lines),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        # ---------------------------------------------------------------
     # LIST ALL MINISTRIES / SECTORS
     # ---------------------------------------------------------------
 
@@ -1920,12 +3036,21 @@ def _analytics_response(
     # LIST DELAYED PROJECTS BY STATE
     # ---------------------------------------------------------------
 
-    delayed_project_match = re.search(
-        r"\b(?:which|what|list|show)\b.*"
-        r"\bprojects?\b.*"
-        r"\bdelayed\b.*"
-        r"\b(?:in|from)\s+(.+?)\s*$",
-        normalized,
+    delayed_project_match = (
+        re.search(
+            r"\b(?:which|what)\b.*"
+            r"\bprojects?\b.*"
+            r"\bdelayed\b.*"
+            r"\b(?:in|from)\s+(.+?)\s*$",
+            normalized,
+        )
+        or
+        re.search(
+            r"\b(?:list|show)\b.*"
+            r"\bdelayed\s+projects?\b.*"
+            r"\b(?:in|from)\s+(.+?)\s*$",
+            normalized,
+        )
     )
 
     if delayed_project_match:
@@ -2289,6 +3414,44 @@ def _analytics_response(
         "source": "postgresql",
     }    
 
+def _query_from_understanding_plan(original_query, plan):
+    """
+    Convert Gemini's structured query-understanding result into a
+    deterministic backend query that existing handlers can process.
+    """
+    if not plan:
+        return original_query
+
+    intent = str(plan.get("intent") or "").upper()
+    operation = str(plan.get("operation") or "").upper()
+    filters = plan.get("filters") or {}
+    retrieval_query = (plan.get("retrieval_query") or "").strip()
+
+    state = filters.get("state")
+    schedule_status = filters.get("schedule_status")
+
+    # Portfolio analytics: list projects matching state + schedule status.
+    if (
+        intent == "ANALYTICS"
+        and operation == "LIST_PROJECTS"
+        and state
+        and schedule_status
+    ):
+        return f"which projects are {schedule_status.lower()} in {state}"
+
+    # Portfolio analytics: count projects in a state.
+    if (
+        intent == "ANALYTICS"
+        and operation == "COUNT_PROJECTS"
+        and state
+    ):
+        return f"how many projects are in {state}"
+
+    # RAG: use Gemini's normalized retrieval query.
+    if intent == "RAG" and retrieval_query:
+        return retrieval_query
+
+    return original_query
 
 # ============================================================================
 # MAIN ORCHESTRATION
@@ -2313,6 +3476,40 @@ def answer_query(
             "question is required."
         )
 
+    # ---------------------------------------------------------------
+    # MULTI-PROJECT REQUEST
+    # ---------------------------------------------------------------
+
+    project_codes = extract_project_codes(query)
+    if len(project_codes) >= 2:
+        normalized = _normalise_query(query)
+
+        # Deterministic routing for multi-project questions.
+        # Do this before Gemini understanding so obvious intents
+        # are not incorrectly promoted to HYBRID.
+        if _contains_any(
+            normalized,
+            (
+                "why",
+                "cause",
+                "caused",
+                "causing",
+                "reason",
+                "mitigate",
+                "mitigation",
+                "recommend",
+                "solution",
+                "fix",
+                "what should we do",
+            ),
+        ):
+            return _multi_project_hybrid_response(query, project_codes)
+
+        if _contains_any(normalized, ML_KEYWORDS):
+            return _multi_project_ml_response(query, project_codes)
+
+        return _multi_project_response(query, project_codes)
+
     # ------------------------------------------------------------------
     # Resolve project code.
     # ------------------------------------------------------------------
@@ -2333,6 +3530,84 @@ def answer_query(
         query,
         resolved_project_code,
     )
+
+        # ---------------------------------------------------------------
+    # Gemini query understanding fallback.
+    #
+    # We do NOT call Gemini for confidently handled FACT, ML, or
+    # ANALYTICS requests.
+    #
+    # RAG, HYBRID, and previously-GENERAL requests may benefit from
+    # natural-language understanding, Hinglish normalization,
+    # spelling correction, and retrieval-query rewriting.
+    # ---------------------------------------------------------------
+
+    understanding_plan: dict[str, Any] | None = None
+
+    if query_type in {
+        RAG_QUERY,
+        HYBRID_QUERY,
+        GENERAL_QUERY,
+    }:
+        try:
+            understanding_plan = (
+                understand_query(
+                    query
+                )
+            )
+        except Exception as exc:
+            print(
+                "QUERY UNDERSTANDING ERROR:",
+                repr(exc),
+            )
+            understanding_plan = None
+
+        if understanding_plan:
+            understood_intent = str(
+                understanding_plan.get(
+                    "intent"
+                )
+                or ""
+            ).upper()
+
+            understood_project_code = (
+                understanding_plan.get(
+                    "project_code"
+                )
+            )
+
+            if (
+                understood_project_code
+                and not resolved_project_code
+            ):
+                resolved_project_code = str(
+                    understood_project_code
+                )
+
+            # Gemini may identify a previously-unrecognized
+            # project/portfolio intent.
+            if understood_intent == "FACT":
+                query_type = FACT_QUERY
+
+            elif understood_intent == "ML":
+                query_type = ML_QUERY
+
+            elif understood_intent == "ANALYTICS":
+                query_type = ANALYTICS_QUERY
+
+            elif understood_intent == "RAG":
+                query_type = RAG_QUERY
+
+            elif understood_intent == "HYBRID":
+                query_type = HYBRID_QUERY
+
+            elif understood_intent == "GENERAL":
+                query_type = GENERAL_QUERY
+
+            query = _query_from_understanding_plan(
+                query,
+                understanding_plan,
+            )
 
     # ------------------------------------------------------------------
     # Load project context only for:
