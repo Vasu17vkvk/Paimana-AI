@@ -63,6 +63,8 @@ import {
     getActiveWarnings,
 } from "../../services/warningsApi";
 
+import SaveToReport from "../reports/SaveToReport";
+
 
 /* =========================================================
    TYPES
