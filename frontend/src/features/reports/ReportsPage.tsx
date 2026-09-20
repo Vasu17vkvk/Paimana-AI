@@ -46,61 +46,160 @@ function styleSheet(ws: XLSX.WorkSheet, widths: number[], freeze = "A2") {
     if (freeze) ws["!freeze"] = freeze;
 }
 
+function humanLabel(key: string): string {
+    return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function shortValue(value: unknown): string {
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "number") return Number.isFinite(value) ? value.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    if (typeof value === "string") return value;
+    return "—";
+}
+
+function collectPrimitiveRows(value: unknown, prefix = ""): Array<[string, string]> {
+    if (value === null || value === undefined || value === "") return prefix ? [[humanLabel(prefix), "—"]] : [];
+    if (Array.isArray(value)) return [];
+    if (typeof value !== "object") return prefix ? [[humanLabel(prefix), shortValue(value)]] : [];
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
+        const path = prefix ? prefix + "_" + key : key;
+        if (Array.isArray(item) || (item && typeof item === "object")) return collectPrimitiveRows(item, path);
+        return [[humanLabel(path), shortValue(item)]];
+    });
+}
+
+function uniqueRows(rows: Array<[string, string]>): Array<[string, string]> {
+    const seen = new Set<string>();
+    return rows.filter(([label, value]) => {
+        const key = label + "|" + value;
+        if (seen.has(key) || value === "—") return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function sectionRows(section: SavedReport["sections"][number]): Array<[string, string]> {
+    const snapshot = section.snapshot as Record<string, unknown>;
+    const preferred = section.type === "overview" ? ["project", "key_facts"]
+        : section.type === "risk" ? ["risk", "selectedRiskScore", "selectedRiskLevel"]
+        : section.type === "cost" ? ["project", "key_facts", "cost_risk"]
+        : section.type === "schedule" ? ["project", "key_facts", "risk", "delay_reasons"]
+        : section.type === "prediction" ? ["project_code", "project_name", "scenario_inputs", "result"]
+        : section.type === "recommendations" ? ["delay_reasons"]
+        : Object.keys(snapshot);
+    const rows: Array<[string, string]> = [];
+    preferred.forEach((key) => {
+        if (key in snapshot) rows.push(...collectPrimitiveRows(snapshot[key], key));
+    });
+    return uniqueRows(rows);
+}
+
+function trendTableRows(section: SavedReport["sections"][number]): Array<Record<string, string>> {
+    const snapshot = section.snapshot as Record<string, unknown>;
+    const arrays = Object.entries(snapshot).filter(([, value]) => Array.isArray(value)) as Array<[string, unknown[]]>;
+    const source = arrays.find(([, value]) => value.length && value.every((item) => item && typeof item === "object"))?.[1];
+    if (!source) return [];
+    return source.map((item) => Object.fromEntries(collectPrimitiveRows(item).map(([label, value]) => [label, value])));
+}
+
 function exportXlsx(report: ReportExportData) {
     const wb = XLSX.utils.book_new();
     const createdAt = "createdAt" in report ? new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN") : new Date().toLocaleString("en-IN");
-
-    const summaryRows:any[][] = [
-        ["PAIMANA REPORT"],
-        ["Report Title", report.title || "PAIMANA Project Report"],
-        ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
+    const overview: any[][] = [
+        ["PAIMANA PROJECT REPORT"],
+        [report.title || "Project Monitoring Report"],
+        ["Generated", createdAt],
+        [],
+        ["PROJECT IDENTITY"],
         ["Project Code", report.projectCode || "—"],
         ["Project Name", report.projectName || "—"],
+        ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
         ["Description", report.description || "—"],
-        ["Observation", report.observation || "—"],
-        ["Created At", createdAt],
-        [],
-        ["FILTER", "VALUE"],
-        ...Object.entries(report.filters).map(([k,v]) => [k.replace(/([A-Z])/g, " $1"), v || "—"]),
     ];
-    if (report.executiveSummary) summaryRows.push([], ["AI EXECUTIVE SUMMARY"], [report.executiveSummary]);
-
-    const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows);
-    summaryWs["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:1} }];
-    summaryWs["A1"].s = { font:{ bold:true, sz:16 }, alignment:{ horizontal:"left" } };
-    styleSheet(summaryWs, [28, 72], "");
-    summaryWs["!rows"] = [{ hpt:28 }];
-    XLSX.utils.book_append_sheet(wb, summaryWs, "Report Summary");
-
-    const sectionRows:any[][] = [["No.","Section","Description","Captured At","Selected Parts","Observation"]];
-    report.sections.forEach((s,i) => sectionRows.push([
-        i + 1,
-        s.title,
-        s.description,
-        new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN"),
-        (s.selectedParts ?? defaultReportParts).map(partLabel).join(", "),
-        s.observation || "—",
-    ]));
-    const sectionWs = XLSX.utils.aoa_to_sheet(sectionRows);
-    styleSheet(sectionWs, [8, 28, 52, 24, 52, 42]);
-    XLSX.utils.book_append_sheet(wb, sectionWs, "Sections");
-
-    const snapshotRows:any[][] = [["Section","Field / Path","Value"]];
-    report.sections.forEach((s) => {
-        flattenSnapshot(s.snapshot).forEach(([path,value]) => snapshotRows.push([s.title, path, value]));
+    if (report.scope === "portfolio") overview.push([], ["REPORT FILTERS"], ...Object.entries(report.filters).map(([k, v]) => [humanLabel(k), v || "—"]));
+    report.sections.filter((s) => ["overview","risk","cost","schedule","prediction","recommendations"].includes(s.type)).forEach((s) => {
+        const rows = sectionRows(s);
+        if (!rows.length) return;
+        overview.push([], [s.title.toUpperCase()]);
+        rows.forEach(([label, value]) => overview.push([label, value]));
+        if (s.observation) overview.push(["Officer Observation", s.observation]);
     });
-    const snapshotWs = XLSX.utils.aoa_to_sheet(snapshotRows);
-    styleSheet(snapshotWs, [28, 62, 72]);
-    XLSX.utils.book_append_sheet(wb, snapshotWs, "Snapshot Data");
+    if (report.executiveSummary) overview.push([], ["AI EXECUTIVE SUMMARY"], [report.executiveSummary]);
+    if (report.observation) overview.push([], ["REPORT OBSERVATION"], [report.observation]);
+    const overviewWs = XLSX.utils.aoa_to_sheet(overview);
+    overviewWs["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:1} }, { s:{r:1,c:0}, e:{r:1,c:1} }];
+    overviewWs["!cols"] = [{wch:30},{wch:88}];
+    overviewWs["!rows"] = [{hpt:28},{hpt:24}];
+    XLSX.utils.book_append_sheet(wb, overviewWs, "Project Overview");
 
+    const detailRows: any[][] = [["SECTION","POINT","VALUE","CAPTURED AT","OBSERVATION"]];
+    report.sections.forEach((s) => {
+        const rows = sectionRows(s);
+        if (!rows.length) detailRows.push([s.title,"Section","No structured values captured",new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN"),s.observation || ""]);
+        else rows.forEach(([label,value]) => detailRows.push([s.title,label,value,new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN"),s.observation || ""]));
+    });
+    const detailWs = XLSX.utils.aoa_to_sheet(detailRows);
+    detailWs["!cols"] = [{wch:28},{wch:34},{wch:72},{wch:24},{wch:44}];
+    detailWs["!freeze"] = "A2";
+    detailWs["!autofilter"] = {ref:"A1:E" + detailRows.length};
+    XLSX.utils.book_append_sheet(wb, detailWs, "Detailed Analysis");
+
+    const trendRows: any[][] = [["SECTION","ROW","FIELD","VALUE"]];
+    report.sections.filter((s) => s.type === "trends" || s.type === "prediction").forEach((s) => {
+        const rows = trendTableRows(s);
+        if (rows.length) rows.forEach((row,index) => Object.entries(row).forEach(([field,value]) => trendRows.push([s.title,index+1,field,value])));
+        else sectionRows(s).forEach(([field,value]) => trendRows.push([s.title,"",field,value]));
+    });
+    const trendWs = XLSX.utils.aoa_to_sheet(trendRows);
+    trendWs["!cols"] = [{wch:28},{wch:10},{wch:38},{wch:60}];
+    trendWs["!freeze"] = "A2";
+    trendWs["!autofilter"] = {ref:"A1:D" + trendRows.length};
+    XLSX.utils.book_append_sheet(wb, trendWs, "Trends & Simulation");
+
+    const appendixRows: any[][] = [["SECTION","FIELD / PATH","VALUE","CAPTURED AT"]];
+    report.sections.forEach((s) => flattenSnapshot(s.snapshot).forEach(([path,value]) => appendixRows.push([s.title,path,value,new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN")]));
+    const appendixWs = XLSX.utils.aoa_to_sheet(appendixRows);
+    appendixWs["!cols"] = [{wch:28},{wch:64},{wch:76},{wch:24}];
+    appendixWs["!freeze"] = "A2";
+    appendixWs["!autofilter"] = {ref:"A1:D" + appendixRows.length};
+    XLSX.utils.book_append_sheet(wb, appendixWs, "Technical Appendix");
     XLSX.writeFileXLSX(wb,(report.title||"PAIMANA_Report").replace(/[^a-z0-9_-]+/gi,"_")+".xlsx",{compression:true});
 }
+
+function htmlMetric(label: string, value: string): string {
+    return '<div class="metric"><div class="metric-label">' + escapeHtml(label) + '</div><div class="metric-value">' + escapeHtml(value) + '</div></div>';
+}
+function htmlRows(rows: Array<[string,string]>): string {
+    if (!rows.length) return '<div class="empty">No structured data captured for this section.</div>';
+    return '<div class="facts">' + rows.map(([label,value]) => '<div class="fact"><div class="fact-label">' + escapeHtml(label) + '</div><div class="fact-value">' + escapeHtml(value) + '</div></div>').join("") + '</div>';
+}
+
 function printReport(report: ReportExportData) {
-    const popup=window.open("","_blank","noopener,noreferrer,width=1000,height=800");
-    if(!popup){window.print();return;}
-    const sections=report.sections.map((s,i)=>`<section class="section"><h3>${i+1}. ${escapeHtml(s.title)}</h3><div class="muted">${escapeHtml(s.description)}</div><div class="muted">Captured: ${escapeHtml(new Date(s.capturedAt??s.addedAt).toLocaleString("en-IN"))}</div>${s.observation?`<div class="note"><b>Observation:</b> ${escapeHtml(s.observation)}</div>`:""}<pre>${escapeHtml(valueText(s.snapshot))}</pre></section>`).join("");
-    popup.document.write(`<!doctype html><html><head><title>${escapeHtml(report.title)}</title><style>body{font-family:Arial,sans-serif;color:#17202a;margin:40px;line-height:1.5}.muted{color:#667085;font-size:12px}.section{border-top:1px solid #d9dde3;padding:18px 0}pre{white-space:pre-wrap;word-break:break-word;background:#f7f8fa;padding:12px;border-radius:8px;font-size:11px}.note{margin-top:10px;background:#f5f6f7;padding:10px;border-radius:8px}@media print{body{margin:18mm}.no-print{display:none}}</style></head><body><button class="no-print" onclick="window.print()">Print / Save as PDF</button><h1>${escapeHtml(report.title||"PAIMANA Project Report")}</h1><div class="muted">${report.scope==="project"?"Project Report":"Portfolio Report"} · ${escapeHtml(report.projectName||report.projectCode||"")}</div>${report.description?`<p>${escapeHtml(report.description)}</p>`:""}${report.observation?`<div class="note"><b>Observation:</b> ${escapeHtml(report.observation)}</div>`:""}${report.executiveSummary?`<h2>AI Executive Summary</h2><div class="note">${escapeHtml(report.executiveSummary)}</div>`:""}<h2>Report Sections</h2>${sections}</body></html>`);
-    popup.document.close();popup.focus();
+    const sections = report.sections;
+    const overview = sections.find((s) => s.type === "overview");
+    const risk = sections.find((s) => s.type === "risk");
+    const cost = sections.find((s) => s.type === "cost");
+    const schedule = sections.find((s) => s.type === "schedule");
+    const metrics = [...(risk ? sectionRows(risk).filter(([l]) => /risk score|risk level|delay probability|progress stall/i.test(l)).slice(0,4) : []), ...(cost ? sectionRows(cost).filter(([l]) => /original cost|revised cost|expenditure|cost risk/i.test(l)).slice(0,4) : []), ...(schedule ? sectionRows(schedule).filter(([l]) => /delay days|physical progress|schedule status|completion/i.test(l)).slice(0,4) : [])].slice(0,8);
+    const sectionHtml = sections.filter((s) => s.type !== "overview").map((s,i) => {
+        const rows = sectionRows(s);
+        const trendRows = trendTableRows(s);
+        let table = "";
+        if (trendRows.length) {
+            const keys = Object.keys(trendRows[0]).slice(0,8);
+            table = '<div class="table-wrap"><table><thead><tr>' + keys.map((k) => '<th>' + escapeHtml(k) + '</th>').join("") + '</tr></thead><tbody>' + trendRows.slice(0,40).map((row) => '<tr>' + keys.map((k) => '<td>' + escapeHtml(row[k] || "—") + '</td>').join("") + '</tr>').join("") + '</tbody></table></div>' + (trendRows.length > 40 ? '<div class="muted">Showing first 40 trend rows. Complete captured values are retained in the Excel Technical Appendix.</div>' : "");
+        }
+        return '<section class="page-section"><div class="section-kicker">' + String(i+2).padStart(2,"0") + ' · ANALYSIS</div><h2>' + escapeHtml(s.title) + '</h2><p class="section-description">' + escapeHtml(s.description) + '</p>' + htmlRows(rows) + table + (s.observation ? '<div class="note"><b>Officer observation</b><br>' + escapeHtml(s.observation) + '</div>' : '') + '</section>';
+    }).join("");
+    const executive = report.executiveSummary ? '<section class="page-section"><div class="section-kicker">EXECUTIVE SUMMARY</div><h2>Key Findings & Actions</h2><div class="ai-summary">' + escapeHtml(report.executiveSummary) + '</div></section>' : "";
+    const overviewHtml = '<section class="page-section overview-page"><div class="brand">PAIMANA <span>· PROJECT MONITORING REPORT</span></div><div class="section-kicker">01 · PROJECT OVERVIEW</div><h1>' + escapeHtml(report.title || "Project Monitoring Report") + '</h1><p class="lead">' + escapeHtml(report.projectName || report.projectCode || report.description || "Selected project analysis") + '</p><div class="identity">' + htmlRows([["Project Code",report.projectCode||"—"],["Project Name",report.projectName||"—"],["Report Type",report.scope==="project"?"Project Report":"Portfolio Report"],["Generated",new Date(report.createdAt??Date.now()).toLocaleString("en-IN")]]) + '</div>' + (metrics.length ? '<div class="metrics">' + metrics.map(([l,v]) => htmlMetric(l,v)).join("") + '</div>' : '') + (overview ? '<h3>Project Details</h3>' + htmlRows(sectionRows(overview)) : '') + (report.description ? '<div class="note"><b>Report scope</b><br>' + escapeHtml(report.description) + '</div>' : '') + (report.observation ? '<div class="note"><b>Officer observation</b><br>' + escapeHtml(report.observation) + '</div>' : '') + '</section>';
+    const popup = window.open("","_blank","noopener,noreferrer,width=1100,height=850");
+    if (!popup) { window.print(); return; }
+    const css = '@page{size:A4;margin:14mm 14mm 16mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#17202a;background:#fff;margin:0;line-height:1.45;font-size:10.5pt}.report{max-width:900px;margin:0 auto}.brand{font-size:10px;font-weight:800;letter-spacing:.14em;color:#475467;margin-bottom:28px}.brand span{font-weight:600;color:#98a2b3}.section-kicker{font-size:9px;font-weight:800;letter-spacing:.16em;color:#667085;text-transform:uppercase;margin-bottom:7px}h1{font-size:25px;line-height:1.18;margin:0 0 7px;color:#101828}h2{font-size:18px;margin:0 0 6px;color:#101828}h3{font-size:12px;margin:22px 0 9px;color:#344054;text-transform:uppercase;letter-spacing:.06em}.lead{font-size:12px;color:#667085;margin:0 0 20px}.section-description,.muted{font-size:9px;color:#667085}.identity,.facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:#e4e7ec;border:1px solid #e4e7ec;border-radius:9px;overflow:hidden}.fact{background:#fff;padding:9px 11px;min-height:43px}.fact-label,.metric-label{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#98a2b3}.fact-value{font-size:10px;color:#344054;margin-top:3px;word-break:break-word}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:16px 0}.metric{border:1px solid #e4e7ec;border-radius:9px;padding:10px;background:#fafafa;min-height:65px}.metric-value{font-size:14px;font-weight:800;color:#101828;margin-top:5px}.page-section{padding:0 0 20px;margin-bottom:20px;border-bottom:1px solid #eaecf0}.overview-page{min-height:245mm}.note{margin-top:12px;padding:10px 12px;border-left:3px solid #667085;background:#f8f9fb;border-radius:5px;font-size:9.5px;color:#475467}.ai-summary{white-space:pre-wrap;border:1px solid #d0d5dd;background:#fafafa;border-radius:9px;padding:14px;font-size:10px}.table-wrap{margin-top:14px;overflow:hidden;border:1px solid #e4e7ec;border-radius:8px}table{width:100%;border-collapse:collapse;font-size:8px}th{background:#f2f4f7;color:#475467;text-align:left;font-weight:800;padding:7px;border-bottom:1px solid #d0d5dd}td{padding:6px 7px;border-bottom:1px solid #eaecf0;color:#344054;vertical-align:top}.no-print{position:fixed;right:20px;top:20px;border:0;border-radius:8px;background:#101828;color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}@media print{.no-print{display:none}.overview-page{break-after:page}}';
+    popup.document.write('<!doctype html><html><head><title>' + escapeHtml(report.title || "PAIMANA Project Report") + '</title><style>' + css + '</style></head><body><button class="no-print" onclick="window.print()">Print / Save as PDF</button><main class="report">' + overviewHtml + executive + sectionHtml + '</main></body></html>');
+    popup.document.close();
+    popup.focus();
 }
 export default function ReportsPage(){
     const store=useReportsStore();
