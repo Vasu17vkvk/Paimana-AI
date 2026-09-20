@@ -1891,6 +1891,7 @@ function PortfolioFinancials({
 
             </div>
 
+            </div>
 
             <div className="grid grid-cols-1 divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
 
