@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type ReportScope = "project" | "portfolio";
+
 export type ReportSectionType =
     | "overview"
     | "cost"
@@ -9,16 +11,26 @@ export type ReportSectionType =
     | "risk"
     | "prediction"
     | "warnings"
-    | "analytics";
+    | "analytics"
+    | "trends"
+    | "recommendations"
+    | "milestones";
 
-export interface SavedReport {
-    id: string;
-    title: string;
-    description: string;
-    observation: string;
-    sections: ReportSection[];
-    createdAt: number;
-    updatedAt: number;
+export type ReportPart =
+    | "summary"
+    | "risk_breakdown"
+    | "contributing_factors"
+    | "chart"
+    | "table"
+    | "recommendations";
+
+export interface ReportFilters {
+    ministry: string;
+    sector: string;
+    state: string;
+    riskLevel: string;
+    projectStatus: string;
+    dateMonth: string;
 }
 
 export interface ReportSection {
@@ -28,36 +40,88 @@ export interface ReportSection {
     description: string;
     addedAt: number;
     snapshot?: unknown;
+    capturedAt: number;
+    selectedParts: ReportPart[];
+    observation: string;
+}
+
+export interface SavedReport {
+    id: string;
+    title: string;
+    description: string;
+    observation: string;
+    scope: ReportScope;
+    projectCode: string;
+    projectName: string;
+    filters: ReportFilters;
+    sections: ReportSection[];
+    executiveSummary: string;
+    createdAt: number;
+    updatedAt: number;
 }
 
 interface ReportsState {
     title: string;
     description: string;
     observation: string;
+    scope: ReportScope;
+    projectCode: string;
+    projectName: string;
+    filters: ReportFilters;
     sections: ReportSection[];
     history: SavedReport[];
     setTitle: (title: string) => void;
     setDescription: (description: string) => void;
     setObservation: (observation: string) => void;
-    addSection: (section: Omit<ReportSection, "addedAt">) => void;
+    setScope: (scope: ReportScope) => void;
+    setProjectCode: (projectCode: string) => void;
+    setProjectName: (projectName: string) => void;
+    setFilter: (key: keyof ReportFilters, value: string) => void;
+    addSection: (section: Omit<ReportSection, "addedAt" | "capturedAt" | "selectedParts" | "observation"> & {
+        selectedParts?: ReportPart[];
+        observation?: string;
+    }) => void;
     removeSection: (id: string) => void;
     clearSections: () => void;
     moveSection: (id: string, direction: "up" | "down") => void;
+    updateSection: (id: string, patch: Partial<Pick<ReportSection, "selectedParts" | "observation" | "title" | "description">>) => void;
+    setExecutiveSummary: (summary: string) => void;
     saveCurrentReport: () => void;
     loadReport: (id: string) => void;
     duplicateReport: (id: string) => void;
     deleteReport: (id: string) => void;
 }
 
-export const reportSectionCatalog: Array<Omit<ReportSection, "id" | "addedAt">> = [
+export const defaultReportFilters: ReportFilters = {
+    ministry: "",
+    sector: "",
+    state: "",
+    riskLevel: "",
+    projectStatus: "",
+    dateMonth: "",
+};
+
+export const defaultReportParts: ReportPart[] = [
+    "summary",
+    "risk_breakdown",
+    "contributing_factors",
+    "chart",
+    "table",
+    "recommendations",
+];
+
+export const reportSectionCatalog: Array<Omit<ReportSection, "id" | "addedAt" | "capturedAt" | "snapshot" | "selectedParts" | "observation">> = [
     { type: "overview", title: "Project Overview", description: "Project identity, scope and current status." },
-    { type: "cost", title: "Cost Analysis", description: "Cost position and cost-related indicators." },
+    { type: "cost", title: "Cost Analysis", description: "Original, revised and expenditure position." },
     { type: "schedule", title: "Schedule & Delay", description: "Schedule position, delay signals and timeline." },
-    { type: "progress", title: "Physical & Financial Progress", description: "Progress indicators and portfolio movement." },
+    { type: "progress", title: "Physical & Financial Progress", description: "Progress indicators and project movement." },
     { type: "risk", title: "Risk Assessment", description: "Overall risk and contributing risk signals." },
     { type: "prediction", title: "ML Predictions", description: "Model-based future risk and prediction outputs." },
     { type: "warnings", title: "Early Warnings", description: "Active warnings and priority signals." },
-    { type: "analytics", title: "Analytics", description: "Selected analytical views and trends." },
+    { type: "analytics", title: "Analytics", description: "Selected analytical views and data." },
+    { type: "trends", title: "Trends", description: "Historical progress, risk and schedule trends." },
+    { type: "milestones", title: "Milestone Analysis", description: "Completion and schedule milestone position." },
+    { type: "recommendations", title: "Recommendations", description: "Documented recommendations and actions." },
 ];
 
 export const useReportsStore = create<ReportsState>()(
@@ -66,19 +130,41 @@ export const useReportsStore = create<ReportsState>()(
             title: "PAIMANA Project Report",
             description: "",
             observation: "",
+            scope: "project",
+            projectCode: "",
+            projectName: "",
+            filters: { ...defaultReportFilters },
             sections: [],
             history: [],
             setTitle: (title) => set({ title }),
             setDescription: (description) => set({ description }),
             setObservation: (observation) => set({ observation }),
+            setScope: (scope) => set({ scope }),
+            setProjectCode: (projectCode) => set({ projectCode }),
+            setProjectName: (projectName) => set({ projectName }),
+            setFilter: (key, value) => set((state) => ({
+                filters: { ...state.filters, [key]: value },
+            })),
             addSection: (section) =>
                 set((state) => {
                     if (state.sections.some((existing) => existing.id === section.id)) return state;
-                    return { sections: [...state.sections, { ...section, addedAt: Date.now() }] };
+                    const now = Date.now();
+                    return {
+                        sections: [
+                            ...state.sections,
+                            {
+                                ...section,
+                                addedAt: now,
+                                capturedAt: now,
+                                selectedParts: section.selectedParts ?? [...defaultReportParts],
+                                observation: section.observation ?? "",
+                            },
+                        ],
+                    };
                 }),
             removeSection: (id) =>
                 set((state) => ({ sections: state.sections.filter((section) => section.id !== id) })),
-            clearSections: () => set({ sections: [] }),
+            clearSections: () => set({ sections: [], executiveSummary: "" }),
             moveSection: (id, direction) =>
                 set((state) => {
                     const index = state.sections.findIndex((section) => section.id === id);
@@ -89,6 +175,13 @@ export const useReportsStore = create<ReportsState>()(
                     [nextSections[index], nextSections[targetIndex]] = [nextSections[targetIndex], nextSections[index]];
                     return { sections: nextSections };
                 }),
+            updateSection: (id, patch) =>
+                set((state) => ({
+                    sections: state.sections.map((section) =>
+                        section.id === id ? { ...section, ...patch } : section,
+                    ),
+                })),
+            setExecutiveSummary: (executiveSummary) => set({ executiveSummary }),
             saveCurrentReport: () =>
                 set((state) => {
                     const now = Date.now();
@@ -97,7 +190,12 @@ export const useReportsStore = create<ReportsState>()(
                         title: state.title || "PAIMANA Project Report",
                         description: state.description,
                         observation: state.observation,
-                        sections: state.sections.map((section) => ({ ...section })),
+                        scope: state.scope,
+                        projectCode: state.projectCode,
+                        projectName: state.projectName,
+                        filters: { ...state.filters },
+                        sections: state.sections.map((section) => ({ ...section, selectedParts: [...section.selectedParts] })),
+                        executiveSummary: state.executiveSummary ?? "",
                         createdAt: now,
                         updatedAt: now,
                     };
@@ -111,7 +209,17 @@ export const useReportsStore = create<ReportsState>()(
                         title: report.title,
                         description: report.description,
                         observation: report.observation,
-                        sections: report.sections.map((section) => ({ ...section })),
+                        scope: report.scope,
+                        projectCode: report.projectCode,
+                        projectName: report.projectName,
+                        filters: { ...defaultReportFilters, ...report.filters },
+                        sections: report.sections.map((section) => ({
+                            ...section,
+                            selectedParts: section.selectedParts ?? [...defaultReportParts],
+                            observation: section.observation ?? "",
+                            capturedAt: section.capturedAt ?? section.addedAt,
+                        })),
+                        executiveSummary: report.executiveSummary ?? "",
                     };
                 }),
             duplicateReport: (id) =>
@@ -126,13 +234,30 @@ export const useReportsStore = create<ReportsState>()(
                             title: report.title + " - Copy",
                             createdAt: now,
                             updatedAt: now,
-                            sections: report.sections.map((section) => ({ ...section })),
+                            filters: { ...report.filters },
+                            sections: report.sections.map((section) => ({
+                                ...section,
+                                selectedParts: [...section.selectedParts],
+                            })),
                         }, ...state.history],
                     };
                 }),
             deleteReport: (id) =>
                 set((state) => ({ history: state.history.filter((report) => report.id !== id) })),
         }),
-        { name: "paimana-report-workspace" },
+        {
+            name: "paimana-report-workspace",
+            partialize: (state) => ({
+                title: state.title,
+                description: state.description,
+                observation: state.observation,
+                scope: state.scope,
+                projectCode: state.projectCode,
+                projectName: state.projectName,
+                filters: state.filters,
+                sections: state.sections,
+                history: state.history,
+            }),
+        },
     ),
 );
