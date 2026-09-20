@@ -1,10 +1,14 @@
+import { FileText } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { useNavigate, Outlet } from "react-router-dom";
+import { useReportsStore } from "../../features/reports/reportsStore";
 
 import Header from "./Header";
 import Sidebar from "./Sidebar";
 
 export default function AppLayout() {
+    const navigate = useNavigate();
+    const reportCount = useReportsStore((state) => state.sections.length);
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -74,6 +78,17 @@ export default function AppLayout() {
                 <main className="px-4 pb-8 pt-5 sm:px-6 sm:pb-10 sm:pt-6 lg:px-6 lg:pb-12 lg:pt-7">
                     <Outlet />
                 </main>
+
+                {reportCount > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => navigate("/reports")}
+                        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-lg transition hover:bg-slate-50"
+                    >
+                        <FileText size={15} />
+                        Report · {reportCount} {reportCount === 1 ? "item" : "items"}
+                    </button>
+                )}
             </div>
         </div>
     );
