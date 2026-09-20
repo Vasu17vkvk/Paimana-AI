@@ -97,6 +97,7 @@ FACT_KEYWORDS = (
 )
 
 ML_KEYWORDS = (
+    "risk",
     "risk score",
     "risk level",
     "future delay",
@@ -393,20 +394,46 @@ def classify_query(
         "fix",
     )
 
+        # ------------------------------------------------------------------
+        # Determine whether the USER'S QUESTION explicitly refers to a
+        # particular project.
+        #
+        # IMPORTANT:
+        # A project selected in the UI is NOT enough.
+        #
+        # This prevents:
+        #
+        #   Project = 400005
+        #   "What are the common causes of infrastructure delays?"
+        #
+        # from incorrectly becoming HYBRID_QUERY.
+        # ------------------------------------------------------------------
+
+        # ------------------------------------------------------------------
+    # Determine whether the USER'S QUESTION refers to a project.
+    #
+    # This includes:
+    #   1. An explicit project code in the question.
+    #   2. Explicit project wording.
+    #   3. Follow-up wording that clearly refers to the project selected
+    #      in the UI, such as "tell me about it".
     # ------------------------------------------------------------------
-    # Determine whether the USER'S QUESTION explicitly refers to a
-    # particular project.
-    #
-    # IMPORTANT:
-    # A project selected in the UI is NOT enough.
-    #
-    # This prevents:
-    #
-    #   Project = 400005
-    #   "What are the common causes of infrastructure delays?"
-    #
-    # from incorrectly becoming HYBRID_QUERY.
-    # ------------------------------------------------------------------
+
+    selected_project_reference = (
+        bool(project_code)
+        and _contains_any(
+            normalized,
+            (
+                "it",
+                "this one",
+                "that project",
+                "that one",
+                "the selected project",
+                "selected project",
+                "this",
+            ),
+        )
+    )
 
     explicit_project_reference = (
         extract_project_code(
@@ -437,8 +464,14 @@ def classify_query(
                 "what is causing it",
                 "what caused it",
                 "how can it be mitigated",
+                "tell me about it",
+                "about it",
+                "tell me more about it",
+                "give me details about it",
+                "give me information about it",
             ),
         )
+        or selected_project_reference
     )
 
     project_reasoning = (
@@ -526,8 +559,43 @@ def classify_query(
     # FACT fallback
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # FACT fallback
+    # ------------------------------------------------------------------
+
     if has_project and is_fact:
         return FACT_QUERY
+
+    # ------------------------------------------------------------------
+    # SAFETY FALLBACK FOR EXPLICIT PROJECT QUESTIONS
+    #
+    # If the user explicitly refers to a project and a verified project
+    # code is available, never send the question to unrestricted Gemini.
+    #
+    # Examples:
+    #
+    #   "tell me about project 400005"
+    #   "tell me about this project"
+    #   "400005?"
+    #
+    # These are handled from PostgreSQL project context.
+    # ------------------------------------------------------------------
+
+    if (
+        has_project
+        and explicit_project_reference
+    ):
+        return FACT_QUERY
+
+    # ------------------------------------------------------------------
+    # PROJECT-SPECIFIC FACT QUESTION WITHOUT PROJECT CODE
+    #
+    # Do not send ambiguous project questions to Gemini.
+    # The orchestration will ask for the project code deterministically.
+    # ------------------------------------------------------------------
+
+    if is_fact and not has_project:
+        return FACT_QUERY    
 
     # ------------------------------------------------------------------
     # GENERAL
@@ -958,38 +1026,94 @@ def _fact_response(
         )
 
     if not fields:
-        fields = [
-            (
-                "Project name",
-                project.get(
-                    "project_name"
+            fields = [
+                (
+                    "Project name",
+                    project.get(
+                        "project_name"
+                    ),
                 ),
-            ),
-            (
-                "Ministry",
-                project.get(
-                    "ministry"
+                (
+                    "Ministry",
+                    project.get(
+                        "ministry"
+                    ),
                 ),
-            ),
-            (
-                "Sector",
-                project.get(
-                    "sector"
+                (
+                    "Sector",
+                    project.get(
+                        "sector"
+                    ),
                 ),
-            ),
-            (
-                "State",
-                project.get(
-                    "state"
+                (
+                    "State",
+                    project.get(
+                        "state"
+                    ),
                 ),
-            ),
-            (
-                "Schedule status",
-                project.get(
-                    "schedule_status"
+                (
+                    "Implementing agency",
+                    project.get(
+                        "implementing_agency"
+                    ),
                 ),
-            ),
-        ]
+                (
+                    "Original completion",
+                    project.get(
+                        "original_completion"
+                    ),
+                ),
+                (
+                    "Revised completion",
+                    project.get(
+                        "revised_completion"
+                    ),
+                ),
+                (
+                    "Schedule status",
+                    project.get(
+                        "schedule_status"
+                    ),
+                ),
+                (
+                    "Cost status",
+                    project.get(
+                        "cost_status"
+                    ),
+                ),
+                (
+                    "Original cost",
+                    (
+                        f"₹{_format_number(project.get('original_cost_cr'))} Cr"
+                        if project.get("original_cost_cr") is not None
+                        else "unavailable"
+                    ),
+                ),
+                (
+                    "Expenditure",
+                    (
+                        f"₹{_format_number(project.get('expenditure_cr'))} Cr"
+                        if project.get("expenditure_cr") is not None
+                        else "unavailable"
+                    ),
+                ),
+                (
+                    "Physical progress",
+                    (
+                        f"{_format_number(project.get('physical_progress_pct'), 1)}%"
+                        if project.get("physical_progress_pct") is not None
+                        else "unavailable"
+                    ),
+                ),
+                (
+                    "Recorded delay",
+                    (
+                        f"{_format_number(project.get('delay_days'), 0)} days"
+                        if project.get("delay_days") is not None
+                        else "unavailable"
+                    ),
+                ),
+            ]
 
     lines = [
         (
