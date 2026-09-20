@@ -7,6 +7,8 @@ import PageHeader from "../../components/layout/PageHeader";
 import { defaultReportParts, reportSectionCatalog, useReportsStore, type ReportPart, type ReportScope, type ReportSection, type SavedReport } from "./reportsStore";
 import { generateReportExecutiveSummary } from "../../services/api";
 
+type ReportExportData = Pick<SavedReport, "title" | "description" | "observation" | "scope" | "projectCode" | "projectName" | "filters" | "sections" | "executiveSummary"> & { createdAt?: number };
+
 function valueText(value: unknown): string {
     if (value === null || value === undefined || value === "") return "—";
     return typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -23,7 +25,7 @@ function SnapshotValue({ value }: { value: unknown }) {
 function partLabel(part: ReportPart) {
     return ({summary:"Summary",risk_breakdown:"Risk Breakdown",contributing_factors:"Contributing Factors",chart:"Chart",table:"Table",recommendations:"Recommendations"} as Record<ReportPart,string>)[part];
 }
-function exportXlsx(report: SavedReport | ReturnType<typeof useReportsStore.getState>) {
+function exportXlsx(report: ReportExportData) {
     const rows:any[][]=[["PAIMANA REPORT",""],["Report Title",report.title],["Scope",report.scope],["Project Code",report.projectCode],["Project Name",report.projectName],["Description",report.description],["Observation",report.observation],["Created At","createdAt" in report?new Date(report.createdAt).toLocaleString("en-IN"):new Date().toLocaleString("en-IN")],[],["Filter","Value"]];
     Object.entries(report.filters).forEach(([k,v])=>rows.push([k,v]));
     rows.push([],["Section","Description","Captured At","Selected Parts","Observation","Snapshot"]);
@@ -34,7 +36,7 @@ function exportXlsx(report: SavedReport | ReturnType<typeof useReportsStore.getS
     XLSX.utils.book_append_sheet(wb,ws,"Report");
     XLSX.writeFileXLSX(wb,(report.title||"PAIMANA_Report").replace(/[^a-z0-9_-]+/gi,"_")+".xlsx",{compression:true});
 }
-function printReport(report: ReturnType<typeof useReportsStore.getState>) {
+function printReport(report: ReportExportData) {
     const popup=window.open("","_blank","noopener,noreferrer,width=1000,height=800");
     if(!popup){window.print();return;}
     const sections=report.sections.map((s,i)=>`<section class="section"><h3>${i+1}. ${escapeHtml(s.title)}</h3><div class="muted">${escapeHtml(s.description)}</div><div class="muted">Captured: ${escapeHtml(new Date(s.capturedAt??s.addedAt).toLocaleString("en-IN"))}</div>${s.observation?`<div class="note"><b>Observation:</b> ${escapeHtml(s.observation)}</div>`:""}<pre>${escapeHtml(valueText(s.snapshot))}</pre></section>`).join("");
@@ -54,7 +56,7 @@ export default function ReportsPage(){
             setExecutiveSummary(result.summary);
         }catch(e){setAiError(e instanceof Error?e.message:"Failed to generate AI Executive Summary.");}finally{setAiLoading(false);}
     }
-    const current={title,description,observation,scope,projectCode,projectName,filters,sections,history,executiveSummary,createdAt:Date.now(),updatedAt:Date.now()};
+    const current: ReportExportData={title,description,observation,scope,projectCode,projectName,filters,sections,executiveSummary,createdAt:Date.now()};
     return <div className="mx-auto w-full max-w-[1500px]">
         <PageHeader eyebrow="INTELLIGENCE · REPORTS" title="Reports" description="Build a project or portfolio report from verified PAIMANA analytics snapshots." action={<div className="flex flex-wrap items-center justify-end gap-2"><span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">{sections.length} {sections.length===1?"section":"sections"}</span><Button variant="secondary" onClick={()=>setHistoryOpen(true)}><History size={15}/> History</Button>{sections.length>0&&<Button variant="secondary" onClick={clearSections}>Clear</Button>}<Button variant="secondary" onClick={saveCurrentReport} disabled={!sections.length}><Check size={15}/> Save Report</Button><Button variant="primary" onClick={()=>setPreview(true)} disabled={!sections.length}><Eye size={15}/> Preview</Button></div>}/>
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_390px]"><div className="space-y-5">
