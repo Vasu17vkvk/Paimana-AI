@@ -10,13 +10,6 @@ import { generateReportExecutiveSummary } from "../../services/api";
 
 type ReportExportData = Pick<SavedReport, "title" | "description" | "observation" | "scope" | "projectCode" | "projectName" | "filters" | "sections" | "executiveSummary"> & { createdAt?: number };
 
-function valueText(value: unknown): string {
-    if (value === null || value === undefined || value === "") return "—";
-    return typeof value === "object" ? JSON.stringify(value) : String(value);
-}
-function escapeHtml(value: string): string {
-    return value.replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" }[c] ?? c));
-}
 function SnapshotValue({ value }: { value: unknown }) {
     if (value === null || value === undefined) return <span className="text-slate-400">—</span>;
     if (["string","number","boolean"].includes(typeof value)) return <span>{String(value)}</span>;
@@ -38,13 +31,6 @@ function flattenSnapshot(value: unknown, path = ""): Array<[string,string]> {
         );
     }
     return [[path || "Value", String(value)]];
-}
-
-function styleSheet(ws: XLSX.WorkSheet, widths: number[], freeze = "A2") {
-    ws["!cols"] = widths.map(w => ({ wch: w }));
-    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-    ws["!autofilter"] = { ref: `A1:${String.fromCharCode(64 + widths.length)}1` };
-    if (freeze) ws["!freeze"] = freeze;
 }
 
 function humanLabel(key: string): string {
@@ -104,245 +90,334 @@ function trendTableRows(section: SavedReport["sections"][number]): Array<Record<
     return source.map((item) => Object.fromEntries(collectPrimitiveRows(item).map(([label, value]) => [label, value])));
 }
 
+
+function findMetric(rows: Array<[string, string]>, patterns: RegExp[]): [string, string] | null {
+    return rows.find(([label, value]) => patterns.some((pattern) => pattern.test(label)) && value !== "—") ?? null;
+}
+function numericValue(value: string): number | null {
+    const match = value.replace(/,/g, "").replace(/₹/g, "").match(/-?\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : null;
+}
+function chartRowsForSection(section: SavedReport["sections"][number]): Array<[string, number]> {
+    const rows = sectionRows(section);
+    const candidates = section.type === "risk"
+        ? [["Cost Risk", /cost risk/i], ["Future Delay", /future delay|delay probability/i], ["Progress Stall", /progress stall/i]]
+        : section.type === "cost"
+            ? [["Original Cost", /original cost/i], ["Revised Cost", /revised cost/i], ["Expenditure", /expenditure/i]]
+            : [];
+    return candidates.map(([label, pattern]) => {
+        const found = findMetric(rows, [pattern as RegExp]);
+        return [label as string, found ? (numericValue(found[1]) ?? 0) : NaN] as [string, number];
+    }).filter(([, value]) => Number.isFinite(value));
+}
+function writeTable(pdf: jsPDF, headers: string[], rows: string[][], x: number, y: number, widths: number[], fontSize = 7.2): number {
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const totalWidth = widths.reduce((a, b) => a + b, 0);
+    const rowHeight = 7.5;
+    let cursorY = y;
+    const drawRow = (values: string[], header = false) => {
+        let cursorX = x;
+        pdf.setFillColor(header ? 239 : 255, header ? 242 : 255, header ? 246 : 255);
+        pdf.setDrawColor(220, 225, 231);
+        pdf.rect(x, cursorY, totalWidth, rowHeight, "FD");
+        values.forEach((value, index) => {
+            const cellWidth = widths[index];
+            pdf.setFont("helvetica", header ? "bold" : "normal");
+            pdf.setFontSize(fontSize);
+            pdf.setTextColor(header ? 51 : 67, header ? 65 : 78, header ? 85 : 92);
+            pdf.text(pdf.splitTextToSize(String(value || "—"), cellWidth - 4).slice(0, 2), cursorX + 2, cursorY + 4.6);
+            cursorX += cellWidth;
+            if (index < values.length - 1) pdf.line(cursorX, cursorY, cursorX, cursorY + rowHeight);
+        });
+        cursorY += rowHeight;
+    };
+    drawRow(headers, true);
+    rows.forEach((row) => {
+        if (cursorY + rowHeight > pageHeight - 18) {
+            pdf.addPage();
+            cursorY = 16;
+            drawRow(headers, true);
+        }
+        drawRow(row);
+    });
+    return cursorY;
+}
+function drawBarChart(pdf: jsPDF, title: string, items: Array<[string, number]>, x: number, y: number, width: number, height: number, suffix = ""): number {
+    if (!items.length) return y;
+    const max = Math.max(...items.map(([, value]) => value), 1);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(51, 65, 85);
+    pdf.text(title, x, y);
+    const top = y + 6;
+    const labelWidth = 34;
+    const barWidth = width - labelWidth - 18;
+    const gap = 7;
+    const barHeight = Math.min(9, Math.max(5, (height - 12 - (items.length - 1) * gap) / items.length));
+    items.forEach(([label, value], index) => {
+        const yy = top + index * (barHeight + gap);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(6.8);
+        pdf.setTextColor(71, 84, 103);
+        pdf.text(label.slice(0, 22), x, yy + barHeight - 1);
+        pdf.setFillColor(235, 239, 243);
+        pdf.roundedRect(x + labelWidth, yy, barWidth, barHeight, 1.2, 1.2, "F");
+        pdf.setFillColor(71, 85, 105);
+        pdf.roundedRect(x + labelWidth, yy, Math.max(1, barWidth * Math.max(0, value) / max), barHeight, 1.2, 1.2, "F");
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(6.8);
+        pdf.setTextColor(51, 65, 85);
+        pdf.text(String(value.toFixed(1)) + suffix, x + labelWidth + barWidth + 2, yy + barHeight - 1);
+    });
+    return top + items.length * (barHeight + gap) + 2;
+}
+function drawLineChart(pdf: jsPDF, title: string, points: Array<[string, number]>, x: number, y: number, width: number, height: number): number {
+    if (points.length < 2) return y;
+    const values = points.map(([, value]) => value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const left = x + 12;
+    const top = y + 8;
+    const chartWidth = width - 18;
+    const chartHeight = height - 22;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(51, 65, 85);
+    pdf.text(title, x, y);
+    pdf.setDrawColor(210, 216, 223);
+    pdf.line(left, top, left, top + chartHeight);
+    pdf.line(left, top + chartHeight, left + chartWidth, top + chartHeight);
+    const coords = points.map(([, value], index) => {
+        const px = left + (index / (points.length - 1)) * chartWidth;
+        const py = top + chartHeight - ((value - min) / range) * chartHeight;
+        return [px, py] as [number, number];
+    });
+    pdf.setDrawColor(71, 85, 105);
+    coords.slice(1).forEach((point, index) => pdf.line(coords[index][0], coords[index][1], point[0], point[1]));
+    coords.forEach(([px, py], index) => {
+        pdf.setFillColor(71, 85, 105);
+        pdf.circle(px, py, 1.3, "F");
+        if (index === 0 || index === points.length - 1 || points.length <= 6) {
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(5.7);
+            pdf.setTextColor(100, 112, 128);
+            pdf.text(points[index][0].slice(0, 12), px, top + chartHeight + 7, { align: "center" });
+        }
+    });
+    return top + chartHeight + 15;
+}
+
 function exportXlsx(report: ReportExportData) {
     const wb = XLSX.utils.book_new();
-    const createdAt = "createdAt" in report ? new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN") : new Date().toLocaleString("en-IN");
+    const generated = new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN");
     const overview: any[][] = [
-        ["PAIMANA PROJECT REPORT"],
-        [report.title || "Project Monitoring Report"],
-        ["Generated", createdAt],
+        ["PAIMANA", "PROJECT MONITORING REPORT"],
+        ["Report Title", report.title || "Project Monitoring Report"],
+        ["Generated", generated],
+        ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
         [],
-        ["PROJECT IDENTITY"],
+        ["PROJECT IDENTITY", ""],
         ["Project Code", report.projectCode || "—"],
         ["Project Name", report.projectName || "—"],
-        ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
-        ["Description", report.description || "—"],
     ];
-    if (report.scope === "portfolio") overview.push([], ["REPORT FILTERS"], ...Object.entries(report.filters).map(([k, v]) => [humanLabel(k), v || "—"]));
-    report.sections.filter((s) => ["overview","risk","cost","schedule","prediction","recommendations"].includes(s.type)).forEach((s) => {
-        const rows = sectionRows(s);
-        if (!rows.length) return;
-        overview.push([], [s.title.toUpperCase()]);
-        rows.forEach(([label, value]) => overview.push([label, value]));
-        if (s.observation) overview.push(["Officer Observation", s.observation]);
-    });
-    if (report.executiveSummary) overview.push([], ["AI EXECUTIVE SUMMARY"], [report.executiveSummary]);
-    if (report.observation) overview.push([], ["REPORT OBSERVATION"], [report.observation]);
+    const overviewSection = report.sections.find((s) => s.type === "overview");
+    const risk = report.sections.find((s) => s.type === "risk");
+    const cost = report.sections.find((s) => s.type === "cost");
+    const schedule = report.sections.find((s) => s.type === "schedule");
+    const progress = report.sections.find((s) => s.type === "progress");
+    const facts: Array<[string, string]> = [
+        ...(overviewSection ? sectionRows(overviewSection).filter(([l]) => /ministry|sector|state|implementing agency|schedule status|original completion|revised completion/i.test(l)) : []),
+        ...(risk ? sectionRows(risk).filter(([l]) => /risk score|risk level|cost risk|future delay|progress stall/i.test(l)) : []),
+        ...(cost ? sectionRows(cost).filter(([l]) => /original cost|revised cost|expenditure/i.test(l)) : []),
+        ...(schedule ? sectionRows(schedule).filter(([l]) => /delay|completion|schedule status|physical progress/i.test(l)) : []),
+        ...(progress ? sectionRows(progress) : []),
+    ];
+    uniqueRows(facts).forEach(([label, value]) => overview.push([humanLabel(label), value]));
+    if (report.observation) overview.push([], ["OFFICER OBSERVATION", report.observation]);
+    if (report.executiveSummary) overview.push([], ["EXECUTIVE SUMMARY", report.executiveSummary]);
     const overviewWs = XLSX.utils.aoa_to_sheet(overview);
-    overviewWs["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:1} }, { s:{r:1,c:0}, e:{r:1,c:1} }];
-    overviewWs["!cols"] = [{wch:30},{wch:88}];
-    overviewWs["!rows"] = [{hpt:28},{hpt:24}];
-    XLSX.utils.book_append_sheet(wb, overviewWs, "Project Overview");
+    overviewWs["!cols"] = [{ wch: 30 }, { wch: 95 }];
+    overviewWs["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+    overviewWs["!freeze"] = "A7";
+    XLSX.utils.book_append_sheet(wb, overviewWs, "Overview");
 
-    const detailRows: any[][] = [["SECTION","POINT","VALUE","CAPTURED AT","OBSERVATION"]];
-    report.sections.forEach((s) => {
-        const rows = sectionRows(s);
-        if (!rows.length) detailRows.push([s.title,"Section","No structured values captured",new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN"),s.observation || ""]);
-        else rows.forEach(([label,value]) => detailRows.push([s.title,label,value,new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN"),s.observation || ""]));
+    const analysis: any[][] = [["SECTION", "INDICATOR / ITEM", "VALUE", "CAPTURED AT", "OBSERVATION"]];
+    report.sections.forEach((section) => {
+        const captured = new Date(section.capturedAt ?? section.addedAt).toLocaleString("en-IN");
+        const rows = sectionRows(section);
+        rows.forEach(([label, value]) => analysis.push([section.title, humanLabel(label), value, captured, section.observation || ""]));
+        trendTableRows(section).forEach((row, index) => Object.entries(row).forEach(([field, value]) => analysis.push([section.title + " · Row " + (index + 1), humanLabel(field), value, captured, section.observation || ""])));
     });
-    const detailWs = XLSX.utils.aoa_to_sheet(detailRows);
-    detailWs["!cols"] = [{wch:28},{wch:34},{wch:72},{wch:24},{wch:44}];
-    detailWs["!freeze"] = "A2";
-    detailWs["!autofilter"] = {ref:"A1:E" + detailRows.length};
-    XLSX.utils.book_append_sheet(wb, detailWs, "Detailed Analysis");
-
-    const trendRows: any[][] = [["SECTION","ROW","FIELD","VALUE"]];
-    report.sections.filter((s) => s.type === "trends" || s.type === "prediction").forEach((s) => {
-        const rows = trendTableRows(s);
-        if (rows.length) rows.forEach((row,index) => Object.entries(row).forEach(([field,value]) => trendRows.push([s.title,index+1,field,value])));
-        else sectionRows(s).forEach(([field,value]) => trendRows.push([s.title,"",field,value]));
-    });
-    const trendWs = XLSX.utils.aoa_to_sheet(trendRows);
-    trendWs["!cols"] = [{wch:28},{wch:10},{wch:38},{wch:60}];
-    trendWs["!freeze"] = "A2";
-    trendWs["!autofilter"] = {ref:"A1:D" + trendRows.length};
-    XLSX.utils.book_append_sheet(wb, trendWs, "Trends & Simulation");
-
-    const appendixRows: any[][] = [["SECTION","FIELD / PATH","VALUE","CAPTURED AT"]];
-    report.sections.forEach((s) => flattenSnapshot(s.snapshot).forEach(([path,value]) => appendixRows.push([s.title,path,value,new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN")]));
-    const appendixWs = XLSX.utils.aoa_to_sheet(appendixRows);
-    appendixWs["!cols"] = [{wch:28},{wch:64},{wch:76},{wch:24}];
-    appendixWs["!freeze"] = "A2";
-    appendixWs["!autofilter"] = {ref:"A1:D" + appendixRows.length};
-    XLSX.utils.book_append_sheet(wb, appendixWs, "Technical Appendix");
-    XLSX.writeFileXLSX(wb,(report.title||"PAIMANA_Report").replace(/[^a-z0-9_-]+/gi,"_")+".xlsx",{compression:true});
-}
-
-function htmlMetric(label: string, value: string): string {
-    return '<div class="metric"><div class="metric-label">' + escapeHtml(label) + '</div><div class="metric-value">' + escapeHtml(value) + '</div></div>';
-}
-function htmlRows(rows: Array<[string,string]>): string {
-    if (!rows.length) return '<div class="empty">No structured data captured for this section.</div>';
-    return '<div class="facts">' + rows.map(([label,value]) => '<div class="fact"><div class="fact-label">' + escapeHtml(label) + '</div><div class="fact-value">' + escapeHtml(value) + '</div></div>').join("") + '</div>';
+    if (report.scope === "portfolio") {
+        Object.entries(report.filters).forEach(([key, value]) => analysis.push(["Portfolio Filter", humanLabel(key), value || "—", "", ""]));
+    }
+    const analysisWs = XLSX.utils.aoa_to_sheet(analysis);
+    analysisWs["!cols"] = [{ wch: 30 }, { wch: 38 }, { wch: 65 }, { wch: 24 }, { wch: 42 }];
+    analysisWs["!freeze"] = "A2";
+    analysisWs["!autofilter"] = { ref: "A1:E" + analysis.length };
+    XLSX.utils.book_append_sheet(wb, analysisWs, "Analysis");
+    XLSX.writeFileXLSX(wb, (report.title || "PAIMANA_Project_Report").replace(/[^a-z0-9_-]+/gi, "_") + ".xlsx", { compression: true });
 }
 
 function downloadPdf(report: ReportExportData) {
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 16;
+    const margin = 15;
     const contentWidth = pageWidth - margin * 2;
     let y = margin;
-
-    const ensureSpace = (height: number) => {
-        if (y + height > pageHeight - 16) {
+    const pageBreak = (needed = 12) => {
+        if (y + needed > pageHeight - 17) {
             pdf.addPage();
             y = margin;
         }
     };
-    const addText = (text: string, size = 9.5, bold = false, color: [number,number,number] = [52,64,84], gap = 4) => {
-        pdf.setFont("helvetica", bold ? "bold" : "normal");
-        pdf.setFontSize(size);
-        pdf.setTextColor(...color);
-        const lines = pdf.splitTextToSize(String(text || "—"), contentWidth);
-        ensureSpace(lines.length * (size * 0.42) + gap);
-        pdf.text(lines, margin, y);
-        y += lines.length * (size * 0.42) + gap;
-    };
-    const addLabelValue = (label: string, value: string) => {
-        ensureSpace(10);
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(7.5);
-        pdf.setTextColor(102,112,133);
-        pdf.text(label.toUpperCase(), margin, y);
-        y += 3.8;
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(9);
-        pdf.setTextColor(52,64,84);
-        const lines = pdf.splitTextToSize(value || "—", contentWidth);
-        pdf.text(lines, margin, y);
-        y += lines.length * 3.8 + 4;
-    };
-    const addSectionHeading = (title: string, kicker: string) => {
-        ensureSpace(18);
-        y += 4;
-        pdf.setDrawColor(228,231,236);
+    const heading = (title: string, subtitle: string) => {
+        pageBreak(18);
+        pdf.setDrawColor(218, 224, 230);
         pdf.line(margin, y, pageWidth - margin, y);
-        y += 7;
+        y += 6;
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(7.5);
-        pdf.setTextColor(102,112,133);
-        pdf.text(kicker.toUpperCase(), margin, y);
+        pdf.setFontSize(7);
+        pdf.setTextColor(100, 112, 128);
+        pdf.text(subtitle.toUpperCase(), margin, y);
         y += 5;
-        pdf.setFontSize(15);
-        pdf.setTextColor(16,24,40);
+        pdf.setFontSize(14);
+        pdf.setTextColor(20, 30, 43);
         pdf.text(pdf.splitTextToSize(title, contentWidth), margin, y);
         y += 7;
     };
-    const addFacts = (rows: Array<[string,string]>) => {
-        rows.forEach(([label,value]) => addLabelValue(label,value));
+    const paragraph = (text: string, size = 8.5) => {
+        if (!text) return;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(size);
+        pdf.setTextColor(55, 68, 84);
+        const lines = pdf.splitTextToSize(text, contentWidth);
+        pageBreak(lines.length * 4 + 3);
+        pdf.text(lines, margin, y);
+        y += lines.length * 4 + 3;
+    };
+    const keyValueTable = (rows: Array<[string, string]>) => {
+        if (!rows.length) return;
+        const split = Math.ceil(rows.length / 2);
+        const left = rows.slice(0, split);
+        const right = rows.slice(split);
+        const tableRows = Array.from({ length: Math.max(left.length, right.length) }, (_, i) => [
+            left[i]?.[0] ?? "", left[i]?.[1] ?? "", right[i]?.[0] ?? "", right[i]?.[1] ?? "",
+        ]);
+        pageBreak(Math.min(60, 10 + tableRows.length * 7.5));
+        y = writeTable(pdf, ["Indicator", "Value", "Indicator", "Value"], tableRows, margin, y, [39, 43, 39, 43]);
+        y += 4;
     };
 
-    pdf.setProperties({ title: report.title || "PAIMANA Project Report", subject: "PAIMANA Project Monitoring Report", author: "PAIMANA" });
-    pdf.setFillColor(16,24,40);
-    pdf.rect(0,0,pageWidth,8,"F");
-    y = 18;
-    pdf.setFont("helvetica","bold");
+    const overview = report.sections.find((s) => s.type === "overview");
+    const risk = report.sections.find((s) => s.type === "risk");
+    const cost = report.sections.find((s) => s.type === "cost");
+    const schedule = report.sections.find((s) => s.type === "schedule");
+    const trends = report.sections.find((s) => s.type === "trends");
+    const simulation = report.sections.find((s) => s.type === "prediction");
+    const recommendation = report.sections.find((s) => s.type === "recommendations");
+
+    pdf.setProperties({ title: report.title || "PAIMANA Project Monitoring Report", subject: "PAIMANA Project Monitoring Report", author: "PAIMANA", creator: "PAIMANA" });
+    pdf.setFillColor(30, 36, 43);
+    pdf.rect(0, 0, pageWidth, 9, "F");
+    y = 19;
+    pdf.setFont("helvetica", "bold");
     pdf.setFontSize(8);
-    pdf.setTextColor(71,84,103);
-    pdf.text("PAIMANA  ·  PROJECT MONITORING REPORT", margin, y);
+    pdf.setTextColor(82, 97, 115);
+    pdf.text("PAIMANA  |  PROJECT MONITORING & ANALYTICS", margin, y);
     y += 10;
-    pdf.setFontSize(22);
-    pdf.setTextColor(16,24,40);
+    pdf.setFontSize(20);
+    pdf.setTextColor(20, 30, 43);
     pdf.text(pdf.splitTextToSize(report.title || "Project Monitoring Report", contentWidth), margin, y);
-    y += 10;
-    addText(report.projectName || report.projectCode || report.description || "Selected project analysis", 10.5, false, [102,112,133], 7);
-
-    const identityRows: Array<[string,string]> = [
+    y += 9;
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.setTextColor(92, 104, 119);
+    pdf.text(pdf.splitTextToSize(report.projectName || "Selected project", contentWidth), margin, y);
+    y += 9;
+    keyValueTable([
         ["Project Code", report.projectCode || "—"],
-        ["Project Name", report.projectName || "—"],
         ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
-        ["Generated", new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN")]
-    ];
-    addSectionHeading("Project Overview", "01 · Overview");
-    addFacts(identityRows);
+        ["Generated", new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN")],
+    ]);
 
-    const overview = report.sections.find(s => s.type === "overview");
-    const risk = report.sections.find(s => s.type === "risk");
-    const cost = report.sections.find(s => s.type === "cost");
-    const schedule = report.sections.find(s => s.type === "schedule");
-    const metrics = [
-        ...(risk ? sectionRows(risk).filter(([l]) => /risk score|risk level|delay probability|progress stall/i.test(l)).slice(0,4) : []),
-        ...(cost ? sectionRows(cost).filter(([l]) => /original cost|revised cost|expenditure|cost risk/i.test(l)).slice(0,4) : []),
-        ...(schedule ? sectionRows(schedule).filter(([l]) => /delay days|physical progress|schedule status|completion/i.test(l)).slice(0,4) : [])
-    ].slice(0,8);
-    if (metrics.length) {
-        ensureSpace(22);
-        pdf.setFont("helvetica","bold");
-        pdf.setFontSize(8);
-        pdf.setTextColor(102,112,133);
-        pdf.text("KEY MONITORING INDICATORS", margin, y);
-        y += 5;
-        const cardW = (contentWidth - 6) / 2;
-        metrics.forEach(([label,value], index) => {
-            const col = index % 2;
-            if (col === 0) ensureSpace(18);
-            const x = margin + col * (cardW + 6);
-            if (col === 0 && index > 0) y += 2;
-            const cardY = y;
-            pdf.setDrawColor(228,231,236);
-            pdf.setFillColor(250,250,250);
-            pdf.roundedRect(x,cardY,cardW,15,2,2,"FD");
-            pdf.setFont("helvetica","bold"); pdf.setFontSize(6.8); pdf.setTextColor(152,162,179);
-            pdf.text(label.toUpperCase().slice(0,34),x+4,cardY+5);
-            pdf.setFontSize(9); pdf.setTextColor(16,24,40);
-            pdf.text(pdf.splitTextToSize(value,cardW-8).slice(0,1),x+4,cardY+10.5);
-            if (col === 1) y += 17;
+    heading("Project Overview", "01 · Project identity & current position");
+    if (overview) keyValueTable(sectionRows(overview).filter(([label]) => !/project code|project name/i.test(label)).slice(0, 20));
+
+    const indicatorRows: Array<[string, string]> = [];
+    if (risk) sectionRows(risk).filter(([label]) => /risk score|risk level|cost risk|future delay|progress stall/i.test(label)).forEach((r) => indicatorRows.push(r));
+    if (cost) sectionRows(cost).filter(([label]) => /original cost|revised cost|expenditure/i.test(label)).forEach((r) => indicatorRows.push(r));
+    if (schedule) sectionRows(schedule).filter(([label]) => /delay|physical progress|completion|schedule status/i.test(label)).forEach((r) => indicatorRows.push(r));
+    const indicators = uniqueRows(indicatorRows).slice(0, 12);
+    if (indicators.length) {
+        heading("Key Monitoring Indicators", "Current captured position");
+        keyValueTable(indicators);
+    }
+
+    if (risk) {
+        heading("Risk Assessment", "02 · Risk position");
+        keyValueTable(sectionRows(risk));
+        const chart = chartRowsForSection(risk);
+        if (chart.length) { pageBreak(58); y = drawBarChart(pdf, "Risk indicator profile", chart, margin, y, contentWidth, 48, "%"); }
+    }
+    if (cost) {
+        heading("Cost & Financial Position", "03 · Financial monitoring");
+        keyValueTable(sectionRows(cost));
+        const chart = chartRowsForSection(cost);
+        if (chart.length) { pageBreak(58); y = drawBarChart(pdf, "Cost position", chart, margin, y, contentWidth, 48, " Cr"); }
+    }
+    if (schedule) {
+        heading("Schedule & Delay Analysis", "04 · Schedule monitoring");
+        keyValueTable(sectionRows(schedule));
+    }
+
+    if (trends) {
+        const snap = trends.snapshot as Record<string, unknown>;
+        const raw = Array.isArray(snap.risk_trajectory) ? snap.risk_trajectory : Array.isArray(snap.progress_trajectory) ? snap.progress_trajectory : Array.isArray(snap.history) ? snap.history : [];
+        const points: Array<[string, number]> = [];
+        raw.forEach((item, index) => {
+            if (!item || typeof item !== "object") return;
+            const obj = item as Record<string, unknown>;
+            const rawValue = obj.risk ?? obj.risk_score ?? obj.progress ?? obj.physical_progress ?? obj.value;
+            if (typeof rawValue === "number" && Number.isFinite(rawValue)) points.push([String(obj.date ?? obj.month ?? obj.period ?? obj.label ?? index + 1), rawValue]);
         });
-        if (metrics.length % 2) y += 17;
-    }
-    if (overview) {
-        addSectionHeading("Project Details", "Overview Detail");
-        addFacts(sectionRows(overview));
-    }
-    if (report.description) {
-        addLabelValue("Report Scope", report.description);
-    }
-    if (report.observation) {
-        addLabelValue("Officer Observation", report.observation);
-    }
-    if (report.executiveSummary) {
-        addSectionHeading("Key Findings & Actions", "Executive Summary");
-        addText(report.executiveSummary, 9.5, false, [52,64,84], 5);
-    }
-
-    report.sections.filter(s => s.type !== "overview").forEach((s,index) => {
-        addSectionHeading(s.title, String(index + 2).padStart(2,"0") + " · Analysis");
-        addText(s.description, 8.5, false, [102,112,133], 4);
-        const rows = sectionRows(s);
-        if (rows.length) addFacts(rows);
-        else addText("No structured data captured for this section.", 9, false, [152,162,179], 4);
-        const trendRows = trendTableRows(s);
-        if (trendRows.length) {
-            addText("Captured trend / simulation values", 8.5, true, [71,84,103], 3);
-            const keys = Object.keys(trendRows[0]).slice(0,5);
-            trendRows.slice(0,24).forEach((row,rowIndex) => {
-                const values = keys.map(k => `${humanLabel(k)}: ${row[k] || "—"}`).join("  |  ");
-                addText(`${rowIndex + 1}. ${values}`, 7.5, false, [71,84,103], 2.5);
-            });
-            if (trendRows.length > 24) addText("Additional captured rows are available in the Excel Technical Appendix.", 7.5, false, [152,162,179], 3);
+        if (points.length >= 2) {
+            heading("Project Trend", "05 · Historical trajectory");
+            pageBreak(72);
+            y = drawLineChart(pdf, "Captured project trajectory", points.slice(0, 12), margin, y, contentWidth, 60);
+            paragraph("Values are reproduced from the saved Project Analytics snapshot; the export does not recalculate them.");
         }
-        if (s.observation) addLabelValue("Officer Observation", s.observation);
-    });
+    }
 
-    ensureSpace(12);
-    pdf.setDrawColor(228,231,236);
-    pdf.line(margin,pageHeight-11,pageWidth-margin,pageHeight-11);
-    pdf.setFont("helvetica","normal");
-    pdf.setFontSize(7);
-    pdf.setTextColor(152,162,179);
-    pdf.text("PAIMANA · Generated report · Captured analytics snapshot", margin, pageHeight-6);
+    if (simulation) {
+        heading("What-If Risk Simulation", "06 · Scenario analysis");
+        keyValueTable(sectionRows(simulation));
+        if (simulation.observation) paragraph("Observation: " + simulation.observation);
+    }
+
+    if (recommendation || report.observation || report.executiveSummary) {
+        heading("Observations & Actions", "07 · Officer record");
+        if (report.observation) paragraph("Officer Observation: " + report.observation);
+        if (recommendation?.observation) paragraph("Section Observation: " + recommendation.observation);
+        if (report.executiveSummary) paragraph(report.executiveSummary);
+    }
+
     const totalPages = pdf.getNumberOfPages();
     for (let page = 1; page <= totalPages; page++) {
         pdf.setPage(page);
-        pdf.setFont("helvetica","normal");
-        pdf.setFontSize(7);
-        pdf.setTextColor(152,162,179);
-        pdf.text(`Page ${page} of ${totalPages}`, pageWidth-margin, pageHeight-6, { align: "right" });
+        pdf.setDrawColor(220, 225, 231);
+        pdf.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(6.8);
+        pdf.setTextColor(135, 146, 159);
+        pdf.text("PAIMANA · Generated from captured analytics snapshot", margin, pageHeight - 7);
+        pdf.text("Page " + page + " of " + totalPages, pageWidth - margin, pageHeight - 7, { align: "right" });
     }
-    const filename = (report.title || "PAIMANA_Report").replace(/[^a-z0-9_-]+/gi,"_") + ".pdf";
-    pdf.save(filename);
+    pdf.save((report.title || "PAIMANA_Project_Report").replace(/[^a-z0-9_-]+/gi, "_") + ".pdf");
 }
+
 export default function ReportsPage(){
     const store=useReportsStore();
     const {title,description,observation,scope,projectCode,projectName,filters,sections,history,executiveSummary,setTitle,setDescription,setObservation,setScope,setProjectCode,setProjectName,setFilter,addSection,removeSection,moveSection,clearSections,updateSection,setExecutiveSummary,saveCurrentReport,loadReport,duplicateReport,deleteReport}=store;
@@ -379,7 +454,7 @@ export default function ReportsPage(){
             <Card padding="lg"><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-bold text-slate-900">AI Executive Summary</h2><p className="mt-1 text-[11px] text-slate-400">Key findings, major risks, changes and recommended actions from selected evidence.</p></div><Button variant="secondary" onClick={aiSummary} disabled={!sections.length||aiLoading}><Sparkles size={15}/>{aiLoading?"Generating...":"Generate Summary"}</Button></div>{aiError&&<div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{aiError}</div>}{executiveSummary?<div className="mt-4 whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-700">{executiveSummary}</div>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-xs text-slate-400">No AI summary generated yet.</div>}</Card>
         </div>
         <aside className="space-y-5"><Card padding="lg"><h2 className="text-sm font-bold text-slate-900">Add to Report</h2><p className="mt-1 text-[11px] text-slate-400">Only verified report section types are available here.</p><input value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder="Search sections..." className="field mt-4"/><div className="mt-4 space-y-2">{available.map(s=><button key={s.type} type="button" onClick={()=>addSection({id:s.type+"-"+Date.now(),...s})} className="group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left hover:bg-slate-50"><span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-500"><Plus size={15}/></span><span><span className="block text-xs font-bold text-slate-800">{s.title}</span><span className="mt-0.5 block text-[10px] text-slate-400">{s.description}</span></span></button>)}</div></Card>
-            <Card padding="lg" className="border-slate-200 bg-slate-50/60"><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Export</div><div className="mt-2 text-sm font-bold text-slate-800">Official report outputs</div><div className="mt-3 grid gap-2"><Button variant="secondary" disabled={!sections.length} onClick={()=>exportXlsx(current)}><Download size={15}/> Excel (.xlsx)</Button><Button variant="secondary" disabled={!sections.length} onClick={()=>downloadPdf(current)}><Download size={15}/> Download PDF</Button><Button variant="primary" disabled={!sections.length} onClick={()=>setPreview(true)}><Eye size={15}/> Preview</Button></div><p className="mt-3 text-[10px] leading-4 text-slate-400">PDF is generated from the saved report snapshot and downloads directly as a .pdf file.</p></Card>
+            <Card padding="lg" className="border-slate-200 bg-slate-50/70"><div className="flex items-start gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white"><Download size={17}/></div><div><div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Report output</div><div className="mt-1 text-sm font-bold text-slate-900">Generate official report</div><p className="mt-1 text-[11px] leading-5 text-slate-500">Exports use only the saved analytics snapshot for this report.</p></div></div><div className="mt-4 space-y-2"><Button variant="primary" className="w-full justify-center" disabled={!sections.length} onClick={()=>downloadPdf(current)}><Download size={15}/> Download PDF</Button><Button variant="secondary" className="w-full justify-center" disabled={!sections.length} onClick={()=>exportXlsx(current)}><Download size={15}/> Download Excel</Button><Button variant="secondary" className="w-full justify-center" disabled={!sections.length} onClick={()=>setPreview(true)}><Eye size={15}/> Preview Report</Button></div><div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-[10px] leading-4 text-slate-500"><span className="font-semibold text-slate-700">PDF:</span> readable official report with tables/charts where captured data supports them.<br/><span className="font-semibold text-slate-700">Excel:</span> compact two-sheet workbook for review and record keeping.</div></Card>
         </aside></div>
 
         {customize&&<div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/40 p-4" onMouseDown={()=>setCustomizeId(null)}><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onMouseDown={e=>e.stopPropagation()}><div className="flex items-start justify-between"><div><h3 className="text-base font-bold text-slate-900">Customize Section</h3><p className="mt-1 text-xs text-slate-400">{customize.title}</p></div><button type="button" onClick={()=>setCustomizeId(null)} className="icon-btn"><X size={16}/></button></div><div className="mt-5 grid grid-cols-2 gap-2">{defaultReportParts.map(p=>{const selected=(customize.selectedParts??defaultReportParts).includes(p);return <button key={p} type="button" onClick={()=>{const currentParts=customize.selectedParts??defaultReportParts;const next=selected?currentParts.filter(x=>x!==p):[...currentParts,p];updateSection(customize.id,{selectedParts:next.length?next:["summary"]});}} className={`flex items-center gap-2 rounded-xl border px-3 py-3 text-left text-xs font-semibold ${selected?"border-slate-400 bg-slate-100 text-slate-900":"border-slate-200 text-slate-500"}`}>{selected?<Check size={14}/>:<Plus size={14}/>} {partLabel(p)}</button>})}</div><label className="mt-5 block"><span className="label">Section Observation / Comment</span><textarea value={customize.observation??""} onChange={e=>updateSection(customize.id,{observation:e.target.value})} rows={4} className="field py-2.5" placeholder="Add an observation/comment..."/></label><div className="mt-5 flex justify-end"><Button variant="primary" onClick={()=>setCustomizeId(null)}>Done</Button></div></div></div>}
