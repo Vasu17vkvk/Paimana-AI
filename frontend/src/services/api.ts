@@ -821,9 +821,3 @@ export interface ReportExecutiveSummaryRequest {
     sections: Array<{ title: string; description: string; selectedParts: string[]; snapshot: unknown; observation: string }>;
 }
 
-export async function generateReportExecutiveSummary(payload: ReportExecutiveSummaryRequest) {
-    return apiRequest<{ summary: string }>("/reports/executive-summary", {
-        method: "POST",
-        body: JSON.stringify(payload),
-    });
-}
