@@ -198,9 +198,9 @@ export default function ReportsPage() {
             </div>
 
             {previewOpen && (
-                <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/30 p-4 backdrop-blur-[2px] sm:p-8">
+                <div className="report-preview-overlay fixed inset-0 z-50 overflow-y-auto bg-slate-950/30 p-4 backdrop-blur-[2px] sm:p-8">
                     <div className="mx-auto min-h-full max-w-5xl py-4 sm:py-8">
-                        <Card padding="lg" className="overflow-hidden bg-white shadow-xl">
+                        <Card padding="lg" className="report-print-root overflow-hidden bg-white shadow-xl">
                             <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-5">
                                 <div className="min-w-0">
                                     <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Report Preview</div>
@@ -242,7 +242,7 @@ export default function ReportsPage() {
                                 ))}
                             </div>
 
-                            <div className="mt-6 flex justify-end border-t border-slate-200 pt-5">
+                            <div className="report-preview-actions mt-6 flex justify-end border-t border-slate-200 pt-5">
                                 <div className="flex flex-wrap justify-end gap-2">
                                     <Button variant="secondary" onClick={() => exportReportCsv(title, description, observation, sections)}>Excel (CSV)</Button>
                                     <Button variant="primary" onClick={printReport}>PDF / Print</Button>
