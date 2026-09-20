@@ -2594,6 +2594,170 @@ def _analytics_response(
             "source": "postgresql",
         }
 
+        # ---------------------------------------------------------------
+    # HIGHEST-RISK MINISTRY
+    # ---------------------------------------------------------------
+
+    highest_risk_ministry_requested = (
+        re.search(
+            r"\b(?:which|what)\b.*"
+            r"\bministr(?:y|ies)\b.*"
+            r"\b(?:highest|most|greatest)\b.*"
+            r"\brisk\b",
+            normalized,
+        )
+        is not None
+        or re.search(
+            r"\b(?:highest|most|greatest)\s+risk\b.*"
+            r"\bministr(?:y|ies)\b",
+            normalized,
+        )
+        is not None
+    )
+
+    if highest_risk_ministry_requested:
+        ml_ready = load_ml_ready()
+        master = load_master()
+
+        if (
+            ml_ready is None
+            or ml_ready.empty
+            or master is None
+            or master.empty
+        ):
+            return {
+                "text": "Project ML or master data is unavailable.",
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        latest_rows = ml_ready.copy()
+
+        sort_columns = [
+            column
+            for column in [
+                "project_code",
+                "snapshot_year",
+                "snapshot_month_num",
+            ]
+            if column in latest_rows.columns
+        ]
+
+        if (
+            "project_code" in latest_rows.columns
+            and len(sort_columns) >= 2
+        ):
+            latest_rows = latest_rows.sort_values(
+                sort_columns
+            )
+
+            latest_rows = (
+                latest_rows
+                .drop_duplicates(
+                    subset=["project_code"],
+                    keep="last",
+                )
+            )
+
+        scores = model_scores_from_features_batch(
+            latest_rows
+        )
+
+        master_for_merge = master[
+            [
+                "project_code",
+                "ministry",
+            ]
+        ].copy()
+
+        master_for_merge["project_code"] = (
+            master_for_merge["project_code"]
+            .astype(str)
+            .str.strip()
+        )
+
+        scores["project_code"] = (
+            scores["project_code"]
+            .astype(str)
+            .str.strip()
+        )
+
+        scored_projects = scores.merge(
+            master_for_merge,
+            on="project_code",
+            how="left",
+        )
+
+        scored_projects = scored_projects[
+            scored_projects["ministry"].notna()
+        ]
+
+        scored_projects = scored_projects[
+            scored_projects["ministry"]
+            .astype(str)
+            .str.strip()
+            .ne("")
+        ]
+
+        if scored_projects.empty:
+            return {
+                "text": "No ministry risk data is available.",
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        ministry_risk = (
+            scored_projects
+            .groupby("ministry", as_index=False)
+            .agg(
+                average_risk_score=(
+                    "overall_risk_score",
+                    "mean",
+                ),
+                project_count=(
+                    "project_code",
+                    "count",
+                ),
+            )
+            .sort_values(
+                [
+                    "average_risk_score",
+                    "ministry",
+                ],
+                ascending=[
+                    False,
+                    True,
+                ],
+            )
+        )
+
+        row = ministry_risk.iloc[0]
+
+        return {
+            "text": (
+                "Ministry with highest average risk score: "
+                f"{row['ministry']}\n"
+                "Average risk score: "
+                f"{float(row['average_risk_score']):.2f}\n"
+                "Projects in ministry: "
+                f"{int(row['project_count'])}"
+            ),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }    
+
 
     # ---------------------------------------------------------------
     # LIST PROJECTS BY MINISTRY
@@ -3414,41 +3578,119 @@ def _analytics_response(
         "source": "postgresql",
     }    
 
-def _query_from_understanding_plan(original_query, plan):
+def _query_from_understanding_plan(
+    original_query: str,
+    plan: dict[str, Any] | None,
+) -> str:
     """
-    Convert Gemini's structured query-understanding result into a
-    deterministic backend query that existing handlers can process.
+    Convert Gemini's structured query-understanding result into
+    a deterministic backend query that existing handlers can process.
+
+    Gemini only interprets the user's wording.
+    Existing PostgreSQL / ML / RAG handlers remain responsible
+    for producing the actual answer.
     """
+
     if not plan:
         return original_query
 
-    intent = str(plan.get("intent") or "").upper()
-    operation = str(plan.get("operation") or "").upper()
+    intent = str(
+        plan.get("intent") or ""
+    ).upper()
+
+    operation = str(
+        plan.get("operation") or ""
+    ).upper()
+
+    dimension = str(
+        plan.get("dimension") or ""
+    ).strip().lower()
+
+    metric = str(
+        plan.get("metric") or ""
+    ).strip().lower()
+
     filters = plan.get("filters") or {}
-    retrieval_query = (plan.get("retrieval_query") or "").strip()
 
-    state = filters.get("state")
-    schedule_status = filters.get("schedule_status")
+    state = str(
+        filters.get("state") or ""
+    ).strip()
 
-    # Portfolio analytics: list projects matching state + schedule status.
-    if (
-        intent == "ANALYTICS"
-        and operation == "LIST_PROJECTS"
-        and state
-        and schedule_status
-    ):
-        return f"which projects are {schedule_status.lower()} in {state}"
+    schedule_status = str(
+        filters.get("schedule_status") or ""
+    ).strip()
 
-    # Portfolio analytics: count projects in a state.
+    # ---------------------------------------------------------------
+    # ANALYTICS: COUNT PROJECTS IN A STATE
+    # ---------------------------------------------------------------
+
     if (
         intent == "ANALYTICS"
         and operation == "COUNT_PROJECTS"
+        and dimension == "state"
         and state
     ):
-        return f"how many projects are in {state}"
+        return (
+            f"how many projects are in {state}"
+        )
 
+    # ---------------------------------------------------------------
+    # ANALYTICS: LIST PROJECTS BY STATE + STATUS
+    # ---------------------------------------------------------------
+
+    if (
+        intent == "ANALYTICS"
+        and operation == "LIST_PROJECTS"
+        and dimension == "state"
+        and state
+        and schedule_status
+    ):
+        return (
+            f"which projects are "
+            f"{schedule_status.lower()} "
+            f"in {state}"
+        )
+
+    # ---------------------------------------------------------------
+    # ANALYTICS: HIGHEST-RISK MINISTRY
+    # ---------------------------------------------------------------
+
+    if (
+        intent == "ANALYTICS"
+        and operation == "HIGHEST_RISK"
+        and dimension == "ministry"
+        and metric == "risk"
+    ):
+        return (
+            "which ministry has highest project risk"
+        )
+
+    # ---------------------------------------------------------------
+    # ANALYTICS: HIGHEST-RISK SECTOR
+    # ---------------------------------------------------------------
+
+    if (
+        intent == "ANALYTICS"
+        and operation == "HIGHEST_RISK"
+        and dimension == "sector"
+        and metric == "risk"
+    ):
+        return (
+            "which sector has highest project risk"
+        )
+
+    # ---------------------------------------------------------------
     # RAG: use Gemini's normalized retrieval query.
-    if intent == "RAG" and retrieval_query:
+    # ---------------------------------------------------------------
+
+    retrieval_query = str(
+        plan.get("retrieval_query") or ""
+    ).strip()
+
+    if (
+        intent == "RAG"
+        and retrieval_query
+    ):
         return retrieval_query
 
     return original_query
@@ -3547,6 +3789,7 @@ def answer_query(
     if query_type in {
         RAG_QUERY,
         HYBRID_QUERY,
+        ANALYTICS_QUERY,
         GENERAL_QUERY,
     }:
         try:

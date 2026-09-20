@@ -62,7 +62,28 @@ VALID_OPERATIONS = {
     "COUNT_PROJECTS",
     "LIST_PROJECTS",
     "LIST_DIMENSIONS",
+    "HIGHEST_RISK",
     "SEARCH_KNOWLEDGE",
+}
+
+VALID_ANALYTICS_DIMENSIONS = {
+    "state",
+    "ministry",
+    "sector",
+    "project",
+}
+
+VALID_ANALYTICS_METRICS = {
+    "project_count",
+    "risk",
+    "delay",
+    "progress",
+    "cost",
+}
+
+VALID_SORT_ORDERS = {
+    "ascending",
+    "descending",
 }
 
 
@@ -108,20 +129,66 @@ IMPORTANT RULES:
    is clear.
 
 4. Normalize state names to standard Indian state/UT names when clear.
+   Examples:
+       goa, Goa -> Goa
+       gujrat -> Gujarat
+       up -> Uttar Pradesh only when the context clearly refers to a state
+       uttar pradesh -> Uttar Pradesh
 
-5. For RAG questions, create a concise retrieval_query suitable for semantic
-   and keyword search.
+5. Understand different natural-language forms of the same request.
+   Examples:
+       "how many projects in Goa"
+       "how many projects are in Goa"
+       "how many projects are there in Goa"
+       "how many projects does Goa have"
+       "Goa me kitne projects hain"
+   all mean:
+       ANALYTICS + COUNT_PROJECTS + dimension=state + metric=project_count
+       + filters.state="Goa"
 
-6. For RAG questions, provide useful retrieval_keywords.
+6. For analytics questions, identify:
+       - the operation
+       - the dimension, when applicable
+       - the metric, when applicable
+       - sort direction, when applicable
+       - result limit, when applicable
+       - filters
 
-7. For analytics questions, identify the requested operation and filters.
+7. Use HIGHEST_RISK for questions asking which entity has the highest,
+   greatest, or most project risk.
+   Examples:
+       "which ministry has highest project risk"
+       "what ministry has the highest average risk"
+       "which sector has the most project risk"
 
-8. Do not produce the factual answer.
+8. For HIGHEST_RISK questions:
+       - dimension must be the entity being compared, such as "ministry"
+         or "sector"
+       - metric must be "risk"
+       - sort_order must be "descending"
+       - limit should normally be 1
 
-9. Do not invent project values, metrics, dates, ministries, sectors, or
-   statuses.
+9. Use LIST_PROJECTS when the user wants the actual projects matching
+   filters, such as delayed projects in a state.
 
-10. Return ONLY valid JSON.
+10. Use COUNT_PROJECTS when the user wants a count of projects.
+
+11. Use LIST_DIMENSIONS when the user wants grouped portfolio counts such as:
+       "project count by state"
+       "how many projects are in each ministry"
+       "project count by sector"
+
+12. For RAG questions, create a concise retrieval_query suitable for semantic
+    and keyword search.
+
+13. For RAG questions, provide useful retrieval_keywords.
+
+14. Do not produce the factual answer.
+
+15. Do not invent project values, metrics, dates, ministries, sectors, or
+    statuses.
+
+16. Return ONLY valid JSON.
 """.strip()
 
 
@@ -332,9 +399,7 @@ def _normalize_query_plan(
     # If project_code is explicitly extracted, keep it synchronized
     # with the filters.
     if project_code:
-        filters["project_code"] = (
-            project_code
-        )
+        filters["project_code"] = project_code
 
     retrieval_query = str(
         plan.get(
@@ -359,9 +424,7 @@ def _normalize_query_plan(
         retrieval_keywords = []
 
     # Limit payload size so a bad model response cannot create a huge object.
-    retrieval_keywords = retrieval_keywords[
-        :10
-    ]
+    retrieval_keywords = retrieval_keywords[:10]
 
     needs_generation = bool(
         plan.get(
@@ -370,10 +433,98 @@ def _normalize_query_plan(
         )
     )
 
+    dimension = str(
+        plan.get(
+            "dimension"
+        ) or ""
+    ).strip().lower()
+
+    if dimension not in {
+        "",
+        "state",
+        "ministry",
+        "sector",
+        "project",
+    }:
+        dimension = ""
+
+    metric = str(
+        plan.get(
+            "metric"
+        ) or ""
+    ).strip().lower()
+
+    if metric not in {
+        "",
+        "project_count",
+        "risk",
+        "delay",
+        "progress",
+        "cost",
+    }:
+        metric = ""
+
+    sort_order = str(
+        plan.get(
+            "sort_order"
+        ) or ""
+    ).strip().lower()
+
+    if sort_order not in {
+        "",
+        "ascending",
+        "descending",
+    }:
+        sort_order = ""
+
+    limit_value = plan.get(
+        "limit"
+    )
+
+    try:
+        limit_value = (
+            int(limit_value)
+            if limit_value is not None
+            else None
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        limit_value = None
+
+    if limit_value is not None:
+        limit_value = max(
+            1,
+            min(
+                limit_value,
+                100,
+            ),
+        )
+
+    # Keep the structured plan internally consistent for common analytics
+    # operations even when Gemini omits a field.
+    if operation == "HIGHEST_RISK":
+        if not metric:
+            metric = "risk"
+
+        if not sort_order:
+            sort_order = "descending"
+
+        if limit_value is None:
+            limit_value = 1
+
+    if operation == "COUNT_PROJECTS" and not metric:
+        metric = "project_count"
+
     return {
         "intent": intent,
         "operation": operation,
         "project_code": project_code,
+        "dimension": dimension,
+        "metric": metric,
+        "sort_order": sort_order,
+        "limit": limit_value,
         "filters": filters,
         "retrieval_query": retrieval_query,
         "retrieval_keywords": retrieval_keywords,
@@ -414,8 +565,14 @@ RETURN ONLY THIS JSON SHAPE:
 
 {{
   "intent": "FACT | ML | RAG | HYBRID | ANALYTICS | GENERAL",
-  "operation": "ANSWER | GET_FACT | GET_PREDICTION | COUNT_PROJECTS | LIST_PROJECTS | LIST_DIMENSIONS | SEARCH_KNOWLEDGE",
+  "operation": "ANSWER | GET_FACT | GET_PREDICTION | COUNT_PROJECTS | LIST_PROJECTS | LIST_DIMENSIONS | HIGHEST_RISK | SEARCH_KNOWLEDGE",
   "project_code": null,
+
+  "dimension": "state | ministry | sector | project | null",
+  "metric": "project_count | risk | delay | progress | cost | null",
+  "sort_order": "ascending | descending | null",
+  "limit": null,
+
   "filters": {{
     "state": null,
     "ministry": null,
@@ -426,6 +583,7 @@ RETURN ONLY THIS JSON SHAPE:
     "project_code": null,
     "search": null
   }},
+
   "retrieval_query": "",
   "retrieval_keywords": [],
   "needs_generation": false
@@ -436,94 +594,314 @@ INTERPRETATION EXAMPLES:
 Question:
 "project 400006 kis ministry ke andr h?"
 
-Expected intent:
-FACT
+Expected:
+{{
+  "intent": "FACT",
+  "operation": "GET_FACT",
+  "project_code": "400006",
+  "dimension": null,
+  "metric": null,
+  "sort_order": null,
+  "limit": null,
+  "filters": {{"project_code": "400006"}}
+}}
 
-Expected operation:
-GET_FACT
-
-Expected project_code:
-"400006"
-
-Expected filters:
-{{"project_code": "400006"}}
 
 Question:
 "uttar pradesh me kon se projects delayed hai"
 
-Expected intent:
-ANALYTICS
-
-Expected operation:
-LIST_PROJECTS
-
-Expected filters:
+Expected:
 {{
-  "state": "Uttar Pradesh",
-  "schedule_status": "Delayed"
+  "intent": "ANALYTICS",
+  "operation": "LIST_PROJECTS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": null,
+  "sort_order": null,
+  "limit": null,
+  "filters": {{
+    "state": "Uttar Pradesh",
+    "schedule_status": "Delayed"
+  }}
 }}
+
 
 Question:
 "gujrat me kitne project hai"
 
-Expected intent:
-ANALYTICS
-
-Expected operation:
-COUNT_PROJECTS
-
-Expected filters:
+Expected:
 {{
-  "state": "Gujarat"
+  "intent": "ANALYTICS",
+  "operation": "COUNT_PROJECTS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": "project_count",
+  "sort_order": null,
+  "limit": null,
+  "filters": {{
+    "state": "Gujarat"
+  }}
 }}
+
+
+Question:
+"how many projects are there in goa"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "COUNT_PROJECTS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": "project_count",
+  "sort_order": null,
+  "limit": null,
+  "filters": {{
+    "state": "Goa"
+  }}
+}}
+
+
+Question:
+"goa me kitne projects hain"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "COUNT_PROJECTS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": "project_count",
+  "sort_order": null,
+  "limit": null,
+  "filters": {{
+    "state": "Goa"
+  }}
+}}
+
+
+Question:
+"how many projects does Goa have"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "COUNT_PROJECTS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": "project_count",
+  "sort_order": null,
+  "limit": null,
+  "filters": {{
+    "state": "Goa"
+  }}
+}}
+
+
+Question:
+"tell me the total project count for Gujarat"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "COUNT_PROJECTS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": "project_count",
+  "sort_order": null,
+  "limit": null,
+  "filters": {{
+    "state": "Gujarat"
+  }}
+}}
+
+
+Question:
+"which ministry has highest project risk"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "HIGHEST_RISK",
+  "project_code": null,
+  "dimension": "ministry",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": 1,
+  "filters": {{}}
+}}
+
+
+Question:
+"what ministry has the highest average risk"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "HIGHEST_RISK",
+  "project_code": null,
+  "dimension": "ministry",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": 1,
+  "filters": {{}}
+}}
+
+
+Question:
+"which ministry has the most risky projects"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "HIGHEST_RISK",
+  "project_code": null,
+  "dimension": "ministry",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": 1,
+  "filters": {{}}
+}}
+
+
+Question:
+"which sector has the highest risk"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "HIGHEST_RISK",
+  "project_code": null,
+  "dimension": "sector",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": 1,
+  "filters": {{}}
+}}
+
+
+Question:
+"which sector is most risky"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "HIGHEST_RISK",
+  "project_code": null,
+  "dimension": "sector",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": 1,
+  "filters": {{}}
+}}
+
+
+Question:
+"how many projects are in each state"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "LIST_DIMENSIONS",
+  "project_code": null,
+  "dimension": "state",
+  "metric": "project_count",
+  "sort_order": "descending",
+  "limit": null,
+  "filters": {{}}
+}}
+
+
+Question:
+"how many projects are in each ministry"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "LIST_DIMENSIONS",
+  "project_code": null,
+  "dimension": "ministry",
+  "metric": "project_count",
+  "sort_order": "descending",
+  "limit": null,
+  "filters": {{}}
+}}
+
+
+Question:
+"project count by sector"
+
+Expected:
+{{
+  "intent": "ANALYTICS",
+  "operation": "LIST_DIMENSIONS",
+  "project_code": null,
+  "dimension": "sector",
+  "metric": "project_count",
+  "sort_order": "descending",
+  "limit": null,
+  "filters": {{}}
+}}
+
 
 Question:
 "what are common causes of infrastructure delays?"
 
-Expected intent:
-RAG
+Expected:
+{{
+  "intent": "RAG",
+  "operation": "SEARCH_KNOWLEDGE",
+  "project_code": null,
+  "dimension": null,
+  "metric": null,
+  "sort_order": null,
+  "limit": null,
+  "filters": {{}},
+  "retrieval_query": "common causes of delays in infrastructure projects",
+  "retrieval_keywords": [
+    "infrastructure project delays",
+    "causes of delay",
+    "schedule delay",
+    "project delivery"
+  ]
+}}
 
-Expected operation:
-SEARCH_KNOWLEDGE
-
-retrieval_query:
-"common causes of delays in infrastructure projects"
-
-retrieval_keywords:
-[
-  "infrastructure project delays",
-  "causes of delay",
-  "schedule delay",
-  "project delivery"
-]
 
 Question:
 "why is project 400005 delayed?"
 
-Expected intent:
-HYBRID
+Expected:
+{{
+  "intent": "HYBRID",
+  "operation": "ANSWER",
+  "project_code": "400005",
+  "dimension": null,
+  "metric": null,
+  "sort_order": null,
+  "limit": null,
+  "filters": {{"project_code": "400005"}}
+}}
 
-Expected operation:
-ANSWER
-
-Expected project_code:
-"400005"
 
 Question:
 "what is the risk score for project 400005?"
 
-Expected intent:
-ML
+Expected:
+{{
+  "intent": "ML",
+  "operation": "GET_PREDICTION",
+  "project_code": "400005",
+  "dimension": null,
+  "metric": "risk",
+  "sort_order": null,
+  "limit": null,
+  "filters": {{"project_code": "400005"}}
+}}
 
-Expected operation:
-GET_PREDICTION
 
-Expected project_code:
-"400005"
+Now classify the user's question according to the rules and examples above.
 
-Now classify the user's question.
-
-Return ONLY JSON.
+Return ONLY valid JSON.
 """.strip()
 
     response = generate_grounded_response(

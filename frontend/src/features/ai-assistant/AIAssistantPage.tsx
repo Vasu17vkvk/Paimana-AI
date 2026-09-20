@@ -485,7 +485,7 @@ export default function AIAssistantPage() {
                 );
 
             const rawAssistantData =
-                response.data;
+                response;
 
             // --------------------------------------------------------------
             // Normalize optional arrays.

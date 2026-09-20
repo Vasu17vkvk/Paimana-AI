@@ -8,15 +8,16 @@ from sqlalchemy import text
 from app.extensions import db
 from app.services.assistant_service import answer_query
 
-from app.services.query_understanding_service import (
-    understand_query,
-)
 
 assistant_bp = Blueprint(
     "assistant",
     __name__,
 )
 
+
+# ============================================================
+# ASSISTANT QUERY
+# ============================================================
 
 # ============================================================
 # ASSISTANT QUERY
@@ -49,7 +50,10 @@ def assistant_query():
     # Validate question
     # --------------------------------------------------------
 
-    if not isinstance(question, str) or not question.strip():
+    if not isinstance(
+        question,
+        str,
+    ) or not question.strip():
         return jsonify(
             {
                 "success": False,
@@ -64,91 +68,15 @@ def assistant_query():
     # --------------------------------------------------------
 
     if project_code is not None:
-        project_code = str(project_code).strip()
+        project_code = str(
+            project_code
+        ).strip()
 
         if not project_code:
             project_code = None
 
-    def _query_from_understanding_plan(
-        original_query: str,
-        plan: dict[str, Any],
-    ) -> str:
-        """
-        Convert Gemini's structured query plan into a canonical query
-        understood by the existing deterministic backend.
-
-        Gemini decides WHAT the user wants.
-        The existing backend decides HOW to retrieve the data.
-        """
-
-        intent = str(
-            plan.get("intent")
-            or ""
-        ).upper()
-
-        operation = str(
-            plan.get("operation")
-            or ""
-        ).upper()
-
-        filters = plan.get(
-            "filters"
-        ) or {}
-
-        # ---------------------------------------------------------------
-        # ANALYTICS
-        # ---------------------------------------------------------------
-
-        if intent == "ANALYTICS":
-
-            state = str(
-                filters.get("state")
-                or ""
-            ).strip()
-
-            schedule_status = str(
-                filters.get("schedule_status")
-                or ""
-            ).strip()
-
-            if (
-                operation == "LIST_PROJECTS"
-                and state
-                and schedule_status
-            ):
-                return (
-                    f"list {schedule_status.lower()} "
-                    f"projects in {state}"
-                )
-
-            if (
-                operation == "COUNT_PROJECTS"
-                and state
-            ):
-                return (
-                    f"how many projects are in {state}"
-                )
-
-        # ---------------------------------------------------------------
-        # RAG
-        # ---------------------------------------------------------------
-
-        if intent == "RAG":
-
-            retrieval_query = str(
-                plan.get(
-                    "retrieval_query"
-                )
-                or ""
-            ).strip()
-
-            if retrieval_query:
-                return retrieval_query
-
-        return original_query        
-
     # --------------------------------------------------------
-    # Run assistant
+    # Execute assistant orchestration
     # --------------------------------------------------------
 
     try:
@@ -161,7 +89,7 @@ def assistant_query():
         return jsonify(
             {
                 "success": True,
-                "data": result,
+                **result,
             }
         ), 200
 
@@ -184,12 +112,10 @@ def assistant_query():
             {
                 "success": False,
                 "error": (
-                    "Assistant service failed. "
-                    "Please check the backend logs."
+                    "Unable to process assistant query."
                 ),
             }
         ), 500
-
 
 # ============================================================
 # ASSISTANT HEALTH

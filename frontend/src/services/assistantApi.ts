@@ -78,9 +78,9 @@ export interface AssistantResponseData {
 }
 
 
-export interface AssistantQueryResponse {
+export interface AssistantQueryResponse
+    extends AssistantResponseData {
     success: boolean;
-    data: AssistantResponseData;
 }
 
 
