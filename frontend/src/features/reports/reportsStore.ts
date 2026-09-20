@@ -134,6 +134,5 @@ export const useReportsStore = create<ReportsState>()(
                 set((state) => ({ history: state.history.filter((report) => report.id !== id) })),
         }),
         { name: "paimana-report-workspace" },
-        { name: "paimana-report-workspace" },
     ),
 );
