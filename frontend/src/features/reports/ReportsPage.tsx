@@ -208,7 +208,7 @@ function splitSummary(text: string): Array<{ heading: string; bullets: string[] 
     const groups: Array<{ heading: string; bullets: string[] }> = [];
     let current: { heading: string; bullets: string[] } | null = null;
     lines.forEach((line) => {
-        const headingMatch = line.replace(/^#+\\s*/, "").replace(/[:*]+$/g, "").match(/^(Key Findings|Major Risks|Important Changes\\s*\\/\\s*Trends|Recommended Actions)$/i);
+        const headingMatch = line.replace(/^#+\s*/, "").replace(/[:*]+$/g, "").match(/^(Key Findings|Major Risks|Important Changes\s*\/\s*Trends|Recommended Actions)$/i);
         if (headingMatch) {
             current = { heading: headingMatch[1], bullets: [] };
             groups.push(current);
