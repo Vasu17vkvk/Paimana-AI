@@ -19,8 +19,8 @@ import {
   type ProjectAnalyticsWhatIfResponse,
 } from "../../services/api";
 import ProjectAnalyticsCharts from "./ProjectAnalyticsCharts";
-
 import ProjectAnalyticsDetailCharts from "./ProjectAnalyticsDetailCharts";
+import SaveToReport from "../reports/SaveToReport";
 
 const emptyFilters: ProjectAnalyticsFilterOptions = {
   sectors: [],
@@ -1163,6 +1163,15 @@ export default function ProjectAnalyticsPage() {
                       <h3 className="text-sm font-semibold text-slate-900">
                         Project Overview
                       </h3>
+                      <div className="mt-2">
+                        <SaveToReport
+                          id={`project-overview-${selectedProjectCode}`}
+                          type="overview"
+                          title="Project Overview"
+                          description="Project identity, scope, status and key facts captured from Project Analytics."
+                          snapshot={{ project: projectInfo, key_facts: keyFacts }}
+                        />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -1277,6 +1286,15 @@ export default function ProjectAnalyticsPage() {
                       <h3 className="text-sm font-semibold text-slate-900">
                         Risk Breakdown
                       </h3>
+                      <div className="mt-2">
+                        <SaveToReport
+                          id={`project-risk-${selectedProjectCode}`}
+                          type="risk"
+                          title="Risk Assessment"
+                          description="Current project risk score, level and component risk signals."
+                          snapshot={{ risk, selectedRiskScore, selectedRiskLevel }}
+                        />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -1323,7 +1341,22 @@ export default function ProjectAnalyticsPage() {
                     </div>
                   </section>
 
-                  <ProjectAnalyticsDetailCharts
+                  <div>
+                    <div className="mb-2">
+                      <SaveToReport
+                        id={`project-trends-${selectedProjectCode}`}
+                        type="trends"
+                        title="Project Trends"
+                        description="Historical schedule, progress and risk trajectories captured from Project Analytics."
+                        snapshot={{
+                          history: projectDetail.history,
+                          flash_history: projectDetail.flash_history,
+                          progress_trajectory: projectDetail.progress_trajectory,
+                          risk_trajectory: projectDetail.risk_trajectory,
+                        }}
+                      />
+                    </div>
+                    <ProjectAnalyticsDetailCharts
                     history={projectDetail.history}
                     flashHistory={projectDetail.flash_history}
                     progressTrajectory={
@@ -1333,6 +1366,16 @@ export default function ProjectAnalyticsPage() {
                       projectDetail.risk_trajectory
                     }
                   />
+
+                  <div className="mb-2">
+                    <SaveToReport
+                      id={`project-recommendations-${selectedProjectCode}`}
+                      type="recommendations"
+                      title="Recommendations"
+                      description="Documented delay reasons and recommended solutions for the selected project."
+                      snapshot={{ delay_reasons: projectDetail.delay_reasons }}
+                    />
+                  </div>
 
                   {/* Delay Reasons */}
                   {projectDetail.delay_reasons.length > 0 && (
