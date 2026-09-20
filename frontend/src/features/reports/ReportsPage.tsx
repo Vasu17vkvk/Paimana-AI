@@ -202,6 +202,38 @@ export default function ReportsPage() {
                 </aside>
             </div>
 
+            <Card padding="lg" className="mt-5">
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <h2 className="text-sm font-bold text-slate-900">Report History</h2>
+                        <p className="mt-1 text-[11px] text-slate-400">Saved report snapshots stay available in this browser.</p>
+                    </div>
+                    <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-500">{history.length} saved</span>
+                </div>
+                {history.length === 0 ? (
+                    <div className="mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center text-xs text-slate-400">
+                        No saved reports yet. Use <span className="font-semibold text-slate-600">Save Report</span> after building a report.
+                    </div>
+                ) : (
+                    <div className="mt-5 space-y-2">
+                        {history.map((report) => (
+                            <div key={report.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center">
+                                <div className="min-w-0 flex-1">
+                                    <div className="truncate text-xs font-bold text-slate-800">{report.title}</div>
+                                    <div className="mt-1 text-[10px] text-slate-400">{report.sections.length} {report.sections.length === 1 ? "section" : "sections"} · {new Date(report.createdAt).toLocaleString()}</div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    <Button size="sm" variant="ghost" onClick={() => { loadReport(report.id); setPreviewOpen(true); }}>View</Button>
+                                    <Button size="sm" variant="ghost" onClick={() => downloadSavedReport(report)}><Download size={13} /> Download</Button>
+                                    <Button size="sm" variant="ghost" onClick={() => duplicateReport(report.id)}><Copy size={13} /> Duplicate</Button>
+                                    <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => deleteReport(report.id)}>Delete</Button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Card>
+
             {previewOpen && (
                 <div className="report-preview-overlay fixed inset-0 z-50 overflow-y-auto bg-slate-950/30 p-4 backdrop-blur-[2px] sm:p-8">
                     <div className="mx-auto min-h-full max-w-5xl py-4 sm:py-8">
