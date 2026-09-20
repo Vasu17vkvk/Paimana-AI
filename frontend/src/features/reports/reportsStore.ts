@@ -17,6 +17,7 @@ export interface ReportSection {
     title: string;
     description: string;
     addedAt: number;
+    snapshot?: unknown;
 }
 
 interface ReportsState {
