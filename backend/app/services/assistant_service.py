@@ -885,6 +885,13 @@ def _fact_response(
         question
     )
 
+    ministry_requested = bool(
+        re.search(
+            r"\b(?:ministry|minstry|mantralaya)\b",
+            normalized,
+        )
+    )
+
     fields: list[
         tuple[str, Any]
     ] = []
@@ -900,7 +907,7 @@ def _fact_response(
             )
         )
 
-    if "ministry" in normalized:
+    if ministry_requested:
         fields.append(
             (
                 "Ministry",
@@ -1175,6 +1182,58 @@ def _fact_response(
                     ),
                 ),
             ]
+
+    # ---------------------------------------------------------------
+    # SINGLE-FIELD RESPONSE
+    # ---------------------------------------------------------------
+
+    if len(fields) == 1:
+        label, value = fields[0]
+
+        display_value = (
+            "unavailable"
+            if value is None
+            else str(value)
+        )
+
+        if label == "Ministry":
+            response_text = (
+                f"Project "
+                f"{project.get('project_code', 'unknown')} "
+                f"is under {display_value}."
+            )
+
+        elif label == "Sector":
+            response_text = (
+                f"Project "
+                f"{project.get('project_code', 'unknown')} "
+                f"is in the {display_value} sector."
+            )
+
+        elif label == "State":
+            response_text = (
+                f"Project "
+                f"{project.get('project_code', 'unknown')} "
+                f"is in {display_value}."
+            )
+
+        else:
+            response_text = (
+                f"Project "
+                f"{project.get('project_code', 'unknown')} — "
+                f"{label}: {display_value}"
+            )
+
+        return {
+            "text": response_text,
+            "query_type": FACT_QUERY,
+            "project_code": project.get(
+                "project_code"
+            ),
+            "citations": [],
+            "model_used": False,
+            "source": "postgresql",
+        }        
 
     lines = [
         (
