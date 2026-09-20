@@ -5,6 +5,47 @@ import PageHeader from "../../components/layout/PageHeader";
 import { useState } from "react";
 import { reportSectionCatalog, useReportsStore } from "./reportsStore";
 
+function csvCell(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportReportCsv(title: string, description: string, observation: string, sections: ReturnType<typeof useReportsStore.getState>["sections"]) {
+    const rows: string[][] = [
+        ["Report Title", title || "PAIMANA Project Report"],
+        ["Description", description],
+        ["Observation / Note", observation],
+        [],
+        ["Section", "Description", "Snapshot Data"],
+    ];
+
+    sections.forEach((section) => {
+        rows.push([
+            section.title,
+            section.description,
+            section.snapshot === undefined ? "" : typeof section.snapshot === "object"
+                ? JSON.stringify(section.snapshot)
+                : String(section.snapshot),
+        ]);
+    });
+
+    const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+    const blob = new Blob(["\\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(title || "PAIMANA_Project_Report").replace(/[^a-z0-9_-]+/gi, "_")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function printReport() {
+    window.print();
+}
+
 function SnapshotValue({ value }: { value: unknown }) {
     if (value === null || value === undefined) return <span className="text-slate-400">—</span>;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -202,7 +243,11 @@ export default function ReportsPage() {
                             </div>
 
                             <div className="mt-6 flex justify-end border-t border-slate-200 pt-5">
-                                <Button variant="secondary" onClick={() => setPreviewOpen(false)}>Close Preview</Button>
+                                <div className="flex flex-wrap justify-end gap-2">
+                                    <Button variant="secondary" onClick={() => exportReportCsv(title, description, observation, sections)}>Excel (CSV)</Button>
+                                    <Button variant="primary" onClick={printReport}>PDF / Print</Button>
+                                    <Button variant="secondary" onClick={() => setPreviewOpen(false)}>Close Preview</Button>
+                                </div>
                             </div>
                         </Card>
                     </div>
