@@ -19,20 +19,6 @@ function SnapshotValue({ value }: { value: unknown }) {
 function partLabel(part: ReportPart) {
     return ({summary:"Summary",risk_breakdown:"Risk Breakdown",contributing_factors:"Contributing Factors",chart:"Chart",table:"Table",recommendations:"Recommendations"} as Record<ReportPart,string>)[part];
 }
-function flattenSnapshot(value: unknown, path = ""): Array<[string,string]> {
-    if (value === null || value === undefined || value === "") return [[path || "Value", "—"]];
-    if (Array.isArray(value)) {
-        if (!value.length) return [[path || "Value", "No data"]];
-        return value.flatMap((item, index) => flattenSnapshot(item, path ? `${path}[${index + 1}]` : `[${index + 1}]`));
-    }
-    if (typeof value === "object") {
-        return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) =>
-            flattenSnapshot(item, path ? `${path} › ${key.replace(/_/g, " ")}` : key.replace(/_/g, " "))
-        );
-    }
-    return [[path || "Value", String(value)]];
-}
-
 function humanLabel(key: string): string {
     return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
