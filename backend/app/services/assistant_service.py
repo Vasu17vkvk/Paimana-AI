@@ -318,6 +318,16 @@ def _is_analytics_intent(
         r"in each ministry|in each sector)\b"
     )
 
+    delayed_project_pattern = re.search(
+        r"\b(?:which|what|list|show)\b.*"
+        r"\bprojects?\b.*"
+        r"\bdelayed\b",
+        normalized,
+    )
+
+    if delayed_project_pattern:
+        return True
+
     return (
         re.search(
             count_pattern,
@@ -1905,6 +1915,139 @@ def _analytics_response(
             "model_used": False,
             "source": "postgresql",
         }
+
+        # ---------------------------------------------------------------
+    # LIST DELAYED PROJECTS BY STATE
+    # ---------------------------------------------------------------
+
+    delayed_project_match = re.search(
+        r"\b(?:which|what|list|show)\b.*"
+        r"\bprojects?\b.*"
+        r"\bdelayed\b.*"
+        r"\b(?:in|from)\s+(.+?)\s*$",
+        normalized,
+    )
+
+    if delayed_project_match:
+
+        requested_location = (
+            delayed_project_match
+            .group(1)
+            .strip()
+        )
+
+        # Match the requested location against our canonical
+        # state/UT names.
+        canonical_states = sorted(
+            INDIA_STATES_AND_UTS,
+            key=len,
+            reverse=True,
+        )
+
+        requested_state = None
+
+        for state_name in canonical_states:
+            if state_name.lower() in requested_location.lower():
+                requested_state = state_name
+                break
+
+        # Common abbreviation.
+        if (
+            requested_state is None
+            and requested_location.lower() == "up"
+        ):
+            requested_state = "Uttar Pradesh"
+
+        if requested_state is None:
+            return {
+                "text": (
+                    "Please specify a valid Indian state or UT."
+                ),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "routing",
+            }
+
+        result = db.session.execute(
+            text(
+                """
+                SELECT
+                    project_code,
+                    project_name,
+                    ministry,
+                    sector,
+                    flash_state,
+                    schedule_status
+                FROM project_master
+                WHERE LOWER(
+                    TRIM(
+                        COALESCE(
+                            schedule_status,
+                            ''
+                        )
+                    )
+                ) = 'delayed'
+                """
+            )
+        )
+
+        delayed_projects: list[dict[str, Any]] = []
+
+        for row in result.mappings():
+
+            project_states = _extract_project_states(
+                row["flash_state"]
+            )
+
+            if requested_state in project_states:
+                delayed_projects.append(
+                    {
+                        "project_code": row["project_code"],
+                        "project_name": row["project_name"],
+                        "ministry": row["ministry"],
+                        "sector": row["sector"],
+                    }
+                )
+
+        if not delayed_projects:
+            return {
+                "text": (
+                    f"No delayed projects were found in "
+                    f"{requested_state}."
+                ),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        lines = [
+            (
+                f"Delayed projects in {requested_state}: "
+                f"{len(delayed_projects)}"
+            )
+        ]
+
+        for project in delayed_projects:
+            lines.append(
+                f"- {project['project_code']}: "
+                f"{project['project_name']}"
+            )
+
+        return {
+            "text": "\n".join(lines),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }    
 
         # ---------------------------------------------------------------
     # PROJECT COUNT BY STATE

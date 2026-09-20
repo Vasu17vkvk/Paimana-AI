@@ -58,6 +58,49 @@ function formatQueryType(
         .replaceAll("_", " ");
 }
 
+const ANALYTICS_PREVIEW_LINES = 16;
+
+
+function getAnalyticsDisplay(
+    message: ChatMessage,
+    expanded: boolean,
+): {
+    text: string;
+    hasMore: boolean;
+} {
+    if (
+        message.role !== "assistant" ||
+        message.data?.query_type !== "ANALYTICS_QUERY"
+    ) {
+        return {
+            text: message.text,
+            hasMore: false,
+        };
+    }
+
+    const lines = message.text.split("\n");
+
+    if (
+        lines.length <= ANALYTICS_PREVIEW_LINES ||
+        expanded
+    ) {
+        return {
+            text: message.text,
+            hasMore: false,
+        };
+    }
+
+    return {
+        text: lines
+            .slice(
+                0,
+                ANALYTICS_PREVIEW_LINES,
+            )
+            .join("\n"),
+        hasMore: true,
+    };
+}
+
 
 // ============================================================================
 // COMPONENT
@@ -93,6 +136,9 @@ export default function AIAssistantPage() {
         error,
         setError,
     ] = useState<string | null>(null);
+
+    const [expandedMessageIds, setExpandedMessageIds] =
+        useState<Set<string>>(new Set());
 
 
     // ------------------------------------------------------------------------
@@ -506,7 +552,24 @@ export default function AIAssistantPage() {
 
     function clearChat() {
         setMessages([]);
+        setExpandedMessageIds(new Set());
         setError(null);
+    }
+
+    function toggleExpandedMessage(
+        messageId: string,
+    ) {
+        setExpandedMessageIds((current) => {
+            const next = new Set(current);
+
+            if (next.has(messageId)) {
+                next.delete(messageId);
+            } else {
+                next.add(messageId);
+            }
+
+            return next;
+        });
     }
 
 
@@ -680,9 +743,59 @@ export default function AIAssistantPage() {
                                                 }
                                             >
 
-                                                <div className="whitespace-pre-wrap leading-6">
-                                                    {message.text}
-                                                </div>
+                                                {(() => {
+                                                    const expanded =
+                                                        expandedMessageIds.has(
+                                                            message.id,
+                                                        );
+
+                                                    const display =
+                                                        getAnalyticsDisplay(
+                                                            message,
+                                                            expanded,
+                                                        );
+
+                                                    return (
+                                                        <>
+                                                            <div className="whitespace-pre-wrap leading-6">
+                                                                {display.text}
+                                                            </div>
+
+                                                            {display.hasMore && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        toggleExpandedMessage(
+                                                                            message.id,
+                                                                        )
+                                                                    }
+                                                                    className="mt-3 text-xs font-semibold text-slate-600 underline underline-offset-2 transition hover:text-slate-900"
+                                                                >
+                                                                    Show more
+                                                                </button>
+                                                            )}
+
+                                                            {message.role === "assistant" &&
+                                                                message.data?.query_type ===
+                                                                "ANALYTICS_QUERY" &&
+                                                                expanded &&
+                                                                message.text.split("\n").length >
+                                                                ANALYTICS_PREVIEW_LINES && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            toggleExpandedMessage(
+                                                                                message.id,
+                                                                            )
+                                                                        }
+                                                                        className="mt-3 text-xs font-semibold text-slate-600 underline underline-offset-2 transition hover:text-slate-900"
+                                                                    >
+                                                                        Show less
+                                                                    </button>
+                                                                )}
+                                                        </>
+                                                    );
+                                                })()}
 
 
                                                 {message.role ===

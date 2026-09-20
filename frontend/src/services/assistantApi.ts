@@ -10,7 +10,8 @@ export type AssistantQueryType =
     | "ML_QUERY"
     | "RAG_QUERY"
     | "HYBRID_QUERY"
-    | "GENERAL_QUERY";
+    | "GENERAL_QUERY"
+    | "ANALYTICS_QUERY";
 
 
 export interface AssistantCitation {
