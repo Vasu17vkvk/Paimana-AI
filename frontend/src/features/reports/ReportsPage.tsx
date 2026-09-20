@@ -1,9 +1,9 @@
-import { ArrowDown, ArrowUp, Eye, FileText, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Download, Eye, FileText, GripVertical, Plus, Trash2, X } from "lucide-react";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
 import PageHeader from "../../components/layout/PageHeader";
 import { useState } from "react";
-import { reportSectionCatalog, useReportsStore } from "./reportsStore";
+import { reportSectionCatalog, useReportsStore, type SavedReport } from "./reportsStore";
 
 function csvCell(value: unknown): string {
     if (value === null || value === undefined) return "";
@@ -46,6 +46,10 @@ function printReport() {
     window.print();
 }
 
+function downloadSavedReport(report: SavedReport) {
+    exportReportCsv(report.title, report.description, report.observation, report.sections);
+}
+
 function SnapshotValue({ value }: { value: unknown }) {
     if (value === null || value === undefined) return <span className="text-slate-400">—</span>;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -79,7 +83,7 @@ function SnapshotValue({ value }: { value: unknown }) {
 }
 
 export default function ReportsPage() {
-    const { title, description, observation, sections, setTitle, setDescription, setObservation, addSection, removeSection, moveSection, clearSections } = useReportsStore();
+    const { title, description, observation, sections, history, setTitle, setDescription, setObservation, addSection, removeSection, moveSection, clearSections, saveCurrentReport, loadReport, duplicateReport, deleteReport } = useReportsStore();
     const [previewOpen, setPreviewOpen] = useState(false);
     const availableSections = reportSectionCatalog.filter((candidate) => !sections.some((section) => section.type === candidate.type));
 
@@ -95,6 +99,7 @@ export default function ReportsPage() {
                             {sections.length} {sections.length === 1 ? "section" : "sections"}
                         </span>
                         {sections.length > 0 && <Button variant="secondary" onClick={clearSections}>Clear</Button>}
+                        <Button variant="secondary" onClick={saveCurrentReport} disabled={sections.length === 0}>Save Report</Button>
                         <Button variant="primary" onClick={() => setPreviewOpen(true)} disabled={sections.length === 0}>
                             <Eye size={15} /> Preview
                         </Button>
