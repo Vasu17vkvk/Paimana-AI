@@ -779,3 +779,34 @@ export async function getGeographicProjects(
         `/geographic/projects${query ? `?${query}` : ""}`,
     );
 }
+
+/* =========================================================
+   REPORTS - AI EXECUTIVE SUMMARY
+========================================================= */
+
+export interface ReportExecutiveSummaryRequest {
+    title: string;
+    scope: "project" | "portfolio";
+    projectCode: string;
+    projectName: string;
+    filters: Record<string, string>;
+    sections: Array<{
+        title: string;
+        description: string;
+        selectedParts: string[];
+        snapshot: unknown;
+        observation: string;
+    }>;
+}
+
+export async function generateReportExecutiveSummary(
+    payload: ReportExecutiveSummaryRequest,
+) {
+    return apiRequest<{ summary: string }>(
+        "/reports/executive-summary",
+        {
+            method: "POST",
+            body: JSON.stringify(payload),
+        },
+    );
+}
