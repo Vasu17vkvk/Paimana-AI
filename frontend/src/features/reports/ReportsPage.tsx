@@ -25,15 +25,74 @@ function SnapshotValue({ value }: { value: unknown }) {
 function partLabel(part: ReportPart) {
     return ({summary:"Summary",risk_breakdown:"Risk Breakdown",contributing_factors:"Contributing Factors",chart:"Chart",table:"Table",recommendations:"Recommendations"} as Record<ReportPart,string>)[part];
 }
+function flattenSnapshot(value: unknown, path = ""): Array<[string,string]> {
+    if (value === null || value === undefined || value === "") return [[path || "Value", "—"]];
+    if (Array.isArray(value)) {
+        if (!value.length) return [[path || "Value", "No data"]];
+        return value.flatMap((item, index) => flattenSnapshot(item, path ? `${path}[${index + 1}]` : `[${index + 1}]`));
+    }
+    if (typeof value === "object") {
+        return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) =>
+            flattenSnapshot(item, path ? `${path} › ${key.replace(/_/g, " ")}` : key.replace(/_/g, " "))
+        );
+    }
+    return [[path || "Value", String(value)]];
+}
+
+function styleSheet(ws: XLSX.WorkSheet, widths: number[], freeze = "A2") {
+    ws["!cols"] = widths.map(w => ({ wch: w }));
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+    ws["!autofilter"] = { ref: `A1:${String.fromCharCode(64 + widths.length)}1` };
+    if (freeze) ws["!freeze"] = freeze;
+}
+
 function exportXlsx(report: ReportExportData) {
-    const rows:any[][]=[["PAIMANA REPORT",""],["Report Title",report.title],["Scope",report.scope],["Project Code",report.projectCode],["Project Name",report.projectName],["Description",report.description],["Observation",report.observation],["Created At","createdAt" in report?new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN"):new Date().toLocaleString("en-IN")],[],["Filter","Value"]];
-    Object.entries(report.filters).forEach(([k,v])=>rows.push([k,v]));
-    rows.push([],["Section","Description","Captured At","Selected Parts","Observation","Snapshot"]);
-    report.sections.forEach(s=>rows.push([s.title,s.description,new Date(s.capturedAt??s.addedAt).toLocaleString("en-IN"),(s.selectedParts??defaultReportParts).join(", "),s.observation||"",valueText(s.snapshot)]));
-    if(report.executiveSummary) rows.push([],["AI Executive Summary",report.executiveSummary]);
-    const wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"]=[{wch:28},{wch:38},{wch:24},{wch:42},{wch:40},{wch:80}];
-    XLSX.utils.book_append_sheet(wb,ws,"Report");
+    const wb = XLSX.utils.book_new();
+    const createdAt = "createdAt" in report ? new Date(report.createdAt ?? Date.now()).toLocaleString("en-IN") : new Date().toLocaleString("en-IN");
+
+    const summaryRows:any[][] = [
+        ["PAIMANA REPORT"],
+        ["Report Title", report.title || "PAIMANA Project Report"],
+        ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
+        ["Project Code", report.projectCode || "—"],
+        ["Project Name", report.projectName || "—"],
+        ["Description", report.description || "—"],
+        ["Observation", report.observation || "—"],
+        ["Created At", createdAt],
+        [],
+        ["FILTER", "VALUE"],
+        ...Object.entries(report.filters).map(([k,v]) => [k.replace(/([A-Z])/g, " $1"), v || "—"]),
+    ];
+    if (report.executiveSummary) summaryRows.push([], ["AI EXECUTIVE SUMMARY"], [report.executiveSummary]);
+
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows);
+    summaryWs["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:1} }];
+    summaryWs["A1"].s = { font:{ bold:true, sz:16 }, alignment:{ horizontal:"left" } };
+    styleSheet(summaryWs, [28, 72], "");
+    summaryWs["!rows"] = [{ hpt:28 }];
+    XLSX.utils.book_append_sheet(wb, summaryWs, "Report Summary");
+
+    const sectionRows:any[][] = [["No.","Section","Description","Captured At","Selected Parts","Observation"]];
+    report.sections.forEach((s,i) => sectionRows.push([
+        i + 1,
+        s.title,
+        s.description,
+        new Date(s.capturedAt ?? s.addedAt).toLocaleString("en-IN"),
+        (s.selectedParts ?? defaultReportParts).map(partLabel).join(", "),
+        s.observation || "—",
+    ]));
+    const sectionWs = XLSX.utils.aoa_to_sheet(sectionRows);
+    styleSheet(sectionWs, [8, 28, 52, 24, 52, 42]);
+    XLSX.utils.book_append_sheet(wb, sectionWs, "Sections");
+
+    const snapshotRows:any[][] = [["Section","Field / Path","Value"]];
+    report.sections.forEach((s) => {
+        flattenSnapshot(s.snapshot).forEach(([path,value]) => snapshotRows.push([s.title, path, value]));
+    });
+    const snapshotWs = XLSX.utils.aoa_to_sheet(snapshotRows);
+    styleSheet(snapshotWs, [28, 62, 72]);
+    XLSX.utils.book_append_sheet(wb, snapshotWs, "Snapshot Data");
+
     XLSX.writeFileXLSX(wb,(report.title||"PAIMANA_Report").replace(/[^a-z0-9_-]+/gi,"_")+".xlsx",{compression:true});
 }
 function printReport(report: ReportExportData) {
@@ -60,12 +119,17 @@ export default function ReportsPage(){
     return <div className="mx-auto w-full max-w-[1500px]">
         <PageHeader eyebrow="INTELLIGENCE · REPORTS" title="Reports" description="Build a project or portfolio report from verified PAIMANA analytics snapshots." action={<div className="flex flex-wrap items-center justify-end gap-2"><span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">{sections.length} {sections.length===1?"section":"sections"}</span><Button variant="secondary" onClick={()=>setHistoryOpen(true)}><History size={15}/> History</Button>{sections.length>0&&<Button variant="secondary" onClick={clearSections}>Clear</Button>}<Button variant="secondary" onClick={saveCurrentReport} disabled={!sections.length}><Check size={15}/> Save Report</Button><Button variant="primary" onClick={()=>setPreview(true)} disabled={!sections.length}><Eye size={15}/> Preview</Button></div>}/>
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_390px]"><div className="space-y-5">
-            <Card padding="lg"><div className="flex items-start gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600"><FileText size={18}/></div><div><h2 className="text-sm font-bold text-slate-900">Report Details</h2><p className="mt-1 text-[11px] text-slate-400">Define report identity, scope and contextual filters.</p></div></div>
-                <div className="mt-6 grid gap-4"><label><span className="label">Report Title</span><input value={title} onChange={e=>setTitle(e.target.value)} className="field"/></label><label><span className="label">Description</span><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} className="field py-2.5"/></label>
-                    <div><span className="label">Report Scope</span><div className="grid grid-cols-2 gap-2">{(["project","portfolio"] as ReportScope[]).map(s=><button key={s} type="button" onClick={()=>setScope(s)} className={`rounded-lg border px-3 py-2.5 text-left text-xs font-semibold ${scope===s?"border-slate-400 bg-slate-100 text-slate-900":"border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>{s==="project"?"Project Report":"Portfolio Report"}</button>)}</div></div>
-                    {scope==="project"&&<div className="grid gap-4 sm:grid-cols-2"><label><span className="label">Project Code</span><input value={projectCode} onChange={e=>setProjectCode(e.target.value)} className="field" placeholder="Project code"/></label><label><span className="label">Project Name</span><input value={projectName} onChange={e=>setProjectName(e.target.value)} className="field" placeholder="Project name"/></label></div>}
-                    {scope==="portfolio"&&<div><span className="label">Portfolio Filters</span><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{([["ministry","Ministry"],["sector","Sector"],["state","State / UT"],["riskLevel","Risk Level"],["projectStatus","Project Status"],["dateMonth","Date / Month"]] as Array<[keyof typeof filters,string]>).map(([k,l])=><label key={k}><span className="mb-1 block text-[10px] font-semibold text-slate-400">{l}</span><input value={filters[k]} onChange={e=>setFilter(k,e.target.value)} className="field" placeholder={l}/></label>)}</div></div>}
-                    <label><span className="label">Report Observation / Note</span><textarea value={observation} onChange={e=>setObservation(e.target.value)} rows={3} className="field py-2.5" placeholder="Add an observation for the report..."/></label>
+            <Card padding="lg" className="overflow-hidden">
+                <div className="flex items-start gap-3 border-b border-slate-100 pb-5"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-slate-900 text-white shadow-sm"><FileText size={18}/></div><div><div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Report workspace</div><h2 className="mt-1 text-base font-bold text-slate-900">Report Details</h2><p className="mt-1 text-xs text-slate-500">Set the report identity and keep the selected project context clear.</p></div></div>
+                <div className="mt-6 space-y-6">
+                    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+                        <label><span className="mb-2 block text-[11px] font-bold text-slate-600">Report Title</span><input value={title} onChange={e=>setTitle(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-100" placeholder="e.g. Project Monitoring Report"/></label>
+                        <div><span className="mb-2 block text-[11px] font-bold text-slate-600">Report Scope</span><div className="grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-1">{(["project","portfolio"] as ReportScope[]).map(s=><button key={s} type="button" onClick={()=>setScope(s)} className={`rounded-lg px-3 py-2.5 text-[11px] font-bold transition ${scope===s?"bg-slate-900 text-white shadow-sm":"text-slate-500 hover:bg-slate-200/70 hover:text-slate-800"}`}>{s==="project"?"Project":"Portfolio"}</button>)}</div></div>
+                    </div>
+                    <label><span className="mb-2 block text-[11px] font-bold text-slate-600">Description</span><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-100" placeholder="Briefly describe what this report covers..."/></label>
+                    {scope==="project"&&<div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><div className="mb-3 flex items-center gap-2"><span className="grid h-7 w-7 place-items-center rounded-lg bg-white text-[10px] font-bold text-slate-600 shadow-sm">ID</span><div><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Project context</div><div className="text-xs font-semibold text-slate-700">Selected project for this report</div></div></div><div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">Project Code</span><input value={projectCode} onChange={e=>setProjectCode(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Project code"/></label><label><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">Project Name</span><input value={projectName} onChange={e=>setProjectName(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Project name"/></label></div></div>}
+                    {scope==="portfolio"&&<div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Portfolio filters</div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{([["ministry","Ministry"],["sector","Sector"],["state","State / UT"],["riskLevel","Risk Level"],["projectStatus","Project Status"],["dateMonth","Date / Month"]] as Array<[keyof typeof filters,string]>).map(([k,l])=><label key={k}><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">{l}</span><input value={filters[k]} onChange={e=>setFilter(k,e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder={l}/></label>)}</div></div>}
+                    <label><span className="mb-2 block text-[11px] font-bold text-slate-600">Report Observation / Note</span><div className="relative"><textarea value={observation} onChange={e=>setObservation(e.target.value)} rows={3} className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm leading-6 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Add an observation, officer note, or context for this report..."/><span className="pointer-events-none absolute bottom-2 right-3 text-[9px] text-slate-300">Optional</span></div></label>
                 </div>
             </Card>
             <Card padding="lg"><div className="flex items-center justify-between"><div><h2 className="text-sm font-bold text-slate-900">Report Sections</h2><p className="mt-1 text-[11px] text-slate-400">Reorder, customize and remove captured sections.</p></div><span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{sections.length} selected</span></div>
