@@ -31,7 +31,7 @@ function exportReportCsv(title: string, description: string, observation: string
     });
 
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
-    const blob = new Blob(["\\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -196,7 +196,7 @@ export default function ReportsPage() {
                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Stage</div>
                         <div className="mt-2 text-sm font-bold text-slate-800">Report workspace</div>
                         <p className="mt-2 text-[11px] leading-5 text-slate-500">
-                            Section selection, ordering and report metadata are available now. Export, report history, data snapshots and AI summary will be connected after their exact data/API contracts are verified.
+                            Section selection, ordering, snapshots, preview, export and report history are available. AI Executive Summary is intentionally not generated without a verified AI/API contract.
                         </p>
                     </Card>
                 </aside>
