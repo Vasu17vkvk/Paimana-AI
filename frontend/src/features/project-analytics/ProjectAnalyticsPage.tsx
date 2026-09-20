@@ -1143,17 +1143,36 @@ export default function ProjectAnalyticsPage() {
                     </div>
 
                     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Delay Days
-                      </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                            Delay Days
+                          </p>
 
-                      <p className="mt-2 text-3xl font-bold text-slate-900">
-                        {formatNumber(selectedDelayDays)}
-                      </p>
+                          <p className="mt-2 text-3xl font-bold text-slate-900">
+                            {formatNumber(selectedDelayDays)}
+                          </p>
 
-                      <p className="mt-2 text-xs text-slate-500">
-                        Recorded schedule delay
-                      </p>
+                          <p className="mt-2 text-xs text-slate-500">
+                            Recorded schedule delay
+                          </p>
+                        </div>
+
+                        <SaveToReport
+                          id={`project-delay-${selectedProjectCode}`}
+                          type="schedule"
+                          title="Delay Analysis"
+                          description="Project schedule delay, future delay probability and delay reasons captured from Project Analytics."
+                          snapshot={{
+                            project: projectInfo,
+                            key_facts: keyFacts,
+                            risk,
+                            delay_reasons: projectDetail.delay_reasons,
+                          }}
+                          projectCode={selectedProjectCode}
+                          projectName={selectedProjectName}
+                        />
+                      </div>
                     </div>
                   </section>
 
@@ -1170,6 +1189,8 @@ export default function ProjectAnalyticsPage() {
                           title="Project Overview"
                           description="Project identity, scope, status and key facts captured from Project Analytics."
                           snapshot={{ project: projectInfo, key_facts: keyFacts }}
+                          projectCode={selectedProjectCode}
+                          projectName={selectedProjectName}
                         />
                       </div>
                     </div>
@@ -1293,6 +1314,8 @@ export default function ProjectAnalyticsPage() {
                           title="Risk Assessment"
                           description="Current project risk score, level and component risk signals."
                           snapshot={{ risk, selectedRiskScore, selectedRiskLevel }}
+                          projectCode={selectedProjectCode}
+                          projectName={selectedProjectName}
                         />
                       </div>
                     </div>
@@ -1354,6 +1377,8 @@ export default function ProjectAnalyticsPage() {
                           progress_trajectory: projectDetail.progress_trajectory,
                           risk_trajectory: projectDetail.risk_trajectory,
                         }}
+                          projectCode={selectedProjectCode}
+                          projectName={selectedProjectName}
                       />
                     </div>
                     <ProjectAnalyticsDetailCharts
@@ -1375,6 +1400,8 @@ export default function ProjectAnalyticsPage() {
                       title="Recommendations"
                       description="Documented delay reasons and recommended solutions for the selected project."
                       snapshot={{ delay_reasons: projectDetail.delay_reasons }}
+                          projectCode={selectedProjectCode}
+                          projectName={selectedProjectName}
                     />
                   </div>
 
@@ -1895,6 +1922,23 @@ export default function ProjectAnalyticsPage() {
                           </div>
                         </div>
 
+                        <div className="flex justify-end">
+                          <SaveToReport
+                            id={`project-simulation-${selectedProjectCode}-${JSON.stringify(scenario)}`}
+                            type="prediction"
+                            title="What-If Risk Simulation"
+                            description="Completed What-If simulation for the selected project, including inputs and baseline versus scenario outputs."
+                            snapshot={{
+                              project_code: selectedProjectCode,
+                              project_name: selectedProjectName,
+                              scenario_inputs: scenario,
+                              result: whatIfResult,
+                            }}
+                            projectCode={selectedProjectCode}
+                            projectName={selectedProjectName}
+                          />
+                        </div>
+
                         {/* Scenario Inputs */}
                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -1962,23 +2006,45 @@ export default function ProjectAnalyticsPage() {
                   {/* Latest Expenditure */}
                   <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Expenditure
-                      </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                            Expenditure
+                          </p>
 
-                      <p className="mt-2 text-2xl font-bold text-slate-900">
-                        ₹ {formatNumber(selectedExpenditure)} Cr
-                      </p>
+                          <p className="mt-2 text-2xl font-bold text-slate-900">
+                            ₹ {formatNumber(selectedExpenditure)} Cr
+                          </p>
+                        </div>
+
+                        <SaveToReport
+                          id={`project-cost-${selectedProjectCode}`}
+                          type="cost"
+                          title="Cost Analysis"
+                          description="Project cost, expenditure and cost-risk position captured from Project Analytics."
+                          snapshot={{
+                            project: projectInfo,
+                            key_facts: keyFacts,
+                            cost_risk: selectedCostRisk,
+                          }}
+                          projectCode={selectedProjectCode}
+                          projectName={selectedProjectName}
+                        />
+                      </div>
                     </div>
 
                     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        Progress Stall Risk
-                      </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                            Progress Stall Risk
+                          </p>
 
-                      <p className="mt-2 text-2xl font-bold text-slate-900">
-                        {formatPercent(selectedProgressStall)}
-                      </p>
+                          <p className="mt-2 text-2xl font-bold text-slate-900">
+                            {formatPercent(selectedProgressStall)}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </section>
                 </>

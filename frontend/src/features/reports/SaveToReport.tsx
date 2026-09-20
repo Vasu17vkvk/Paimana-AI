@@ -8,6 +8,8 @@ interface SaveToReportProps {
     title: string;
     description: string;
     snapshot: unknown;
+    projectCode?: string;
+    projectName?: string;
 }
 
 export default function SaveToReport({
@@ -16,10 +18,15 @@ export default function SaveToReport({
     title,
     description,
     snapshot,
+    projectCode,
+    projectName,
 }: SaveToReportProps) {
     const sections = useReportsStore((state) => state.sections);
     const addSection = useReportsStore((state) => state.addSection);
     const removeSection = useReportsStore((state) => state.removeSection);
+    const setScope = useReportsStore((state) => state.setScope);
+    const setProjectCode = useReportsStore((state) => state.setProjectCode);
+    const setProjectName = useReportsStore((state) => state.setProjectName);
 
     const added = sections.some((section) => section.id === id);
 
@@ -35,12 +42,24 @@ export default function SaveToReport({
                     return;
                 }
 
+                if (projectCode) {
+                    setScope("project");
+                    setProjectCode(projectCode);
+                    setProjectName(projectName || projectCode);
+                }
+
                 addSection({
                     id,
                     type,
                     title,
                     description,
-                    snapshot,
+                    snapshot: projectCode
+                        ? {
+                            project_code: projectCode,
+                            project_name: projectName || projectCode,
+                            data: snapshot,
+                        }
+                        : snapshot,
                 });
             }}
             className={added ? "text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800" : ""}
