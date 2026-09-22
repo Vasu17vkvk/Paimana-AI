@@ -440,14 +440,16 @@ function downloadPdf(report: ReportExportData) {
 
         const totalProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/total projects/i])?.[1] || "—";
         const delayedProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/delayed projects/i])?.[1] || "—";
-        const averageRisk = findMetric(portfolioRiskRows, [/average risk score/i])?.[1] || "—";
-        const expenditureTotal = findMetric(portfolioCostRows, [/total expenditure/i])?.[1] || "—";
+        const riskScores = portfolioData?.projects.map((project) => project.riskScore).filter((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? [];
+        const averageRisk = riskScores.length ? (riskScores.reduce((sum, value) => sum + value, 0) / riskScores.length).toFixed(2) : "—";
+        const originalCost = portfolioData ? portfolioData.financials.originalCost.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+        const revisedCost = portfolioData ? portfolioData.financials.revisedCost.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
 
         py = cards([
             ["TOTAL PROJECTS", totalProjects],
             ["DELAYED PROJECTS", delayedProjects],
             ["AVERAGE RISK", averageRisk],
-            ["TOTAL EXPENDITURE", expenditureTotal],
+            ["ORIGINAL COST", originalCost],
         ], py);
 
         py = sectionTitle("01", "Portfolio Scope & Current Position", py);
@@ -467,7 +469,7 @@ function downloadPdf(report: ReportExportData) {
         ], py);
 
         py = sectionTitle("03", "Portfolio Financial Position", py);
-        py = table(uniqueRows(portfolioCostRows).slice(0, 18), py, "Combined financial indicators");
+        py = table([["Original Cost", originalCost], ["Revised Cost", revisedCost], ...uniqueRows(portfolioCostRows)].slice(0, 18), py, "Combined financial indicators");
 
         py = sectionTitle("04", "Portfolio Trends", py);
         if (portfolioTrendRows.length) {
