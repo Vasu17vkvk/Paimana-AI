@@ -66,12 +66,22 @@ from sqlalchemy import text
 from app.extensions import db
 from app.services.gemini_service import generate_grounded_response
 
+import psutil
+
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
+def _log_memory(label: str) -> None:
+    process = psutil.Process(os.getpid())
+    rss_mb = process.memory_info().rss / 1024 / 1024
+    print(
+        f"[MEMORY] {label}: {rss_mb:.1f} MB",
+        flush=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Local candidate retrieval.
@@ -365,17 +375,9 @@ If evidence is insufficient, say so.
 @lru_cache(maxsize=1)
 def get_embedding_model() -> TextEmbedding:
     """
-    Load exactly one FastEmbed model instance per Python process.
-
-    Memory controls:
-        - one cached model instance
-        - one ONNX thread
-        - explicit cache directory
-        - optional offline/local-only loading
-
-    The model is still BAAI/bge-small-en-v1.5 and therefore remains
-    compatible with the existing 384-dimensional PostgreSQL vectors.
+    Load the local BGE embedding model once per Python process.
     """
+    _log_memory("before_fastembed_load")
 
     cache_dir = os.getenv(
         "FASTEMBED_CACHE_DIR",
@@ -386,16 +388,23 @@ def get_embedding_model() -> TextEmbedding:
         os.getenv(
             "FASTEMBED_LOCAL_FILES_ONLY",
             "false",
-        ).strip().lower()
+        )
+        .strip()
+        .lower()
         == "true"
     )
 
-    return TextEmbedding(
-        model_name=EMBEDDING_MODEL_NAME,
-        cache_dir=cache_dir,
-        threads=1,
-        local_files_only=local_files_only,
+    model = TextEmbedding(
+    model_name=EMBEDDING_MODEL_NAME,
+    cache_dir=cache_dir,
+    threads=1,
+    local_files_only=local_files_only,
+    providers=["CPUExecutionProvider"],
     )
+
+    _log_memory("after_fastembed_load")
+
+    return model
 
 
 def _embed_query(
@@ -404,6 +413,8 @@ def _embed_query(
     """
     Convert a user question into a normalized BGE embedding.
     """
+
+    _log_memory("before_embedding")
 
     model = get_embedding_model()
 
@@ -435,6 +446,8 @@ def _embed_query(
         )
 
     vector = vector / norm
+
+    _log_memory("after_embedding")
 
     return vector.tolist()
 
@@ -1499,6 +1512,25 @@ def retrieve_knowledge(
 
     Gemini is NOT called here.
     """
+
+    _log_memory("before_retrieval")
+
+
+    """
+    Retrieve relevant local RAG knowledge.
+
+    Pipeline:
+        1. BGE embedding
+        2. pgvector search
+        3. PostgreSQL full-text search
+        4. Weighted RRF
+        5. Intent-aware reranking
+        6. Quality filtering
+        7. Document diversity
+        8. Context compaction
+
+    Gemini is NOT called here.
+    """
     query = str(
         question
     ).strip()
@@ -1582,7 +1614,7 @@ def retrieve_knowledge(
     # ------------------------------------------------------------------
     # 7. Final context budget.
     # ------------------------------------------------------------------
-
+    _log_memory("after_retrieval")
     return _compact_chunks(
         diversified_results
     )
@@ -1880,6 +1912,7 @@ def answer_from_knowledge_base(
     document_type: str | None = None,
     document_year: int | None = None,
 ) -> dict[str, Any]:
+    
     """
     Retrieve local knowledge and ask Gemini for one final answer.
 
@@ -1957,7 +1990,7 @@ def answer_from_knowledge_base(
     # ------------------------------------------------------------------
     # Exactly ONE Gemini generation call.
     # ------------------------------------------------------------------
-
+    _log_memory("before_gemini")
     result = generate_grounded_response(
         prompt,
         system_instruction=RAG_SYSTEM_INSTRUCTION,
@@ -1966,6 +1999,8 @@ def answer_from_knowledge_base(
     compacted_chunks = _compact_chunks(
         chunks
     )
+
+    _log_memory("after_gemini")
 
     return {
         "text": result.get(

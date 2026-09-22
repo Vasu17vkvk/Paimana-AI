@@ -4012,18 +4012,11 @@ def answer_query(
         Any,
     ] | None = None
 
-    if (
-        query_type in {
-            RAG_QUERY,
-            HYBRID_QUERY,
-            ANALYTICS_QUERY,
-            GENERAL_QUERY,
-        }
-        or (
-            query_type == FACT_QUERY
-            and not resolved_project_code
-        )
-    ):
+    if query_type in {
+        FACT_QUERY,
+        ML_QUERY,
+        HYBRID_QUERY,
+    }:
 
         if not resolved_project_code:
             return {
