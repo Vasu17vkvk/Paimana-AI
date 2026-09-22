@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
 import PageHeader from "../../components/layout/PageHeader";
-import { defaultReportParts, reportSectionCatalog, useReportsStore, type ReportPart, type ReportScope, type SavedReport } from "./reportsStore";
+import { defaultReportParts, useReportsStore, type ReportPart, type ReportScope, type SavedReport } from "./reportsStore";
 import { generateReportExecutiveSummary, getDashboard, getDashboardFilterOptions, type DashboardFilterOptions, type DashboardResponse } from "../../services/api";
 
 type ReportExportData = Pick<SavedReport, "title" | "description" | "observation" | "scope" | "projectCode" | "projectName" | "filters" | "sections" | "executiveSummary"> & { createdAt?: number };
