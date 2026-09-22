@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type ReportScope = "project" | "portfolio";
-export type ReportSectionType = "overview" | "cost" | "schedule" | "progress" | "risk" | "prediction" | "warnings" | "analytics" | "trends" | "recommendations" | "milestones";
+export type ReportSectionType = "overview" | "cost" | "schedule" | "progress" | "risk" | "prediction" | "analytics" | "trends" | "recommendations" | "milestones";
 export type ReportPart = "summary" | "risk_breakdown" | "contributing_factors" | "chart" | "table" | "recommendations";
 
 export interface ReportFilters {
