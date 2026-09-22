@@ -6,7 +6,7 @@ import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
 import PageHeader from "../../components/layout/PageHeader";
 import { defaultReportParts, useReportsStore, type ReportPart, type ReportScope, type SavedReport } from "./reportsStore";
-import { generateReportExecutiveSummary, getDashboard, getDashboardFilterOptions, type DashboardFilterOptions, type DashboardResponse } from "../../services/api";
+import { generateReportExecutiveSummary, getDashboard, getDashboardFilterOptions, getProjectAnalyticsProjects, type DashboardFilterOptions, type DashboardResponse, type ProjectAnalyticsProject } from "../../services/api";
 
 type ReportExportData = Pick<SavedReport, "title" | "description" | "observation" | "scope" | "projectCode" | "projectName" | "filters" | "sections" | "executiveSummary"> & { createdAt?: number };
 
@@ -53,7 +53,7 @@ function uniqueRows(rows: Array<[string, string]>): Array<[string, string]> {
 }
 
 function sectionRows(section: SavedReport["sections"][number]): Array<[string, string]> {
-    const rawSnapshot = section.snapshot as Record<string, unknown>;
+    const rawSnapshot = (section.snapshot && typeof section.snapshot === "object" ? section.snapshot : {}) as Record<string, unknown>;
     // Project-specific captures wrap the original analytics snapshot inside "data".
     // Unwrap it here so PDF/Excel exports read the actual saved project analytics.
     const snapshot = rawSnapshot && rawSnapshot.data && typeof rawSnapshot.data === "object" && !Array.isArray(rawSnapshot.data)
@@ -70,11 +70,24 @@ function sectionRows(section: SavedReport["sections"][number]): Array<[string, s
     preferred.forEach((key) => {
         if (key in snapshot) rows.push(...collectPrimitiveRows(snapshot[key], key));
     });
+
+    // Normalize the risk snapshot into report-friendly labels used by PDF/Excel.
+    if (section.type === "risk" && snapshot.risk && typeof snapshot.risk === "object" && !Array.isArray(snapshot.risk)) {
+        const riskData = snapshot.risk as Record<string, unknown>;
+        if (riskData.overall_risk !== undefined) rows.push(["Risk Score", shortValue(riskData.overall_risk)]);
+        if (riskData.risk_level !== undefined) rows.push(["Risk Level", shortValue(riskData.risk_level)]);
+        if (riskData.cost_risk !== undefined) rows.push(["Cost Risk", shortValue(riskData.cost_risk)]);
+        if (riskData.future_delay_probability !== undefined) rows.push(["Future Delay Probability", shortValue(riskData.future_delay_probability)]);
+        if (riskData.progress_stall_probability !== undefined) rows.push(["Progress Stall Probability", shortValue(riskData.progress_stall_probability)]);
+    }
+    if (section.type === "risk" && snapshot.selectedRiskScore !== undefined) rows.push(["Risk Score", shortValue(snapshot.selectedRiskScore)]);
+    if (section.type === "risk" && snapshot.selectedRiskLevel !== undefined) rows.push(["Risk Level", shortValue(snapshot.selectedRiskLevel)]);
+
     return uniqueRows(rows);
 }
 
 function trendTableRows(section: SavedReport["sections"][number]): Array<Record<string, string>> {
-    const rawSnapshot = section.snapshot as Record<string, unknown>;
+    const rawSnapshot = (section.snapshot && typeof section.snapshot === "object" ? section.snapshot : {}) as Record<string, unknown>;
     const snapshot = rawSnapshot && rawSnapshot.data && typeof rawSnapshot.data === "object" && !Array.isArray(rawSnapshot.data)
         ? rawSnapshot.data as Record<string, unknown>
         : rawSnapshot;
@@ -142,7 +155,7 @@ function exportXlsx(report: ReportExportData) {
     const schedule = report.sections.find((s) => s.type === "schedule");
 
     const rows: any[][] = [
-        ["PAIMANA", "PROJECT MONITORING REPORT"],
+        ["PAIMANA", report.scope === "project" ? "PROJECT MONITORING REPORT" : "PORTFOLIO MONITORING REPORT"],
         ["Project Code", report.projectCode || "—"],
         ["Project Name", report.projectName || "—"],
         ["Report Type", report.scope === "project" ? "Project Report" : "Portfolio Report"],
@@ -608,8 +621,8 @@ export default function ReportsPage(){
     const [preview,setPreview]=useState(false),[historyOpen,setHistoryOpen]=useState(false),[customizeId,setCustomizeId]=useState<string|null>(null),[aiLoading,setAiLoading]=useState(false),[aiError,setAiError]=useState(""),[catalogSearch,setCatalogSearch]=useState("");
     const [portfolioOptions,setPortfolioOptions]=useState<DashboardFilterOptions>({periods:[],ministries:[],sectors:[],states:[],risk_levels:[],statuses:[]});
     const [portfolioData,setPortfolioData]=useState<DashboardResponse|null>(null);
-    const [portfolioLoading,setPortfolioLoading]=useState(false);
-    useEffect(()=>{if(scope!=="portfolio") return; getDashboardFilterOptions().then(setPortfolioOptions).catch(()=>setPortfolioOptions({periods:[],ministries:[],sectors:[],states:[],risk_levels:[],statuses:[]}));},[scope]);
+    const [portfolioLoading,setPortfolioLoading]=useState(false);\n    const [projectOptions,setProjectOptions]=useState<ProjectAnalyticsProject[]>([]);
+    useEffect(()=>{if(scope!=="portfolio") return; getDashboardFilterOptions().then(setPortfolioOptions).catch(()=>setPortfolioOptions({periods:[],ministries:[],sectors:[],states:[],risk_levels:[],statuses:[]}));},[scope]);\n    useEffect(()=>{if(scope!=="project") return; getProjectAnalyticsProjects().then((result)=>setProjectOptions(result.projects ?? [])).catch(()=>setProjectOptions([]));},[scope]);
     useEffect(()=>{if(scope!=="portfolio") {setPortfolioData(null); return;} setPortfolioLoading(true); getDashboard({period:filters.dateMonth,ministry:filters.ministry,sector:filters.sector,state:filters.state,risk:filters.riskLevel,status:filters.projectStatus}).then(setPortfolioData).catch(()=>setPortfolioData(null)).finally(()=>setPortfolioLoading(false));},[scope,filters.dateMonth,filters.ministry,filters.sector,filters.state,filters.riskLevel,filters.projectStatus]);
     useEffect(()=>{if(scope!=="portfolio") return; const optionMap: Record<string,string[]>={ministry:portfolioOptions.ministries,sector:portfolioOptions.sectors,state:portfolioOptions.states,riskLevel:portfolioOptions.risk_levels,projectStatus:portfolioOptions.statuses,dateMonth:portfolioOptions.periods}; (Object.entries(optionMap) as Array<[keyof typeof filters,string[]]>).forEach(([key,options])=>{if(filters[key] && options.length && !options.includes(filters[key])) setFilter(key,"");});},[scope,portfolioOptions.ministries,portfolioOptions.sectors,portfolioOptions.states,portfolioOptions.risk_levels,portfolioOptions.statuses,portfolioOptions.periods]);
     const customize=sections.find(s=>s.id===customizeId)??null;
@@ -643,7 +656,7 @@ export default function ReportsPage(){
                         <div><span className="mb-2 block text-[11px] font-bold text-slate-600">Report Scope</span><div className="grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-1">{(["project","portfolio"] as ReportScope[]).map(s=><button key={s} type="button" onClick={()=>setScope(s)} className={`rounded-lg px-3 py-2.5 text-[11px] font-bold transition ${scope===s?"bg-slate-900 text-white shadow-sm":"text-slate-500 hover:bg-slate-200/70 hover:text-slate-800"}`}>{s==="project"?"Project":"Portfolio"}</button>)}</div><p className="mt-2 text-[10px] leading-4 text-slate-400">{scope==="project"?"Single selected project report. Save its analytics directly from Project Analytics.":"Combined report for all projects matching the selected portfolio filters."}</p></div>
                     </div>
                     <label><span className="mb-2 block text-[11px] font-bold text-slate-600">Description</span><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-100" placeholder="Briefly describe what this report covers..."/></label>
-                    {scope==="project"&&<div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><div className="mb-3 flex items-center gap-2"><span className="grid h-7 w-7 place-items-center rounded-lg bg-white text-[10px] font-bold text-slate-600 shadow-sm">ID</span><div><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Project context</div><div className="text-xs font-semibold text-slate-700">Selected project for this report</div></div></div><div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">Project Code</span><input value={projectCode} onChange={e=>setProjectCode(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Project code"/></label><label><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">Project Name</span><input value={projectName} onChange={e=>setProjectName(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Project name"/></label></div></div>}
+                    {scope==="project"&&<div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><div className="mb-3 flex items-center gap-2"><span className="grid h-7 w-7 place-items-center rounded-lg bg-white text-[10px] font-bold text-slate-600 shadow-sm">ID</span><div><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Project context</div><div className="text-xs font-semibold text-slate-700">Select the single project this report covers</div></div></div><div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">Project</span><select value={projectCode} onChange={e=>{const selected=projectOptions.find(p=>p.project_code===e.target.value);setProjectCode(e.target.value);setProjectName(selected?.project_name??"");}} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"><option value="">Select project</option>{projectOptions.map(p=><option key={p.project_code} value={p.project_code}>{p.project_code} · {p.project_name}</option>)}</select></label><label><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">Project Name</span><input value={projectName} onChange={e=>setProjectName(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Selected project name"/></label></div></div>}
                     {scope==="portfolio"&&<div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><div className="mb-3 flex items-center justify-between"><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Portfolio filters</div><span className="text-[10px] text-slate-400">{portfolioLoading?"Loading portfolio…":portfolioData?(`${portfolioData.metrics.totalProjects} projects matched`):"Select filters"}</span></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{([["ministry","Ministry",portfolioOptions.ministries],["sector","Sector",portfolioOptions.sectors],["state","State / UT",portfolioOptions.states],["riskLevel","Risk Level",portfolioOptions.risk_levels],["projectStatus","Project Status",portfolioOptions.statuses],["dateMonth","Date / Month",portfolioOptions.periods]] as Array<[keyof typeof filters,string,string[]]>).map(([k,l,options])=><label key={k}><span className="mb-1.5 block text-[10px] font-semibold text-slate-500">{l}</span><select value={filters[k]} onChange={e=>setFilter(k,e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"><option value="">{`All ${l}`}</option>{options.map(option=><option key={option} value={option}>{option}</option>)}</select></label>)}</div></div>}
                     <label><span className="mb-2 block text-[11px] font-bold text-slate-600">Report Observation / Note</span><div className="relative"><textarea value={observation} onChange={e=>setObservation(e.target.value)} rows={3} className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm leading-6 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100" placeholder="Add an observation, officer note, or context for this report..."/><span className="pointer-events-none absolute bottom-2 right-3 text-[9px] text-slate-300">Optional</span></div></label>
                 </div>
