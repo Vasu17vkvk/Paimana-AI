@@ -440,7 +440,7 @@ function downloadPdf(report: ReportExportData) {
 
         const totalProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/total projects/i])?.[1] || "—";
         const delayedProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/delayed projects/i])?.[1] || "—";
-        const progressSnapshot = (sections.find((section) => section.type === "progress")?.snapshot ?? {}) as Record<string, unknown>;
+        const progressSnapshot = (report.sections.find((section) => section.type === "progress")?.snapshot ?? {}) as Record<string, unknown>;
         const progressProjects = Array.isArray(progressSnapshot.projects) ? progressSnapshot.projects : [];
         const riskScores = progressProjects
             .map((project: unknown) => (project && typeof project === "object" ? (project as Record<string, unknown>).riskScore : undefined))
