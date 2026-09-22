@@ -898,6 +898,39 @@ Expected:
   "filters": {{"project_code": "400005"}}
 }}
 
+Question:
+"tell me the top critical projects"
+
+Expected:
+{
+  "intent": "ANALYTICS",
+  "operation": "LIST_PROJECTS",
+  "project_code": null,
+  "dimension": "project",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": 10,
+  "filters": {
+    "risk_level": "Critical"
+  }
+}
+
+Question:
+"critical projects name"
+
+Expected:
+{
+  "intent": "ANALYTICS",
+  "operation": "LIST_PROJECTS",
+  "project_code": null,
+  "dimension": "project",
+  "metric": "risk",
+  "sort_order": "descending",
+  "limit": null,
+  "filters": {
+    "risk_level": "Critical"
+  }
+}
 
 Now classify the user's question according to the rules and examples above.
 

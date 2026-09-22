@@ -54,6 +54,7 @@ Existing indexes:
 
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 from typing import Any
@@ -364,14 +365,36 @@ If evidence is insufficient, say so.
 @lru_cache(maxsize=1)
 def get_embedding_model() -> TextEmbedding:
     """
-    Load the local BGE embedding model once per Python process.
+    Load exactly one FastEmbed model instance per Python process.
 
-    FastEmbed uses the same BAAI/bge-small-en-v1.5 model family
-    through an ONNX-based CPU runtime, avoiding the large
-    PyTorch/CUDA dependency chain.
+    Memory controls:
+        - one cached model instance
+        - one ONNX thread
+        - explicit cache directory
+        - optional offline/local-only loading
+
+    The model is still BAAI/bge-small-en-v1.5 and therefore remains
+    compatible with the existing 384-dimensional PostgreSQL vectors.
     """
+
+    cache_dir = os.getenv(
+        "FASTEMBED_CACHE_DIR",
+        "/tmp/fastembed",
+    )
+
+    local_files_only = (
+        os.getenv(
+            "FASTEMBED_LOCAL_FILES_ONLY",
+            "false",
+        ).strip().lower()
+        == "true"
+    )
+
     return TextEmbedding(
-        model_name=EMBEDDING_MODEL_NAME
+        model_name=EMBEDDING_MODEL_NAME,
+        cache_dir=cache_dir,
+        threads=1,
+        local_files_only=local_files_only,
     )
 
 
@@ -391,7 +414,9 @@ def _embed_query(
 
     embedding = next(
         model.embed(
-            [retrieval_query]
+            [retrieval_query],
+            batch_size=1,
+            parallel=1,
         )
     )
 

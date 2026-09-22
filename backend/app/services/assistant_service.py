@@ -2855,11 +2855,6 @@ def _analytics_response(
             normalized,
         )
         is not None
-        or re.search(
-            r"\bcritical\b.*\bprojects?\b",
-            normalized,
-        )
-        is not None
     )
 
     if critical_project_requested:
@@ -2928,6 +2923,142 @@ def _analytics_response(
             "model_used": False,
             "source": "postgresql",
         }
+
+    # ---------------------------------------------------------------
+    # LIST CRITICAL PROJECTS
+    # ---------------------------------------------------------------
+
+    critical_project_list_requested = (
+        "critical" in normalized
+        and "projects" in normalized
+        and re.search(
+            r"\b(?:list|show|give|tell|which|what|name|top)\b",
+            normalized,
+        )
+        is not None
+    )
+
+    if critical_project_list_requested:
+
+        ml_ready = load_ml_ready()
+
+        if ml_ready is None or ml_ready.empty:
+            return {
+                "text": "ML project data is unavailable.",
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        latest_rows = ml_ready.copy()
+
+        sort_columns = [
+            column
+            for column in [
+                "project_code",
+                "snapshot_year",
+                "snapshot_month_num",
+            ]
+            if column in latest_rows.columns
+        ]
+
+        if (
+            "project_code" in latest_rows.columns
+            and len(sort_columns) >= 2
+        ):
+            latest_rows = latest_rows.sort_values(
+                sort_columns
+            )
+
+            latest_rows = (
+                latest_rows
+                .drop_duplicates(
+                    subset=["project_code"],
+                    keep="last",
+                )
+            )
+
+        scores = model_scores_from_features_batch(
+            latest_rows
+        )
+
+        scored = latest_rows.copy()
+
+        scored["overall_risk_score"] = (
+            scores["overall_risk"]
+        )
+
+        scored["risk_level"] = (
+            scores["risk_level"]
+        )
+
+        critical = (
+            scored[
+                scored["risk_level"]
+                .astype(str)
+                .str.upper()
+                .eq("CRITICAL")
+            ]
+            .sort_values(
+                [
+                    "overall_risk_score",
+                    "project_code",
+                ],
+                ascending=[
+                    False,
+                    True,
+                ],
+            )
+        )
+
+        if critical.empty:
+            return {
+                "text": "No critical projects were found.",
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        lines = [
+            f"Critical projects: {len(critical)}"
+        ]
+
+        for _, project in critical.iterrows():
+
+            project_code_value = project.get(
+                "project_code"
+            )
+
+            project_name = project.get(
+                "project_name"
+            )
+
+            risk_score = project.get(
+                "overall_risk_score"
+            )
+
+            lines.append(
+                f"- {project_code_value}: "
+                f"{project_name} "
+                f"(Risk score: "
+                f"{float(risk_score):.2f})"
+            )
+
+        return {
+            "text": "\n".join(lines),
+            "query_type": ANALYTICS_QUERY,
+            "project_code": None,
+            "citations": [],
+            "retrieved_chunks": [],
+            "model_used": False,
+            "source": "postgresql",
+        }    
 
 
     # ---------------------------------------------------------------
@@ -3579,16 +3710,12 @@ def _analytics_response(
     }    
 
 def _query_from_understanding_plan(
-    original_query: str,
-    plan: dict[str, Any] | None,
-) -> str:
+    original_query,
+    plan,
+):
     """
-    Convert Gemini's structured query-understanding result into
-    a deterministic backend query that existing handlers can process.
-
-    Gemini only interprets the user's wording.
-    Existing PostgreSQL / ML / RAG handlers remain responsible
-    for producing the actual answer.
+    Convert Gemini's structured query-understanding result into a
+    deterministic backend query that existing handlers can process.
     """
 
     if not plan:
@@ -3602,6 +3729,27 @@ def _query_from_understanding_plan(
         plan.get("operation") or ""
     ).upper()
 
+    filters = plan.get(
+        "filters"
+    ) or {}
+
+    retrieval_query = (
+        plan.get("retrieval_query")
+        or ""
+    ).strip()
+
+    state = filters.get(
+        "state"
+    )
+
+    schedule_status = filters.get(
+        "schedule_status"
+    )
+
+    risk_level = filters.get(
+        "risk_level"
+    )
+
     dimension = str(
         plan.get("dimension") or ""
     ).strip().lower()
@@ -3610,38 +3758,13 @@ def _query_from_understanding_plan(
         plan.get("metric") or ""
     ).strip().lower()
 
-    filters = plan.get("filters") or {}
-
-    state = str(
-        filters.get("state") or ""
-    ).strip()
-
-    schedule_status = str(
-        filters.get("schedule_status") or ""
-    ).strip()
-
     # ---------------------------------------------------------------
-    # ANALYTICS: COUNT PROJECTS IN A STATE
-    # ---------------------------------------------------------------
-
-    if (
-        intent == "ANALYTICS"
-        and operation == "COUNT_PROJECTS"
-        and dimension == "state"
-        and state
-    ):
-        return (
-            f"how many projects are in {state}"
-        )
-
-    # ---------------------------------------------------------------
-    # ANALYTICS: LIST PROJECTS BY STATE + STATUS
+    # LIST PROJECTS BY STATE + SCHEDULE STATUS
     # ---------------------------------------------------------------
 
     if (
         intent == "ANALYTICS"
         and operation == "LIST_PROJECTS"
-        and dimension == "state"
         and state
         and schedule_status
     ):
@@ -3652,7 +3775,35 @@ def _query_from_understanding_plan(
         )
 
     # ---------------------------------------------------------------
-    # ANALYTICS: HIGHEST-RISK MINISTRY
+    # COUNT PROJECTS IN STATE
+    # ---------------------------------------------------------------
+
+    if (
+        intent == "ANALYTICS"
+        and operation == "COUNT_PROJECTS"
+        and state
+    ):
+        return (
+            f"how many projects are in "
+            f"{state}"
+        )
+
+    # ---------------------------------------------------------------
+    # LIST CRITICAL PROJECTS
+    # ---------------------------------------------------------------
+
+    if (
+        intent == "ANALYTICS"
+        and operation == "LIST_PROJECTS"
+        and dimension == "project"
+        and risk_level
+    ):
+        return (
+            f"list {risk_level.lower()} projects"
+        )
+
+    # ---------------------------------------------------------------
+    # HIGHEST-RISK MINISTRY
     # ---------------------------------------------------------------
 
     if (
@@ -3666,7 +3817,7 @@ def _query_from_understanding_plan(
         )
 
     # ---------------------------------------------------------------
-    # ANALYTICS: HIGHEST-RISK SECTOR
+    # HIGHEST-RISK SECTOR
     # ---------------------------------------------------------------
 
     if (
@@ -3680,12 +3831,8 @@ def _query_from_understanding_plan(
         )
 
     # ---------------------------------------------------------------
-    # RAG: use Gemini's normalized retrieval query.
+    # RAG
     # ---------------------------------------------------------------
-
-    retrieval_query = str(
-        plan.get("retrieval_query") or ""
-    ).strip()
 
     if (
         intent == "RAG"
@@ -3865,11 +4012,18 @@ def answer_query(
         Any,
     ] | None = None
 
-    if query_type in {
-        FACT_QUERY,
-        ML_QUERY,
-        HYBRID_QUERY,
-    }:
+    if (
+        query_type in {
+            RAG_QUERY,
+            HYBRID_QUERY,
+            ANALYTICS_QUERY,
+            GENERAL_QUERY,
+        }
+        or (
+            query_type == FACT_QUERY
+            and not resolved_project_code
+        )
+    ):
 
         if not resolved_project_code:
             return {
