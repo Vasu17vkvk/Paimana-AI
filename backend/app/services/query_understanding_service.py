@@ -555,7 +555,7 @@ def understand_query(
             "question is required."
         )
 
-    prompt = f"""
+    prompt = """
 USER QUESTION:
 
 {query}

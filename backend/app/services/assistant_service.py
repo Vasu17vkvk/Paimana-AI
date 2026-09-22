@@ -3935,8 +3935,6 @@ def answer_query(
 
     if query_type in {
         RAG_QUERY,
-        HYBRID_QUERY,
-        ANALYTICS_QUERY,
         GENERAL_QUERY,
     }:
         try:
