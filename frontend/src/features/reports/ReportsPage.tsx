@@ -126,8 +126,7 @@ function formatReportValue(value: string): string {
 
 function splitSummary(text: string): Array<{ heading: string; bullets: string[] }> {
     if (!text) return [];
-    const lines = text.split(/\\r?\
-/).map((line) => line.trim()).filter(Boolean);
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const groups: Array<{ heading: string; bullets: string[] }> = [];
     let current: { heading: string; bullets: string[] } | null = null;
     lines.forEach((line) => {
