@@ -213,6 +213,11 @@ function exportXlsx(report: ReportExportData) {
     );
 }
 
+function trendsRowsForReport(sections: SavedReport["sections"]): Array<Record<string,string>> {
+    const section = sections.find((item) => item.type === "trends");
+    return section ? trendTableRows(section) : [];
+}
+
 function downloadPdf(report: ReportExportData) {
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
@@ -389,6 +394,108 @@ function downloadPdf(report: ReportExportData) {
     const costRows = cost ? sectionRows(cost) : [];
     const scheduleRows = schedule ? sectionRows(schedule) : [];
     const simulationRows = simulation ? sectionRows(simulation) : [];
+
+    if (report.scope === "portfolio") {
+        pdf.setProperties({
+            title: report.title || "PAIMANA Portfolio Monitoring Report",
+            subject: "PAIMANA Portfolio Monitoring Report",
+            author: "PAIMANA",
+            creator: "PAIMANA",
+        });
+        pdf.setFillColor(31, 38, 46);
+        pdf.rect(0, 0, pageWidth, 8, "F");
+        let py = 20;
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8);
+        pdf.setTextColor(92, 105, 119);
+        pdf.text("PAIMANA | PORTFOLIO MONITORING & ANALYTICS", margin, py);
+        py += 9;
+        pdf.setFontSize(19);
+        pdf.setTextColor(24, 34, 46);
+        pdf.text(pdf.splitTextToSize(report.title || "PAIMANA Portfolio Report", contentWidth), margin, py);
+        py += 8;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        pdf.setTextColor(80, 92, 106);
+        pdf.text("Combined portfolio view based on the selected filters.", margin, py);
+        py += 9;
+
+        const portfolioRows = overview ? sectionRows(overview) : [];
+        const portfolioRiskRows = risk ? sectionRows(risk) : [];
+        const portfolioCostRows = cost ? sectionRows(cost) : [];
+        const portfolioTrendRows = trendsRowsForReport(report.sections);
+
+        const totalProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/total projects/i])?.[1] || "—";
+        const delayedProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/delayed projects/i])?.[1] || "—";
+        const averageRisk = findMetric(portfolioRiskRows, [/average risk score/i])?.[1] || "—";
+        const expenditureTotal = findMetric(portfolioCostRows, [/total expenditure/i])?.[1] || "—";
+
+        py = cards([
+            ["TOTAL PROJECTS", totalProjects],
+            ["DELAYED PROJECTS", delayedProjects],
+            ["AVERAGE RISK", averageRisk],
+            ["TOTAL EXPENDITURE", expenditureTotal],
+        ], py);
+
+        py = sectionTitle("01", "Portfolio Scope & Current Position", py);
+        const filterRows = Object.entries(report.filters).filter(([,value]) => value).map(([key,value]) => [humanLabel(key), value] as [string,string]);
+        if (filterRows.length) py = table(filterRows, py, "Applied filters");
+        py = table(portfolioRows.filter(([label]) => /total projects|delayed projects|delay rate|cost overrun|average risk/i.test(label)).slice(0, 16), py, "Portfolio indicators");
+
+        py = sectionTitle("02", "Portfolio Risk Position", py);
+        const riskRows = uniqueRows(portfolioRiskRows.filter(([label]) => /risk distribution|critical|high|elevated|moderate|low|risk score|average risk|delayed projects/i.test(label)));
+        py = table(riskRows.slice(0, 18), py, "Risk distribution and indicators");
+        py = chart("Risk Distribution", [
+            ["Critical", numericValue(findMetric(portfolioRiskRows, [/risk distribution critical/i])?.[1] || "") ?? NaN],
+            ["High", numericValue(findMetric(portfolioRiskRows, [/risk distribution high/i])?.[1] || "") ?? NaN],
+            ["Elevated", numericValue(findMetric(portfolioRiskRows, [/risk distribution elevated/i])?.[1] || "") ?? NaN],
+            ["Moderate", numericValue(findMetric(portfolioRiskRows, [/risk distribution moderate/i])?.[1] || "") ?? NaN],
+            ["Low", numericValue(findMetric(portfolioRiskRows, [/risk distribution low/i])?.[1] || "") ?? NaN],
+        ], py);
+
+        py = sectionTitle("03", "Portfolio Financial Position", py);
+        py = table(uniqueRows(portfolioCostRows).slice(0, 18), py, "Combined financial indicators");
+
+        py = sectionTitle("04", "Portfolio Trends", py);
+        if (portfolioTrendRows.length) {
+            const trendRows = portfolioTrendRows.slice(0, 12).map(row => [
+                Object.values(row)[0] || "—",
+                Object.entries(row).slice(1).map(([k,v]) => `${humanLabel(k)}: ${v}`).join(" · ")
+            ] as [string,string]);
+            py = table(trendRows, py, "Monthly portfolio movement");
+        } else {
+            py = wrappedText("No captured monthly portfolio trend data is available for this report.", margin, py, contentWidth);
+        }
+
+        if (report.observation || report.executiveSummary) {
+            if (py + 35 > bottom) py = addPage();
+            py = sectionTitle("05", "Executive Summary & Officer Record", py);
+            if (report.observation) py = table([["Officer Observation", report.observation]], py);
+            const groups = splitSummary(report.executiveSummary || "");
+            groups.forEach(group => {
+                if (py + 14 > bottom) py = addPage();
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(9);
+                pdf.setTextColor(42, 54, 68);
+                pdf.text(group.heading, margin, py);
+                py += 5;
+                group.bullets.forEach(bullet => {
+                    const lines = pdf.splitTextToSize("• " + bullet, contentWidth - 4);
+                    if (py + lines.length * 4 + 4 > bottom) py = addPage();
+                    pdf.setFont("helvetica", "normal");
+                    pdf.setFontSize(8);
+                    pdf.setTextColor(57, 68, 82);
+                    pdf.text(lines, margin + 2, py);
+                    py += lines.length * 4 + 3;
+                });
+                py += 2;
+            });
+        }
+
+        footer();
+        pdf.save((report.title || "PAIMANA_Portfolio_Report").replace(/[^a-z0-9_-]+/gi, "_") + ".pdf");
+        return;
+    }
 
     const status = findMetric(overviewRows, [/schedule status/i])?.[1]
         || findMetric(scheduleRows, [/schedule status/i])?.[1]
