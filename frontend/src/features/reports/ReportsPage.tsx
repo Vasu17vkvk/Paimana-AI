@@ -126,7 +126,8 @@ function formatReportValue(value: string): string {
 
 function splitSummary(text: string): Array<{ heading: string; bullets: string[] }> {
     if (!text) return [];
-    const lines = text.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);
+    const lines = text.split(/\\r?\
+/).map((line) => line.trim()).filter(Boolean);
     const groups: Array<{ heading: string; bullets: string[] }> = [];
     let current: { heading: string; bullets: string[] } | null = null;
     lines.forEach((line) => {
@@ -623,8 +624,10 @@ export default function ReportsPage(){
     const [preview,setPreview]=useState(false),[historyOpen,setHistoryOpen]=useState(false),[customizeId,setCustomizeId]=useState<string|null>(null),[aiLoading,setAiLoading]=useState(false),[aiError,setAiError]=useState(""),[catalogSearch,setCatalogSearch]=useState("");
     const [portfolioOptions,setPortfolioOptions]=useState<DashboardFilterOptions>({periods:[],ministries:[],sectors:[],states:[],risk_levels:[],statuses:[]});
     const [portfolioData,setPortfolioData]=useState<DashboardResponse|null>(null);
-    const [portfolioLoading,setPortfolioLoading]=useState(false);\n    const [projectOptions,setProjectOptions]=useState<ProjectAnalyticsProject[]>([]);
-    useEffect(()=>{if(scope!=="portfolio") return; getDashboardFilterOptions().then(setPortfolioOptions).catch(()=>setPortfolioOptions({periods:[],ministries:[],sectors:[],states:[],risk_levels:[],statuses:[]}));},[scope]);\n    useEffect(()=>{if(scope!=="project") return; getProjectAnalyticsProjects().then((result)=>setProjectOptions(result.projects ?? [])).catch(()=>setProjectOptions([]));},[scope]);
+    const [portfolioLoading,setPortfolioLoading]=useState(false);
+    const [projectOptions,setProjectOptions]=useState<ProjectAnalyticsProject[]>([]);
+    useEffect(()=>{if(scope!=="portfolio") return; getDashboardFilterOptions().then(setPortfolioOptions).catch(()=>setPortfolioOptions({periods:[],ministries:[],sectors:[],states:[],risk_levels:[],statuses:[]}));},[scope]);
+    useEffect(()=>{if(scope!=="project") return; getProjectAnalyticsProjects().then((result)=>setProjectOptions(result.projects ?? [])).catch(()=>setProjectOptions([]));},[scope]);
     useEffect(()=>{if(scope!=="portfolio") {setPortfolioData(null); return;} setPortfolioLoading(true); getDashboard({period:filters.dateMonth,ministry:filters.ministry,sector:filters.sector,state:filters.state,risk:filters.riskLevel,status:filters.projectStatus}).then(setPortfolioData).catch(()=>setPortfolioData(null)).finally(()=>setPortfolioLoading(false));},[scope,filters.dateMonth,filters.ministry,filters.sector,filters.state,filters.riskLevel,filters.projectStatus]);
     useEffect(()=>{if(scope!=="portfolio") return; const optionMap: Record<string,string[]>={ministry:portfolioOptions.ministries,sector:portfolioOptions.sectors,state:portfolioOptions.states,riskLevel:portfolioOptions.risk_levels,projectStatus:portfolioOptions.statuses,dateMonth:portfolioOptions.periods}; (Object.entries(optionMap) as Array<[keyof typeof filters,string[]]>).forEach(([key,options])=>{if(filters[key] && options.length && !options.includes(filters[key])) setFilter(key,"");});},[scope,portfolioOptions.ministries,portfolioOptions.sectors,portfolioOptions.states,portfolioOptions.risk_levels,portfolioOptions.statuses,portfolioOptions.periods]);
     const customize=sections.find(s=>s.id===customizeId)??null;
