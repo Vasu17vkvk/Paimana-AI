@@ -81,7 +81,6 @@ export const reportSectionCatalog: Array<Omit<ReportSection, "id" | "addedAt" | 
     { type: "progress", title: "Physical & Financial Progress", description: "Progress indicators and project movement." },
     { type: "risk", title: "Risk Assessment", description: "Overall risk and contributing risk signals." },
     { type: "prediction", title: "ML Predictions", description: "Model-based future risk and prediction outputs." },
-    { type: "warnings", title: "Early Warnings", description: "Active warnings and priority signals." },
     { type: "analytics", title: "Analytics", description: "Selected analytical views and data." },
     { type: "trends", title: "Trends", description: "Historical progress, risk and schedule trends." },
     { type: "milestones", title: "Milestone Analysis", description: "Completion and schedule milestone position." },
