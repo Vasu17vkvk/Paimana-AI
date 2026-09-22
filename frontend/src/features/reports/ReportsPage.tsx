@@ -440,10 +440,20 @@ function downloadPdf(report: ReportExportData) {
 
         const totalProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/total projects/i])?.[1] || "—";
         const delayedProjects = findMetric([...portfolioRows, ...portfolioRiskRows], [/delayed projects/i])?.[1] || "—";
-        const riskScores = portfolioData?.projects.map((project) => project.riskScore).filter((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? [];
-        const averageRisk = riskScores.length ? (riskScores.reduce((sum, value) => sum + value, 0) / riskScores.length).toFixed(2) : "—";
-        const originalCost = portfolioData ? portfolioData.financials.originalCost.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
-        const revisedCost = portfolioData ? portfolioData.financials.revisedCost.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+        const progressSnapshot = (sections.find((section) => section.type === "progress")?.snapshot ?? {}) as Record<string, unknown>;
+        const progressProjects = Array.isArray(progressSnapshot.projects) ? progressSnapshot.projects : [];
+        const riskScores = progressProjects
+            .map((project: unknown) => (project && typeof project === "object" ? (project as Record<string, unknown>).riskScore : undefined))
+            .filter((value: unknown): value is number => typeof value === "number" && Number.isFinite(value));
+        const averageRisk = riskScores.length ? (riskScores.reduce((sum: number, value: number) => sum + value, 0) / riskScores.length).toFixed(2) : "—";
+        const financialSnapshot = (cost?.snapshot ?? {}) as Record<string, unknown>;
+        const financials = financialSnapshot.financials && typeof financialSnapshot.financials === "object"
+            ? financialSnapshot.financials as Record<string, unknown>
+            : {};
+        const originalCostValue = financials.originalCost;
+        const revisedCostValue = financials.revisedCost;
+        const originalCost = typeof originalCostValue === "number" ? originalCostValue.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
+        const revisedCost = typeof revisedCostValue === "number" ? revisedCostValue.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—";
 
         py = cards([
             ["TOTAL PROJECTS", totalProjects],
@@ -469,7 +479,8 @@ function downloadPdf(report: ReportExportData) {
         ], py);
 
         py = sectionTitle("03", "Portfolio Financial Position", py);
-        py = table([["Original Cost", originalCost], ["Revised Cost", revisedCost], ...uniqueRows(portfolioCostRows)].slice(0, 18), py, "Combined financial indicators");
+        const combinedCostRows: Array<[string, string]> = [["Original Cost", originalCost], ["Revised Cost", revisedCost], ...uniqueRows(portfolioCostRows)];
+        py = table(combinedCostRows.slice(0, 18), py, "Combined financial indicators");
 
         py = sectionTitle("04", "Portfolio Trends", py);
         if (portfolioTrendRows.length) {
