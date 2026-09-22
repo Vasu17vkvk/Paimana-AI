@@ -1281,7 +1281,7 @@ export default function DashboardPage() {
                         <div className="flex items-center gap-1">
                             <SaveToReport
                                 id="dashboard-highest-risk"
-                                type="warnings"
+                                type="risk"
                                 title="Highest Risk Projects"
                                 description="Top projects ranked by current ML risk score."
                                 snapshot={{
