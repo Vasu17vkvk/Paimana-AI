@@ -298,6 +298,44 @@ def _contains_any(
         for keyword in keywords
     )
 
+def _is_conversational_query(
+    query: str,
+) -> bool:
+    """
+    Detect ordinary conversational messages that should never
+    be promoted into a project/data intent by query understanding.
+    """
+
+    normalized = _normalise_query(
+        query
+    )
+
+    conversational_exact = {
+        "hi",
+        "hello",
+        "hey",
+        "hi there",
+        "hello there",
+        "hey there",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "thanks",
+        "thank you",
+        "thanks a lot",
+        "thank you very much",
+        "ok",
+        "okay",
+        "great",
+        "cool",
+        "help",
+        "who are you",
+        "what are you",
+        "what can you do",
+    }
+
+    return normalized in conversational_exact    
+
 def extract_project_code(
     query: str,
 ) -> str | None:
@@ -3963,6 +4001,274 @@ def _query_from_understanding_plan(
 
     return original_query
 
+def _validate_understanding_plan(
+    plan: dict[str, Any],
+    resolved_project_code: str | None,
+    original_query: str,
+) -> dict[str, Any]:
+    """
+    Validate Gemini's structured intent before executing it.
+
+    Gemini decides the semantic layer, but the backend guarantees
+    that the selected layer is internally consistent and has the
+    minimum information required for execution.
+    """
+
+    if not isinstance(
+        plan,
+        dict,
+    ):
+        return {
+            "intent": "GENERAL",
+            "operation": "ANSWER",
+            "project_code": resolved_project_code,
+            "dimension": "",
+            "metric": "",
+            "sort_order": "",
+            "limit": None,
+            "filters": {},
+            "retrieval_query": "",
+            "retrieval_keywords": [],
+            "needs_generation": True,
+        }
+
+    validated = dict(
+        plan
+    )
+
+    intent = str(
+        validated.get(
+            "intent"
+        )
+        or "GENERAL"
+    ).upper()
+
+    operation = str(
+        validated.get(
+            "operation"
+        )
+        or "ANSWER"
+    ).upper()
+
+    project = (
+        validated.get(
+            "project_code"
+        )
+        or resolved_project_code
+    )
+
+    if project:
+        project = str(
+            project
+        ).strip()
+
+    # ---------------------------------------------------------------
+    # GENERAL
+    # ---------------------------------------------------------------
+
+    if intent == "GENERAL":
+        validated["intent"] = "GENERAL"
+        validated["operation"] = "ANSWER"
+        validated["project_code"] = project
+        return validated
+
+    # ---------------------------------------------------------------
+    # ANALYTICS
+    #
+    # Must describe a portfolio operation rather than a project
+    # prediction/fact request.
+    # ---------------------------------------------------------------
+
+    if intent == "ANALYTICS":
+
+        valid_analytics_operations = {
+            "COUNT_PROJECTS",
+            "LIST_PROJECTS",
+            "LIST_DIMENSIONS",
+            "HIGHEST_RISK",
+        }
+
+        if operation not in valid_analytics_operations:
+            validated["intent"] = "GENERAL"
+            validated["operation"] = "ANSWER"
+            return validated
+
+        dimension = str(
+            validated.get(
+                "dimension"
+            )
+            or ""
+        ).lower()
+
+        metric = str(
+            validated.get(
+                "metric"
+            )
+            or ""
+        ).lower()
+
+        if operation == "COUNT_PROJECTS":
+            if dimension not in {
+                "state",
+                "ministry",
+                "sector",
+            }:
+                validated["intent"] = "GENERAL"
+                validated["operation"] = "ANSWER"
+                return validated
+
+            validated["metric"] = (
+                "project_count"
+            )
+
+        elif operation == "LIST_DIMENSIONS":
+            if dimension not in {
+                "state",
+                "ministry",
+                "sector",
+            }:
+                validated["intent"] = "GENERAL"
+                validated["operation"] = "ANSWER"
+                return validated
+
+            validated["metric"] = (
+                "project_count"
+            )
+
+        elif operation == "LIST_PROJECTS":
+            if dimension != "project":
+                validated["intent"] = "GENERAL"
+                validated["operation"] = "ANSWER"
+                return validated
+
+        elif operation == "HIGHEST_RISK":
+            if dimension not in {
+                "ministry",
+                "sector",
+            }:
+                validated["intent"] = "GENERAL"
+                validated["operation"] = "ANSWER"
+                return validated
+
+            validated["metric"] = "risk"
+            validated["sort_order"] = "descending"
+
+            if not validated.get(
+                "limit"
+            ):
+                validated["limit"] = 1
+
+        validated["project_code"] = None
+
+        return validated
+
+    # ---------------------------------------------------------------
+    # PROJECT-SPECIFIC LAYERS
+    #
+    # FACT / ML / HYBRID require a project.
+    # ---------------------------------------------------------------
+
+    if intent in {
+        "FACT",
+        "ML",
+        "HYBRID",
+    }:
+
+        if not project:
+            return {
+                "intent": "GENERAL",
+                "operation": "ANSWER",
+                "project_code": None,
+                "dimension": "",
+                "metric": "",
+                "sort_order": "",
+                "limit": None,
+                "filters": {},
+                "retrieval_query": "",
+                "retrieval_keywords": [],
+                "needs_generation": True,
+            }
+
+        validated["project_code"] = project
+
+        filters = dict(
+            validated.get(
+                "filters"
+            )
+            or {}
+        )
+
+        filters["project_code"] = project
+
+        validated["filters"] = filters
+
+        if intent == "FACT":
+            validated["operation"] = (
+                "GET_FACT"
+            )
+
+        elif intent == "ML":
+            validated["operation"] = (
+                "GET_PREDICTION"
+            )
+
+        elif intent == "HYBRID":
+            validated["operation"] = (
+                "ANSWER"
+            )
+
+        return validated
+
+    # ---------------------------------------------------------------
+    # RAG
+    #
+    # RAG requires a retrieval request. A project code is optional.
+    # ---------------------------------------------------------------
+
+    if intent == "RAG":
+
+        retrieval_query = str(
+            validated.get(
+                "retrieval_query"
+            )
+            or ""
+        ).strip()
+
+        if not retrieval_query:
+            retrieval_query = (
+                str(
+                    original_query
+                ).strip()
+            )
+
+        validated["operation"] = (
+            "SEARCH_KNOWLEDGE"
+        )
+
+        validated["retrieval_query"] = (
+            retrieval_query
+        )
+
+        return validated
+
+    # ---------------------------------------------------------------
+    # Unknown intent -> safe GENERAL.
+    # ---------------------------------------------------------------
+
+    return {
+        "intent": "GENERAL",
+        "operation": "ANSWER",
+        "project_code": project,
+        "dimension": "",
+        "metric": "",
+        "sort_order": "",
+        "limit": None,
+        "filters": {},
+        "retrieval_query": "",
+        "retrieval_keywords": [],
+        "needs_generation": True,
+    }    
+
 # ============================================================================
 # MAIN ORCHESTRATION
 # ============================================================================
@@ -3989,44 +4295,22 @@ def answer_query(
 
     # ---------------------------------------------------------------
     # MULTI-PROJECT REQUEST
-    # ---------------------------------------------------------------
-
-    project_codes = extract_project_codes(query)
-    if len(project_codes) >= 2:
-        normalized = _normalise_query(query)
-
-        # Deterministic routing for multi-project questions.
-        # Do this before Gemini understanding so obvious intents
-        # are not incorrectly promoted to HYBRID.
-        if _contains_any(
-            normalized,
-            (
-                "why",
-                "cause",
-                "caused",
-                "causing",
-                "reason",
-                "mitigate",
-                "mitigation",
-                "recommend",
-                "solution",
-                "fix",
-                "what should we do",
-            ),
-        ):
-            return _multi_project_hybrid_response(
-                query,
-                project_codes,
-                query_embedding=query_embedding,
-            )
-
-        if _contains_any(normalized, ML_KEYWORDS):
-            return _multi_project_ml_response(query, project_codes)
-
-        return _multi_project_response(query, project_codes)
-
     # ------------------------------------------------------------------
-    # Resolve project code.
+    # GEMINI-FIRST QUERY UNDERSTANDING
+    # ------------------------------------------------------------------
+    #
+    # Every query goes through the Gemini query-understanding layer.
+    #
+    # Gemini decides:
+    #     FACT
+    #     ML
+    #     RAG
+    #     HYBRID
+    #     ANALYTICS
+    #     GENERAL
+    #
+    # The backend then executes the selected layer using its
+    # authoritative data source.
     # ------------------------------------------------------------------
 
     resolved_project_code = (
@@ -4037,91 +4321,109 @@ def answer_query(
         )
     )
 
-    # ------------------------------------------------------------------
-    # Classify query.
-    # ------------------------------------------------------------------
-
-    query_type = classify_query(
-        query,
-        resolved_project_code,
-    )
-
-        # ---------------------------------------------------------------
-    # Gemini query understanding fallback.
-    #
-    # We do NOT call Gemini for confidently handled FACT, ML, or
-    # ANALYTICS requests.
-    #
-    # RAG, HYBRID, and previously-GENERAL requests may benefit from
-    # natural-language understanding, Hinglish normalization,
-    # spelling correction, and retrieval-query rewriting.
-    # ---------------------------------------------------------------
-
     understanding_plan: dict[str, Any] | None = None
 
-    if query_type in {
-        RAG_QUERY,
-        GENERAL_QUERY,
-    }:
-        try:
-            understanding_plan = (
-                understand_query(
-                    query
-                )
-            )
-        except Exception as exc:
-            print(
-                "QUERY UNDERSTANDING ERROR:",
-                repr(exc),
-            )
-            understanding_plan = None
-
-        if understanding_plan:
-            understood_intent = str(
-                understanding_plan.get(
-                    "intent"
-                )
-                or ""
-            ).upper()
-
-            understood_project_code = (
-                understanding_plan.get(
-                    "project_code"
-                )
-            )
-
-            if (
-                understood_project_code
-                and not resolved_project_code
-            ):
-                resolved_project_code = str(
-                    understood_project_code
-                )
-
-            # Gemini may identify a previously-unrecognized
-            # project/portfolio intent.
-            if understood_intent == "FACT":
-                query_type = FACT_QUERY
-
-            elif understood_intent == "ML":
-                query_type = ML_QUERY
-
-            elif understood_intent == "ANALYTICS":
-                query_type = ANALYTICS_QUERY
-
-            elif understood_intent == "RAG":
-                query_type = RAG_QUERY
-
-            elif understood_intent == "HYBRID":
-                query_type = HYBRID_QUERY
-
-            elif understood_intent == "GENERAL":
-                query_type = GENERAL_QUERY
-
-            query = _query_from_understanding_plan(
+    try:
+        understanding_plan = (
+            understand_query(
                 query,
-                understanding_plan,
+                project_code=resolved_project_code,
             )
+        )
+
+    except Exception as exc:
+        print(
+            "QUERY UNDERSTANDING ERROR:",
+            repr(exc),
+        )
+        understanding_plan = None
+
+    # ------------------------------------------------------------------
+    # Resolve Gemini's intent.
+    # ------------------------------------------------------------------
+
+    understanding_plan = _validate_understanding_plan(
+        understanding_plan,
+        resolved_project_code,
+        query,
+    )
+
+    understood_intent = str(
+        understanding_plan.get(
+            "intent"
+        )
+        or "GENERAL"
+    ).upper()
+
+    understood_project_code = (
+        understanding_plan.get(
+            "project_code"
+        )
+    )
+
+    if (
+        understood_project_code
+        and not resolved_project_code
+    ):
+        resolved_project_code = str(
+            understood_project_code
+        )
+
+    query = _query_from_understanding_plan(
+        query,
+        understanding_plan,
+    )
+
+    # ------------------------------------------------------------------
+    # Gemini intent -> backend execution layer.
+    # ------------------------------------------------------------------
+
+    intent_to_query_type = {
+        "FACT": FACT_QUERY,
+        "ML": ML_QUERY,
+        "RAG": RAG_QUERY,
+        "HYBRID": HYBRID_QUERY,
+        "ANALYTICS": ANALYTICS_QUERY,
+        "GENERAL": GENERAL_QUERY,
+    }
+
+    query_type = intent_to_query_type.get(
+        understood_intent,
+        GENERAL_QUERY,
+    )
+
+    # ------------------------------------------------------------------
+    # Multi-project execution.
+    #
+    # Layer selection still comes from Gemini.
+    # Project-code extraction is only used to execute the selected
+    # multi-project operation against the authoritative database/ML/RAG
+    # sources.
+    # ------------------------------------------------------------------
+
+    project_codes = extract_project_codes(
+        query
+    )
+
+    if len(project_codes) >= 2:
+
+        if query_type == HYBRID_QUERY:
+            return _multi_project_hybrid_response(
+                query,
+                project_codes,
+                query_embedding=query_embedding,
+            )
+
+        if query_type == ML_QUERY:
+            return _multi_project_ml_response(
+                query,
+                project_codes,
+            )
+
+        return _multi_project_response(
+            query,
+            project_codes,
+        )
 
     # ------------------------------------------------------------------
     # Load project context only for:
