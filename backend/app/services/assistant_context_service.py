@@ -5,10 +5,10 @@ Builds a compact, authoritative context object for the AI assistant.
 
 Sources:
     Project facts:
-        Existing PostgreSQL-backed Project Analytics data.
+        PostgreSQL-backed project_master data.
 
     Predictions:
-        Existing NIRMAAN ML engine.
+        Existing canonical NIRMAAN ML engine.
 
     RAG knowledge:
         Handled separately by rag_service.py.
@@ -16,9 +16,12 @@ Sources:
     Gemini:
         Receives the compact context and explains/synthesizes it.
 
-This service deliberately uses the lower-level Project Analytics helpers
-instead of get_project_detail(), because the Assistant does not need the
-full Project Analytics response or risk trajectory calculation.
+Memory strategy:
+    - Never load the entire project_master table for one project.
+    - Never load the entire paimana_ml_ready table.
+    - Monthly history is project-scoped.
+    - FLASH history is project-scoped.
+    - ML history is project-scoped.
 """
 
 from __future__ import annotations
@@ -26,16 +29,18 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+from sqlalchemy import text
+
+from app.extensions import db
 
 from app.services.project_analytics_service import (
     delay_reasons,
     latest_ml_row,
-    load_master,
-    load_ml_ready,
     model_score_from_features,
     project_flash_history,
     project_history,
     solution_for_reason,
+    _load_project_ml_history,
 )
 
 
@@ -62,7 +67,10 @@ def _clean_text(
     if value is None:
         return None
 
-    if isinstance(value, pd.Timestamp):
+    if isinstance(
+        value,
+        pd.Timestamp,
+    ):
         if pd.isna(value):
             return None
 
@@ -70,11 +78,11 @@ def _clean_text(
             "%Y-%m-%d"
         )
 
-    text = str(
+    text_value = str(
         value
     ).strip()
 
-    return text or None
+    return text_value or None
 
 
 def _clean_number(
@@ -90,6 +98,7 @@ def _clean_number(
     try:
         if pd.isna(value):
             return None
+
     except (
         TypeError,
         ValueError,
@@ -132,6 +141,7 @@ def _clean_value(
     try:
         if pd.isna(value):
             return None
+
     except (
         TypeError,
         ValueError,
@@ -144,6 +154,7 @@ def _clean_value(
             "item",
         ):
             value = value.item()
+
     except Exception:
         pass
 
@@ -178,6 +189,70 @@ def _compact_record(
 
 
 # ============================================================================
+# PROJECT MASTER LOOKUP
+# ============================================================================
+
+def _load_project_master_row(
+    project_code: str,
+) -> pd.Series | None:
+    """
+    Load ONLY the requested project from project_master.
+
+    This replaces the previous pattern:
+
+        load_master()
+            -> entire project_master table
+            -> filter one project
+
+    with:
+
+        PostgreSQL
+            -> WHERE project_code = ?
+            -> one row
+    """
+
+    code = str(
+        project_code
+    ).strip()
+
+    if not code:
+        return None
+
+    query = text(
+        """
+        SELECT *
+        FROM "project_master"
+
+        WHERE CAST(
+            project_code AS TEXT
+        ) = :project_code
+
+        LIMIT 1
+        """
+    )
+
+    with db.engine.connect() as connection:
+
+        row = (
+            connection.execute(
+                query,
+                {
+                    "project_code": code,
+                },
+            )
+            .mappings()
+            .first()
+        )
+
+    if row is None:
+        return None
+
+    return pd.Series(
+        row
+    )
+
+
+# ============================================================================
 # PROJECT CONTEXT
 # ============================================================================
 
@@ -187,8 +262,8 @@ def get_project_context(
     """
     Build the authoritative Assistant context for one project.
 
-    Uses the same underlying Project Analytics data and ML engine, but avoids
-    the heavier get_project_detail() wrapper.
+    Uses project-scoped PostgreSQL queries and the existing canonical
+    PAIMANA ML engine.
     """
 
     code = str(
@@ -204,35 +279,15 @@ def get_project_context(
     # MASTER PROJECT DATA
     # ------------------------------------------------------------------------
 
-    master = load_master()
-
-    if master is None or master.empty:
-        raise ValueError(
-            "Project master data is unavailable."
-        )
-
-    if "project_code" not in master.columns:
-        raise ValueError(
-            "project_master does not contain project_code."
-        )
-
-    project_codes = (
-        master["project_code"]
-        .astype(str)
-        .str.strip()
+    row = _load_project_master_row(
+        code
     )
 
-    rows = master[
-        project_codes == code
-    ].copy()
-
-    if rows.empty:
+    if row is None:
         return {}
 
-    row = rows.iloc[0]
-
     # ------------------------------------------------------------------------
-    # HISTORY
+    # PROJECT-SCOPED HISTORY
     # ------------------------------------------------------------------------
 
     history = project_history(
@@ -244,7 +299,7 @@ def get_project_context(
     )
 
     # ------------------------------------------------------------------------
-    # LATEST ML SNAPSHOT
+    # LATEST PROJECT ML SNAPSHOT
     # ------------------------------------------------------------------------
 
     ml_row = latest_ml_row(
@@ -256,13 +311,14 @@ def get_project_context(
     if ml_row is not None:
 
         try:
+
             risk = model_score_from_features(
                 ml_row
             )
 
         except Exception:
-            # A model failure should not prevent project facts from being
-            # available to the Assistant.
+            # Model failure should not prevent project facts
+            # from being available to the Assistant.
             risk = None
 
     # ------------------------------------------------------------------------
@@ -276,15 +332,18 @@ def get_project_context(
         )
 
         try:
+
             stored_overall_missing = (
                 pd.isna(
                     stored_overall
                 )
             )
+
         except (
             TypeError,
             ValueError,
         ):
+
             stored_overall_missing = (
                 stored_overall is None
             )
@@ -464,10 +523,12 @@ def get_project_context(
     # ------------------------------------------------------------------------
     # PREDICTIONS
     #
-    # model_score_from_features() returns future-delay and progress-stall
-    # probabilities as decimal probabilities, e.g. 0.0997.
+    # Existing internal model values:
+    #     delay_probability -> decimal probability
+    #     stall_probability -> decimal probability
     #
-    # The Assistant contract uses percentage points, so convert them here.
+    # Assistant contract:
+    #     percentage points
     # ------------------------------------------------------------------------
 
     if risk is not None:
@@ -541,9 +602,6 @@ def get_project_context(
 
     # ------------------------------------------------------------------------
     # EVIDENCE-BASED DELAY INDICATORS
-    #
-    # These are indicators from the project's records.
-    # They are not automatically confirmed causal findings.
     # ------------------------------------------------------------------------
 
     observed_indicators: list[
@@ -641,6 +699,7 @@ def get_project_context(
                 )
 
                 if compact:
+
                     recent_history.append(
                         compact
                     )
@@ -702,6 +761,7 @@ def get_project_context(
                 )
 
                 if compact:
+
                     recent_progress.append(
                         compact
                     )
@@ -709,7 +769,11 @@ def get_project_context(
     # ------------------------------------------------------------------------
     # PHYSICAL PROGRESS TRAJECTORY
     #
-    # Use the same ML-ready source used by Project Analytics.
+    # IMPORTANT:
+    # _load_project_ml_history() queries PostgreSQL for ONE project.
+    #
+    # We no longer call load_ml_ready(), because that old full-table
+    # loader has been removed.
     # ------------------------------------------------------------------------
 
     progress_trajectory: list[
@@ -720,7 +784,9 @@ def get_project_context(
 
         try:
 
-            ml_project = load_ml_ready()
+            ml_project = _load_project_ml_history(
+                code
+            )
 
             if (
                 ml_project is not None
@@ -729,24 +795,32 @@ def get_project_context(
                 in ml_project.columns
             ):
 
-                ml_project = ml_project[
-                    ml_project[
-                        "project_code"
-                    ]
-                    .astype(str)
-                    .str.strip()
-                    .eq(code)
-                ].copy()
+                if (
+                    "snapshot_year"
+                    in ml_project.columns
+                    and
+                    "snapshot_month_num"
+                    in ml_project.columns
+                ):
 
-                if not ml_project.empty:
+                    valid_dates = (
+                        ml_project[
+                            "snapshot_year"
+                        ].notna()
+                        &
+                        ml_project[
+                            "snapshot_month_num"
+                        ].notna()
+                    )
 
-                    if (
-                        "snapshot_year"
-                        in ml_project.columns
-                        and
-                        "snapshot_month_num"
-                        in ml_project.columns
-                    ):
+                    ml_project = (
+                        ml_project[
+                            valid_dates
+                        ]
+                        .copy()
+                    )
+
+                    if not ml_project.empty:
 
                         ml_project[
                             "snapshot_date"
@@ -767,53 +841,54 @@ def get_project_context(
                             errors="coerce",
                         )
 
-                    progress_columns = [
-                        "snapshot_date",
-                        "physical_progress_pct",
-                        "progress_change_pct",
-                        "expenditure_cr",
-                        "revised_cost_cr",
-                    ]
+                progress_columns = [
+                    "snapshot_date",
+                    "physical_progress_pct",
+                    "progress_change_pct",
+                    "expenditure_cr",
+                    "revised_cost_cr",
+                ]
 
-                    progress_columns = [
-                        column
-                        for column in progress_columns
-                        if column
-                        in ml_project.columns
-                    ]
+                progress_columns = [
+                    column
+                    for column in progress_columns
+                    if column
+                    in ml_project.columns
+                ]
 
-                    if progress_columns:
+                if progress_columns:
 
-                        rows_for_progress = (
-                            ml_project[
-                                progress_columns
-                            ]
-                            .sort_values(
-                                "snapshot_date"
-                            )
-                            .tail(
-                                MAX_PROGRESS_ROWS
+                    rows_for_progress = (
+                        ml_project[
+                            progress_columns
+                        ]
+                        .sort_values(
+                            "snapshot_date"
+                        )
+                        .tail(
+                            MAX_PROGRESS_ROWS
+                        )
+                    )
+
+                    for record in (
+                        rows_for_progress
+                        .to_dict(
+                            orient="records"
+                        )
+                    ):
+
+                        compact = (
+                            _compact_record(
+                                record,
+                                progress_columns,
                             )
                         )
 
-                        for record in (
-                            rows_for_progress
-                            .to_dict(
-                                orient="records"
-                            )
-                        ):
+                        if compact:
 
-                            compact = (
-                                _compact_record(
-                                    record,
-                                    progress_columns,
-                                )
+                            progress_trajectory.append(
+                                compact
                             )
-
-                            if compact:
-                                progress_trajectory.append(
-                                    compact
-                                )
 
         except Exception:
 

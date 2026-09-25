@@ -1,5 +1,9 @@
 import { apiRequest } from "./api";
 
+import {
+    getBrowserQueryEmbedding,
+} from "../rag/browserEmbedding";
+
 
 // ============================================================================
 // ASSISTANT API TYPES
@@ -87,6 +91,17 @@ export interface AssistantQueryResponse
 export interface AssistantQueryRequest {
     question: string;
     project_code?: string | null;
+
+    /**
+     * Optional browser-generated BGE embedding.
+     *
+     * The backend validates that this contains exactly
+     * 384 numeric values.
+     *
+     * When omitted, the backend uses its existing
+     * FastEmbed fallback.
+     */
+    query_embedding?: number[] | null;
 }
 
 
@@ -125,29 +140,85 @@ export async function askAssistant(
         );
     }
 
+    // ------------------------------------------------------------------------
+    // Build the normal request first.
+    //
+    // We intentionally keep the embedding optional.
+    // If browser BGE cannot initialize, load, or infer,
+    // getBrowserQueryEmbedding() returns null and the backend
+    // automatically falls back to FastEmbed.
+    // ------------------------------------------------------------------------
+
     const body:
         AssistantQueryRequest = {
         question: trimmedQuestion,
     };
 
+    // ------------------------------------------------------------------------
+    // Project code
+    // ------------------------------------------------------------------------
+
     if (
         projectCode !== undefined &&
         projectCode !== null
     ) {
+
         const trimmedProjectCode =
             String(projectCode).trim();
 
         if (trimmedProjectCode) {
+
             body.project_code =
                 trimmedProjectCode;
         }
     }
 
+    // ------------------------------------------------------------------------
+    // Browser-side BGE embedding
+    // ------------------------------------------------------------------------
+    //
+    // This is deliberately attempted before the API request so the
+    // backend receives a ready-to-use 384-dimensional vector.
+    //
+    // If anything fails, null is returned and the backend retains
+    // the existing FastEmbed fallback.
+    // ------------------------------------------------------------------------
+
+    try {
+
+        const queryEmbedding =
+            await getBrowserQueryEmbedding(
+                trimmedQuestion,
+            );
+
+        if (
+            queryEmbedding !== null
+        ) {
+
+            body.query_embedding =
+                queryEmbedding;
+        }
+
+    } catch {
+        // ------------------------------------------------------------
+        // Never allow browser embedding failure to break the Assistant.
+        //
+        // The backend will fall back to its existing FastEmbed path.
+        // ------------------------------------------------------------
+    }
+
+    // ------------------------------------------------------------------------
+    // Send request
+    // ------------------------------------------------------------------------
+
     return apiRequest<AssistantQueryResponse>(
         "/assistant/query",
         {
             method: "POST",
-            body: JSON.stringify(body),
+
+            body: JSON.stringify(
+                body,
+            ),
         },
     );
 }
@@ -158,6 +229,7 @@ export async function askAssistant(
 // ============================================================================
 
 export async function getAssistantProjects(): Promise<AssistantProjectsResponse> {
+
     return apiRequest<AssistantProjectsResponse>(
         "/assistant/projects",
     );
@@ -176,6 +248,7 @@ export interface AssistantHealthResponse {
 
 
 export async function getAssistantHealth(): Promise<AssistantHealthResponse> {
+
     return apiRequest<AssistantHealthResponse>(
         "/assistant/health",
     );

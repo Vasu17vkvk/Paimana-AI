@@ -45,6 +45,8 @@ from sqlalchemy import text
 
 from app.extensions import db
 
+import pandas as pd
+
 from app.services.assistant_context_service import (
     get_project_context,
 )
@@ -63,8 +65,6 @@ from app.services.query_understanding_service import (
 )
 
 from app.services.project_analytics_service import (
-    load_master,
-    load_ml_ready,
     model_scores_from_features_batch,
 )
 
@@ -1323,6 +1323,7 @@ def _multi_project_ml_response(
 def _multi_project_hybrid_response(
     question: str,
     project_codes: list[str],
+    query_embedding: list[float] | None = None,
 ) -> dict[str, Any]:
     """
     Answer a multi-project reasoning question using:
@@ -1371,6 +1372,7 @@ def _multi_project_hybrid_response(
     rag_chunks = retrieve_knowledge(
         question,
         top_k=RAG_TOP_K,
+        query_embedding=query_embedding,
     )
 
     # ---------------------------------------------------------------
@@ -2408,6 +2410,215 @@ def _extract_project_states(
         dict.fromkeys(found)
     )
 
+def _iter_latest_ml_scores(
+    batch_size: int = 256,
+):
+    """
+    Stream the latest ML snapshot for every project and score
+    only one small batch at a time.
+
+    This replaces the old:
+
+        load_ml_ready()
+        -> entire paimana_ml_ready table
+        -> sort
+        -> deduplicate
+        -> score everything
+
+    with:
+
+        PostgreSQL latest-row selection
+        -> 256 rows
+        -> ML scoring
+        -> next 256 rows
+    """
+
+    query = text(
+        """
+        SELECT
+            ml.*,
+
+            pm.project_name AS master_project_name,
+            pm.sector AS master_sector,
+            pm.ministry AS master_ministry
+
+        FROM (
+            SELECT DISTINCT ON (
+                CAST(project_code AS TEXT)
+            ) *
+
+            FROM "paimana_ml_ready"
+
+            WHERE project_code IS NOT NULL
+
+            ORDER BY
+                CAST(project_code AS TEXT),
+                snapshot_year DESC,
+                snapshot_month_num DESC
+        ) ml
+
+        LEFT JOIN "project_master" pm
+            ON CAST(
+                pm.project_code AS TEXT
+            )
+            =
+            CAST(
+                ml.project_code AS TEXT
+            )
+
+        ORDER BY
+            CAST(
+                ml.project_code AS TEXT
+            )
+        """
+    )
+
+    with db.engine.connect() as connection:
+
+        chunks = pd.read_sql(
+            query,
+            connection,
+            chunksize=batch_size,
+        )
+
+        for chunk in chunks:
+
+            if chunk.empty:
+                continue
+
+            chunk = chunk.loc[
+                :,
+                ~chunk.columns.duplicated(),
+            ].copy()
+
+            chunk["project_code"] = (
+                chunk["project_code"]
+                .astype(str)
+                .str.strip()
+            )
+
+            scores = (
+                model_scores_from_features_batch(
+                    chunk,
+                    batch_size=batch_size,
+                )
+            )
+
+            if scores.empty:
+                continue
+
+            scores = scores.loc[
+                :,
+                ~scores.columns.duplicated(),
+            ].copy()
+
+            scores["project_code"] = (
+                scores["project_code"]
+                .astype(str)
+                .str.strip()
+            )
+
+            # --------------------------------------------------------
+            # Attach only the descriptive fields required by the
+            # analytics responses.
+            # --------------------------------------------------------
+
+            descriptive = chunk[
+                [
+                    column
+                    for column in [
+                        "project_code",
+                        "project_name",
+                        "sector",
+                        "ministry",
+                    ]
+                    if column in chunk.columns
+                ]
+            ].copy()
+
+            descriptive = descriptive.drop_duplicates(
+                "project_code",
+                keep="last",
+            )
+
+            scores = scores.merge(
+                descriptive,
+                on="project_code",
+                how="left",
+                suffixes=(
+                    "",
+                    "_source",
+                ),
+            )
+
+            # Prefer project_master values.
+            if "project_name_source" in scores.columns:
+                if "project_name" not in scores.columns:
+                    scores["project_name"] = (
+                        scores["project_name_source"]
+                    )
+                else:
+                    scores["project_name"] = (
+                        scores["project_name"]
+                        .fillna(
+                            scores[
+                                "project_name_source"
+                            ]
+                        )
+                    )
+
+                scores.drop(
+                    columns=[
+                        "project_name_source"
+                    ],
+                    inplace=True,
+                )
+
+            if "sector_source" in scores.columns:
+                if "sector" not in scores.columns:
+                    scores["sector"] = (
+                        scores["sector_source"]
+                    )
+                else:
+                    scores["sector"] = (
+                        scores["sector"]
+                        .fillna(
+                            scores[
+                                "sector_source"
+                            ]
+                        )
+                    )
+
+                scores.drop(
+                    columns=[
+                        "sector_source"
+                    ],
+                    inplace=True,
+                )
+
+            if "ministry_source" in scores.columns:
+                if "ministry" not in scores.columns:
+                    scores["ministry"] = (
+                        scores["ministry_source"]
+                    )
+                else:
+                    scores["ministry"] = (
+                        scores["ministry"]
+                        .fillna(
+                            scores[
+                                "ministry_source"
+                            ]
+                        )
+                    )
+
+                scores.drop(
+                    columns=[
+                        "ministry_source"
+                    ],
+                    inplace=True,
+                )
+
+            yield scores
 
 def _analytics_response(
     question: str,
@@ -2448,96 +2659,73 @@ def _analytics_response(
     )
 
     if highest_risk_sector_requested:
-        ml_ready = load_ml_ready()
-        master = load_master()
 
-        if (
-            ml_ready is None
-            or ml_ready.empty
-            or master is None
-            or master.empty
-        ):
-            return {
-                "text": (
-                    "Project ML or master data is unavailable."
-                ),
-                "query_type": ANALYTICS_QUERY,
-                "project_code": None,
-                "citations": [],
-                "retrieved_chunks": [],
-                "model_used": False,
-                "source": "postgresql",
-            }
+        sector_totals: dict[str, dict[str, float]] = {}
 
-        latest_rows = ml_ready.copy()
+        for scores in _iter_latest_ml_scores():
 
-        sort_columns = [
-            column
-            for column in [
-                "project_code",
-                "snapshot_year",
-                "snapshot_month_num",
-            ]
-            if column in latest_rows.columns
-        ]
+            if (
+                "sector" not in scores.columns
+                or
+                "overall_risk_score"
+                not in scores.columns
+            ):
+                continue
 
-        if (
-            "project_code" in latest_rows.columns
-            and len(sort_columns) >= 2
-        ):
-            latest_rows = latest_rows.sort_values(
-                sort_columns
+            work = scores[
+                [
+                    "sector",
+                    "overall_risk_score",
+                ]
+            ].copy()
+
+            work["sector"] = (
+                work["sector"]
+                .fillna("")
+                .astype(str)
+                .str.strip()
             )
 
-            latest_rows = (
-                latest_rows
-                .drop_duplicates(
-                    subset=["project_code"],
-                    keep="last",
+            work["overall_risk_score"] = pd.to_numeric(
+                work[
+                    "overall_risk_score"
+                ],
+                errors="coerce",
+            )
+
+            work = work[
+                work["sector"].ne("")
+                &
+                work[
+                    "overall_risk_score"
+                ].notna()
+            ]
+
+            for _, row in work.iterrows():
+
+                sector_name = str(
+                    row["sector"]
                 )
-            )
 
-        scores = model_scores_from_features_batch(
-            latest_rows
-        )
+                score = float(
+                    row[
+                        "overall_risk_score"
+                    ]
+                )
 
-        master_for_merge = master[
-            [
-                "project_code",
-                "sector",
-            ]
-        ].copy()
+                bucket = sector_totals.setdefault(
+                    sector_name,
+                    {
+                        "sum": 0.0,
+                        "count": 0.0,
+                    },
+                )
 
-        master_for_merge["project_code"] = (
-            master_for_merge["project_code"]
-            .astype(str)
-            .str.strip()
-        )
+                bucket["sum"] += score
+                bucket["count"] += 1
 
-        scores["project_code"] = (
-            scores["project_code"]
-            .astype(str)
-            .str.strip()
-        )
+        if not sector_totals:
 
-        scored_projects = scores.merge(
-            master_for_merge,
-            on="project_code",
-            how="left",
-        )
-
-        scored_projects = scored_projects[
-            scored_projects["sector"].notna()
-        ]
-
-        scored_projects = scored_projects[
-            scored_projects["sector"]
-            .astype(str)
-            .str.strip()
-            .ne("")
-        ]
-
-        if scored_projects.empty:
             return {
                 "text": (
                     "No sector risk data is available."
@@ -2550,41 +2738,38 @@ def _analytics_response(
                 "source": "postgresql",
             }
 
-        sector_risk = (
-            scored_projects
-            .groupby("sector", as_index=False)
-            .agg(
-                average_risk_score=(
-                    "overall_risk_score",
-                    "mean",
-                ),
-                project_count=(
-                    "project_code",
-                    "count",
-                ),
-            )
-            .sort_values(
-                [
-                    "average_risk_score",
-                    "sector",
-                ],
-                ascending=[
-                    False,
-                    True,
-                ],
+        sector_rows = [
+            {
+                "sector": sector,
+                "average_risk_score":
+                    values["sum"]
+                    /
+                    values["count"],
+                "project_count":
+                    int(values["count"]),
+            }
+            for sector, values
+            in sector_totals.items()
+            if values["count"] > 0
+        ]
+
+        sector_rows.sort(
+            key=lambda row: (
+                -row["average_risk_score"],
+                row["sector"],
             )
         )
 
-        row = sector_risk.iloc[0]
+        row = sector_rows[0]
 
         return {
             "text": (
                 "Sector with highest average risk score: "
                 f"{row['sector']}\n"
                 "Average risk score: "
-                f"{float(row['average_risk_score']):.2f}\n"
+                f"{row['average_risk_score']:.2f}\n"
                 "Projects in sector: "
-                f"{int(row['project_count'])}"
+                f"{row['project_count']}"
             ),
             "query_type": ANALYTICS_QUERY,
             "project_code": None,
@@ -2593,7 +2778,6 @@ def _analytics_response(
             "model_used": False,
             "source": "postgresql",
         }
-
         # ---------------------------------------------------------------
     # HIGHEST-RISK MINISTRY
     # ---------------------------------------------------------------
@@ -2616,139 +2800,120 @@ def _analytics_response(
     )
 
     if highest_risk_ministry_requested:
-        ml_ready = load_ml_ready()
-        master = load_master()
 
-        if (
-            ml_ready is None
-            or ml_ready.empty
-            or master is None
-            or master.empty
-        ):
-            return {
-                "text": "Project ML or master data is unavailable.",
-                "query_type": ANALYTICS_QUERY,
-                "project_code": None,
-                "citations": [],
-                "retrieved_chunks": [],
-                "model_used": False,
-                "source": "postgresql",
-            }
+        ministry_totals: dict[
+            str,
+            dict[str, float],
+        ] = {}
 
-        latest_rows = ml_ready.copy()
+        for scores in _iter_latest_ml_scores():
 
-        sort_columns = [
-            column
-            for column in [
-                "project_code",
-                "snapshot_year",
-                "snapshot_month_num",
-            ]
-            if column in latest_rows.columns
-        ]
+            if (
+                "ministry" not in scores.columns
+                or
+                "overall_risk_score"
+                not in scores.columns
+            ):
+                continue
 
-        if (
-            "project_code" in latest_rows.columns
-            and len(sort_columns) >= 2
-        ):
-            latest_rows = latest_rows.sort_values(
-                sort_columns
-            )
-
-            latest_rows = (
-                latest_rows
-                .drop_duplicates(
-                    subset=["project_code"],
-                    keep="last",
-                )
-            )
-
-        scores = model_scores_from_features_batch(
-            latest_rows
-        )
-
-        master_for_merge = master[
-            [
-                "project_code",
-                "ministry",
-            ]
-        ].copy()
-
-        master_for_merge["project_code"] = (
-            master_for_merge["project_code"]
-            .astype(str)
-            .str.strip()
-        )
-
-        scores["project_code"] = (
-            scores["project_code"]
-            .astype(str)
-            .str.strip()
-        )
-
-        scored_projects = scores.merge(
-            master_for_merge,
-            on="project_code",
-            how="left",
-        )
-
-        scored_projects = scored_projects[
-            scored_projects["ministry"].notna()
-        ]
-
-        scored_projects = scored_projects[
-            scored_projects["ministry"]
-            .astype(str)
-            .str.strip()
-            .ne("")
-        ]
-
-        if scored_projects.empty:
-            return {
-                "text": "No ministry risk data is available.",
-                "query_type": ANALYTICS_QUERY,
-                "project_code": None,
-                "citations": [],
-                "retrieved_chunks": [],
-                "model_used": False,
-                "source": "postgresql",
-            }
-
-        ministry_risk = (
-            scored_projects
-            .groupby("ministry", as_index=False)
-            .agg(
-                average_risk_score=(
-                    "overall_risk_score",
-                    "mean",
-                ),
-                project_count=(
-                    "project_code",
-                    "count",
-                ),
-            )
-            .sort_values(
+            work = scores[
                 [
-                    "average_risk_score",
                     "ministry",
+                    "overall_risk_score",
+                ]
+            ].copy()
+
+            work["ministry"] = (
+                work["ministry"]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+            )
+
+            work["overall_risk_score"] = pd.to_numeric(
+                work[
+                    "overall_risk_score"
                 ],
-                ascending=[
-                    False,
-                    True,
-                ],
+                errors="coerce",
+            )
+
+            work = work[
+                work["ministry"].ne("")
+                &
+                work[
+                    "overall_risk_score"
+                ].notna()
+            ]
+
+            for _, row in work.iterrows():
+
+                ministry_name = str(
+                    row["ministry"]
+                )
+
+                score = float(
+                    row[
+                        "overall_risk_score"
+                    ]
+                )
+
+                bucket = ministry_totals.setdefault(
+                    ministry_name,
+                    {
+                        "sum": 0.0,
+                        "count": 0.0,
+                    },
+                )
+
+                bucket["sum"] += score
+                bucket["count"] += 1
+
+        if not ministry_totals:
+
+            return {
+                "text": (
+                    "No ministry risk data is available."
+                ),
+                "query_type": ANALYTICS_QUERY,
+                "project_code": None,
+                "citations": [],
+                "retrieved_chunks": [],
+                "model_used": False,
+                "source": "postgresql",
+            }
+
+        ministry_rows = [
+            {
+                "ministry": ministry,
+                "average_risk_score":
+                    values["sum"]
+                    /
+                    values["count"],
+                "project_count":
+                    int(values["count"]),
+            }
+            for ministry, values
+            in ministry_totals.items()
+            if values["count"] > 0
+        ]
+
+        ministry_rows.sort(
+            key=lambda row: (
+                -row["average_risk_score"],
+                row["ministry"],
             )
         )
 
-        row = ministry_risk.iloc[0]
+        row = ministry_rows[0]
 
         return {
             "text": (
                 "Ministry with highest average risk score: "
                 f"{row['ministry']}\n"
                 "Average risk score: "
-                f"{float(row['average_risk_score']):.2f}\n"
+                f"{row['average_risk_score']:.2f}\n"
                 "Projects in ministry: "
-                f"{int(row['project_count'])}"
+                f"{row['project_count']}"
             ),
             "query_type": ANALYTICS_QUERY,
             "project_code": None,
@@ -2756,7 +2921,7 @@ def _analytics_response(
             "retrieved_chunks": [],
             "model_used": False,
             "source": "postgresql",
-        }    
+        }  
 
 
     # ---------------------------------------------------------------
@@ -2858,63 +3023,28 @@ def _analytics_response(
     )
 
     if critical_project_requested:
-        ml_ready = load_ml_ready()
 
-        if ml_ready is None or ml_ready.empty:
-            return {
-                "text": "ML project data is unavailable.",
-                "query_type": ANALYTICS_QUERY,
-                "project_code": None,
-                "citations": [],
-                "retrieved_chunks": [],
-                "model_used": False,
-                "source": "postgresql",
-            }
+        critical_count = 0
 
-        latest_rows = ml_ready.copy()
+        for scores in _iter_latest_ml_scores():
 
-        sort_columns = [
-            column
-            for column in [
-                "project_code",
-                "snapshot_year",
-                "snapshot_month_num",
-            ]
-            if column in latest_rows.columns
-        ]
+            if "risk_level" not in scores.columns:
+                continue
 
-        if (
-            "project_code" in latest_rows.columns
-            and len(sort_columns) >= 2
-        ):
-            latest_rows = latest_rows.sort_values(
-                sort_columns
-            )
-
-            latest_rows = (
-                latest_rows
-                .drop_duplicates(
-                    subset=["project_code"],
-                    keep="last",
-                )
-            )
-
-        scores = model_scores_from_features_batch(
-            latest_rows
-        )
-
-        critical_count = int(
-            (
-                scores["risk_level"]
+            critical_count += int(
+                scores[
+                    "risk_level"
+                ]
                 .astype(str)
                 .str.upper()
                 .eq("CRITICAL")
-            ).sum()
-        )
+                .sum()
+            )
 
         return {
             "text": (
-                f"Critical projects: {critical_count}"
+                f"Critical projects: "
+                f"{critical_count}"
             ),
             "query_type": ANALYTICS_QUERY,
             "project_code": None,
@@ -2940,83 +3070,85 @@ def _analytics_response(
 
     if critical_project_list_requested:
 
-        ml_ready = load_ml_ready()
+        critical_projects: list[
+            dict[str, Any]
+        ] = []
 
-        if ml_ready is None or ml_ready.empty:
-            return {
-                "text": "ML project data is unavailable.",
-                "query_type": ANALYTICS_QUERY,
-                "project_code": None,
-                "citations": [],
-                "retrieved_chunks": [],
-                "model_used": False,
-                "source": "postgresql",
+        for scores in _iter_latest_ml_scores():
+
+            required = {
+                "project_code",
+                "risk_level",
+                "overall_risk_score",
             }
 
-        latest_rows = ml_ready.copy()
+            if not required.issubset(
+                scores.columns
+            ):
+                continue
 
-        sort_columns = [
-            column
-            for column in [
-                "project_code",
-                "snapshot_year",
-                "snapshot_month_num",
-            ]
-            if column in latest_rows.columns
-        ]
-
-        if (
-            "project_code" in latest_rows.columns
-            and len(sort_columns) >= 2
-        ):
-            latest_rows = latest_rows.sort_values(
-                sort_columns
-            )
-
-            latest_rows = (
-                latest_rows
-                .drop_duplicates(
-                    subset=["project_code"],
-                    keep="last",
-                )
-            )
-
-        scores = model_scores_from_features_batch(
-            latest_rows
-        )
-
-        scored = latest_rows.copy()
-
-        scored["overall_risk_score"] = (
-            scores["overall_risk"]
-        )
-
-        scored["risk_level"] = (
-            scores["risk_level"]
-        )
-
-        critical = (
-            scored[
-                scored["risk_level"]
+            critical = scores[
+                scores[
+                    "risk_level"
+                ]
                 .astype(str)
                 .str.upper()
                 .eq("CRITICAL")
-            ]
-            .sort_values(
-                [
-                    "overall_risk_score",
-                    "project_code",
+            ].copy()
+
+            if critical.empty:
+                continue
+
+            for _, project in critical.iterrows():
+
+                critical_projects.append(
+                    {
+                        "project_code":
+                            str(
+                                project[
+                                    "project_code"
+                                ]
+                            ),
+
+                        "project_name":
+                            (
+                                project.get(
+                                    "project_name"
+                                )
+                                if pd.notna(
+                                    project.get(
+                                        "project_name"
+                                    )
+                                )
+                                else "unavailable"
+                            ),
+
+                        "overall_risk_score":
+                            float(
+                                project[
+                                    "overall_risk_score"
+                                ]
+                            ),
+                    }
+                )
+
+        critical_projects.sort(
+            key=lambda project: (
+                -project[
+                    "overall_risk_score"
                 ],
-                ascending=[
-                    False,
-                    True,
+                project[
+                    "project_code"
                 ],
             )
         )
 
-        if critical.empty:
+        if not critical_projects:
+
             return {
-                "text": "No critical projects were found.",
+                "text": (
+                    "No critical projects were found."
+                ),
                 "query_type": ANALYTICS_QUERY,
                 "project_code": None,
                 "citations": [],
@@ -3026,28 +3158,17 @@ def _analytics_response(
             }
 
         lines = [
-            f"Critical projects: {len(critical)}"
+            f"Critical projects: "
+            f"{len(critical_projects)}"
         ]
 
-        for _, project in critical.iterrows():
-
-            project_code_value = project.get(
-                "project_code"
-            )
-
-            project_name = project.get(
-                "project_name"
-            )
-
-            risk_score = project.get(
-                "overall_risk_score"
-            )
+        for project in critical_projects:
 
             lines.append(
-                f"- {project_code_value}: "
-                f"{project_name} "
+                f"- {project['project_code']}: "
+                f"{project['project_name']} "
                 f"(Risk score: "
-                f"{float(risk_score):.2f})"
+                f"{project['overall_risk_score']:.2f})"
             )
 
         return {
@@ -3058,7 +3179,7 @@ def _analytics_response(
             "retrieved_chunks": [],
             "model_used": False,
             "source": "postgresql",
-        }    
+        }  
 
 
     # ---------------------------------------------------------------
@@ -3849,6 +3970,7 @@ def _query_from_understanding_plan(
 def answer_query(
     question: str,
     project_code: str | None = None,
+    query_embedding: list[float] | None = None,
 ) -> dict[str, Any]:
     """
     Main assistant entry point.
@@ -3892,7 +4014,11 @@ def answer_query(
                 "what should we do",
             ),
         ):
-            return _multi_project_hybrid_response(query, project_codes)
+            return _multi_project_hybrid_response(
+                query,
+                project_codes,
+                query_embedding=query_embedding,
+            )
 
         if _contains_any(normalized, ML_KEYWORDS):
             return _multi_project_ml_response(query, project_codes)
@@ -4095,6 +4221,7 @@ def answer_query(
         result = answer_from_knowledge_base(
             query,
             top_k=RAG_TOP_K,
+            query_embedding=query_embedding,
         )
 
         return {
@@ -4153,6 +4280,7 @@ def answer_query(
         rag_chunks = retrieve_knowledge(
             query,
             top_k=RAG_TOP_K,
+            query_embedding=query_embedding,
         )
 
         # --------------------------------------------------------------

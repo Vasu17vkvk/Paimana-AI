@@ -45,6 +45,7 @@ def assistant_query():
 
     question = data.get("question")
     project_code = data.get("project_code")
+    query_embedding = data.get("query_embedding")
 
     # --------------------------------------------------------
     # Validate question
@@ -76,6 +77,64 @@ def assistant_query():
             project_code = None
 
     # --------------------------------------------------------
+    # Optional browser-generated RAG embedding
+    #
+    # Expected:
+    #   list of exactly 384 numeric values
+    #
+    # We keep this optional so the existing FastEmbed
+    # fallback continues to work during migration.
+    # --------------------------------------------------------
+
+    if query_embedding is not None:
+
+        if not isinstance(
+            query_embedding,
+            list,
+        ):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "query_embedding must be a list."
+                    ),
+                }
+            ), 400
+
+        if len(query_embedding) != 384:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "query_embedding must contain "
+                        "exactly 384 values."
+                    ),
+                }
+            ), 400
+
+        try:
+
+            query_embedding = [
+                float(value)
+                for value in query_embedding
+            ]
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "query_embedding must contain "
+                        "only numeric values."
+                    ),
+                }
+            ), 400        
+
+    # --------------------------------------------------------
     # Execute assistant orchestration
     # --------------------------------------------------------
 
@@ -84,6 +143,7 @@ def assistant_query():
         result = answer_query(
             question=question,
             project_code=project_code,
+            query_embedding=query_embedding,
         )
 
         return jsonify(

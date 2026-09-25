@@ -45,61 +45,6 @@ def _safe_number(value, default=0):
 
 
 # ============================================================
-# LOAD ML DATA FROM POSTGRESQL
-# ============================================================
-
-def load_ml_data() -> pd.DataFrame:
-    """
-    Load the ML-ready dataset from PostgreSQL.
-
-    PostgreSQL table:
-        paimana_ml_ready
-    """
-
-    query = text(
-        """
-        SELECT *
-        FROM "paimana_ml_ready"
-        """
-    )
-
-    with db.engine.connect() as connection:
-        df = pd.read_sql(
-            query,
-            connection,
-        )
-
-    if df.empty:
-        raise ValueError(
-            "PostgreSQL table 'paimana_ml_ready' is empty."
-        )
-
-    df = df.loc[
-        :,
-        ~df.columns.duplicated(),
-    ].copy()
-
-    # Normalize project code
-    if "project_code" not in df.columns:
-        raise ValueError(
-            "PostgreSQL table 'paimana_ml_ready' "
-            "does not contain 'project_code'."
-        )
-
-    df["project_code"] = (
-        df["project_code"]
-        .apply(_to_project_code)
-    )
-
-    # Remove invalid project codes
-    df = df[
-        df["project_code"].ne("")
-    ].copy()
-
-    return df
-
-
-# ============================================================
 # PROJECT WARNING
 # ============================================================
 
@@ -116,45 +61,54 @@ def get_project_warnings(
             "Invalid project code."
         )
 
-    # Load the project ML data directly from PostgreSQL
-    df = load_ml_data()
+    # --------------------------------------------------------
+    # Fetch ONLY the latest ML snapshot for this project.
+    #
+    # Previously:
+    #   SELECT * FROM paimana_ml_ready
+    #   -> load entire table into Pandas
+    #   -> filter project
+    #   -> sort
+    #
+    # Now PostgreSQL performs the filtering and sorting.
+    # --------------------------------------------------------
 
-    rows = df[
-        df["project_code"].eq(
-            project_code
-        )
-    ].copy()
+    query = text(
+        """
+        SELECT *
+        FROM "paimana_ml_ready"
+        WHERE CAST(project_code AS TEXT) = :project_code
+        ORDER BY
+            snapshot_year DESC,
+            snapshot_month_num DESC
+        LIMIT 1
+        """
+    )
 
-    if rows.empty:
+    with db.engine.connect() as connection:
+        row = connection.execute(
+            query,
+            {
+                "project_code": project_code,
+            },
+        ).mappings().first()
+
+    if row is None:
         raise ValueError(
             f"Project not found: {project_code}"
         )
 
     # --------------------------------------------------------
-    # Latest snapshot
+    # The existing ML engine expects a pandas Series.
+    #
+    # Only ONE row is converted to pandas instead of loading
+    # the entire paimana_ml_ready table.
     # --------------------------------------------------------
 
-    sort_columns = []
-
-    if "snapshot_year" in rows.columns:
-        sort_columns.append(
-            "snapshot_year"
-        )
-
-    if "snapshot_month_num" in rows.columns:
-        sort_columns.append(
-            "snapshot_month_num"
-        )
-
-    if sort_columns:
-        rows = rows.sort_values(
-            sort_columns
-        )
-
-    latest_row = rows.iloc[-1]
+    latest_row = pd.Series(row)
 
     # --------------------------------------------------------
-    # ML prediction
+    # Existing ML prediction logic remains unchanged.
     # --------------------------------------------------------
 
     risk = engine.predict_row(
@@ -169,28 +123,33 @@ def get_project_warnings(
                 project_code,
             )
         ),
+
         "snapshot_year": _safe_number(
             risk.get(
                 "snapshot_year"
             ),
             None,
         ),
+
         "snapshot_month": _safe_number(
             risk.get(
                 "snapshot_month"
             ),
             None,
         ),
+
         "early_warning_active": bool(
             risk.get(
                 "early_warning_active",
                 False,
             )
         ),
+
         "early_warning_priority": risk.get(
             "early_warning_priority",
             "NONE",
         ),
+
         "early_warning_reasons": list(
             risk.get(
                 "early_warning_reasons",
@@ -198,10 +157,12 @@ def get_project_warnings(
             )
             or []
         ),
+
         "risk_level": risk.get(
             "risk_level",
             "LOW",
         ),
+
         "overall_risk_score": float(
             _safe_number(
                 risk.get(
@@ -222,139 +183,190 @@ def get_active_warnings() -> list[dict]:
     """
     Return all currently active ML-generated warnings.
 
-    Uses the latest snapshot of each project and the same
-    PAIMANA ML engine logic as Risk Analysis, but performs
-    model inference in vectorized batches.
+    IMPORTANT:
+    This function deliberately processes data in small
+    batches rather than loading the entire ML dataset into RAM.
+
+    PostgreSQL first selects the latest snapshot for each
+    project. Pandas then receives only 256 rows at a time.
     """
 
-    df = load_ml_data()
-
     # --------------------------------------------------------
-    # Latest snapshot per project
+    # PostgreSQL selects ONLY the latest snapshot per project.
+    #
+    # DISTINCT ON is PostgreSQL-specific and is appropriate
+    # here because this application already depends on
+    # PostgreSQL / pgvector.
     # --------------------------------------------------------
 
-    sort_columns = [
-        column
-        for column in [
-            "snapshot_year",
-            "snapshot_month_num",
-        ]
-        if column in df.columns
-    ]
-
-    if sort_columns:
-        df = df.sort_values(
-            sort_columns
-        )
-
-    latest_df = (
-        df
-        .drop_duplicates(
-            subset=["project_code"],
-            keep="last",
-        )
-        .copy()
+    query = text(
+        """
+        SELECT DISTINCT ON (project_code) *
+        FROM "paimana_ml_ready"
+        WHERE project_code IS NOT NULL
+        ORDER BY
+            project_code,
+            snapshot_year DESC,
+            snapshot_month_num DESC
+        """
     )
-
-    if latest_df.empty:
-        return []
-
-    # --------------------------------------------------------
-    # Batch ML prediction
-    # --------------------------------------------------------
-
-    predictions = engine.predict_batch(
-        latest_df,
-        batch_size=256,
-    )
-
-    if predictions.empty:
-        return []
 
     warnings: list[dict] = []
 
     # --------------------------------------------------------
-    # Keep only active warnings
+    # Process only 256 rows at a time.
+    #
+    # This avoids creating one huge DataFrame containing
+    # every project's latest snapshot.
     # --------------------------------------------------------
 
-    active_predictions = predictions[
-        predictions[
-            "early_warning_active"
-        ].fillna(False)
-    ].copy()
+    with db.engine.connect() as connection:
 
-    if active_predictions.empty:
-        return []
+        chunks = pd.read_sql(
+            query,
+            connection,
+            chunksize=256,
+        )
 
-    # --------------------------------------------------------
-    # Convert predictions to API response
-    # --------------------------------------------------------
+        for latest_df in chunks:
 
-    for _, prediction in active_predictions.iterrows():
+            if latest_df.empty:
+                continue
 
-        project_code = _to_project_code(
-            prediction.get(
-                "project_code"
+            # ------------------------------------------------
+            # Remove duplicate DataFrame columns if any are
+            # introduced by the SQL/result layer.
+            # ------------------------------------------------
+
+            latest_df = latest_df.loc[
+                :,
+                ~latest_df.columns.duplicated(),
+            ].copy()
+
+            # ------------------------------------------------
+            # Validate project_code.
+            # ------------------------------------------------
+
+            if "project_code" not in latest_df.columns:
+                raise ValueError(
+                    "PostgreSQL table 'paimana_ml_ready' "
+                    "does not contain 'project_code'."
+                )
+
+            latest_df["project_code"] = (
+                latest_df["project_code"]
+                .apply(_to_project_code)
             )
-        )
 
-        if not project_code:
-            continue
+            latest_df = latest_df[
+                latest_df["project_code"].ne("")
+            ].copy()
 
-        warnings.append(
-            {
-                "project_code": project_code,
+            if latest_df.empty:
+                continue
 
-                "snapshot_year": _safe_number(
+            # ------------------------------------------------
+            # Run the EXISTING ML engine on this small batch.
+            #
+            # We are keeping the model logic unchanged.
+            # Only the amount of data held in memory changes.
+            # ------------------------------------------------
+
+            predictions = engine.predict_batch(
+                latest_df,
+                batch_size=256,
+            )
+
+            if predictions.empty:
+                continue
+
+            # ------------------------------------------------
+            # Keep only active warnings.
+            # ------------------------------------------------
+
+            active_predictions = predictions[
+                predictions[
+                    "early_warning_active"
+                ].fillna(False)
+            ].copy()
+
+            if active_predictions.empty:
+                continue
+
+            # ------------------------------------------------
+            # Convert predictions to API response objects.
+            # ------------------------------------------------
+
+            for _, prediction in (
+                active_predictions.iterrows()
+            ):
+
+                project_code = _to_project_code(
                     prediction.get(
-                        "snapshot_year"
-                    ),
-                    None,
-                ),
-
-                "snapshot_month": _safe_number(
-                    prediction.get(
-                        "snapshot_month"
-                    ),
-                    None,
-                ),
-
-                "risk_level": (
-                    prediction.get(
-                        "risk_level",
-                        "LOW",
+                        "project_code"
                     )
-                ),
+                )
 
-                "overall_risk_score": float(
-                    _safe_number(
-                        prediction.get(
-                            "overall_risk_score",
-                            0,
+                if not project_code:
+                    continue
+
+                warnings.append(
+                    {
+                        "project_code": project_code,
+
+                        "snapshot_year": _safe_number(
+                            prediction.get(
+                                "snapshot_year"
+                            ),
+                            None,
                         ),
-                        0,
-                    )
-                ),
 
-                "early_warning_priority": (
-                    prediction.get(
-                        "early_warning_priority",
-                        "NONE",
-                    )
-                ),
+                        "snapshot_month": _safe_number(
+                            prediction.get(
+                                "snapshot_month"
+                            ),
+                            None,
+                        ),
 
-                "early_warning_reasons": list(
-                    prediction.get(
-                        "early_warning_reasons",
-                        [],
-                    )
-                    or []
-                ),
-            }
-        )
+                        "risk_level": (
+                            prediction.get(
+                                "risk_level",
+                                "LOW",
+                            )
+                        ),
+
+                        "overall_risk_score": float(
+                            _safe_number(
+                                prediction.get(
+                                    "overall_risk_score",
+                                    0,
+                                ),
+                                0,
+                            )
+                        ),
+
+                        "early_warning_priority": (
+                            prediction.get(
+                                "early_warning_priority",
+                                "NONE",
+                            )
+                        ),
+
+                        "early_warning_reasons": list(
+                            prediction.get(
+                                "early_warning_reasons",
+                                [],
+                            )
+                            or []
+                        ),
+                    }
+                )
 
     # --------------------------------------------------------
-    # Sort highest priority first
+    # Sort highest priority first.
+    #
+    # This preserves the behavior of the previous
+    # implementation.
     # --------------------------------------------------------
 
     priority_order = {

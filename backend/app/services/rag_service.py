@@ -1496,6 +1496,7 @@ def retrieve_knowledge(
     country: str | None = None,
     document_type: str | None = None,
     document_year: int | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve relevant local RAG knowledge.
@@ -1514,6 +1515,14 @@ def retrieve_knowledge(
     """
 
     _log_memory("before_retrieval")
+
+    print(
+        "[RAG] query_embedding received:",
+        query_embedding is not None,
+        "length:",
+        len(query_embedding) if query_embedding is not None else None,
+        flush=True,
+    )
 
 
     """
@@ -1551,12 +1560,51 @@ def retrieve_knowledge(
     )
 
     # ------------------------------------------------------------------
-    # 1. Local embedding.
+    # ------------------------------------------------------------------
+    # 1. Query embedding.
+    #
+    # Preferred:
+    #     Browser-generated BGE embedding.
+    #
+    # Fallback:
+    #     Existing server-side FastEmbed embedding.
+    #
+    # Keeping the fallback makes the migration backward-compatible.
     # ------------------------------------------------------------------
 
-    query_embedding = _embed_query(
-        query
-    )
+    if query_embedding is None:
+        query_embedding = _embed_query(
+            query
+        )
+    else:
+        query_embedding = [
+            float(value)
+            for value in query_embedding
+        ]
+
+        if len(query_embedding) != 384:
+            raise ValueError(
+                "query_embedding must contain exactly 384 values."
+            )
+
+        norm = float(
+            np.linalg.norm(
+                np.asarray(
+                    query_embedding,
+                    dtype=np.float32,
+                )
+            )
+        )
+
+        if norm == 0:
+            raise ValueError(
+                "query_embedding must not be a zero vector."
+            )
+
+        query_embedding = [
+            float(value / norm)
+            for value in query_embedding
+        ]
 
     # ------------------------------------------------------------------
     # 2. Vector retrieval.
@@ -1628,6 +1676,7 @@ def debug_retrieval(
     question: str,
     *,
     top_k: int = FINAL_TOP_K,
+    query_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Debug the complete local retrieval pipeline.
@@ -1659,9 +1708,39 @@ def debug_retrieval(
             "top_k must be greater than zero."
         )
 
-    query_embedding = _embed_query(
-        query
-    )
+    if query_embedding is None:
+        query_embedding = _embed_query(
+            query
+        )
+    else:
+        query_embedding = [
+            float(value)
+            for value in query_embedding
+        ]
+
+        if len(query_embedding) != 384:
+            raise ValueError(
+                "query_embedding must contain exactly 384 values."
+            )
+
+        norm = float(
+            np.linalg.norm(
+                np.asarray(
+                    query_embedding,
+                    dtype=np.float32,
+                )
+            )
+        )
+
+        if norm == 0:
+            raise ValueError(
+                "query_embedding must not be a zero vector."
+            )
+
+        query_embedding = [
+            float(value / norm)
+            for value in query_embedding
+        ]
 
     vector_results = _vector_search(
         query_embedding,
@@ -1911,6 +1990,7 @@ def answer_from_knowledge_base(
     country: str | None = None,
     document_type: str | None = None,
     document_year: int | None = None,
+    query_embedding: list[float] | None = None,
 ) -> dict[str, Any]:
     
     """
@@ -1936,12 +2016,13 @@ def answer_from_knowledge_base(
     # ------------------------------------------------------------------
 
     chunks = retrieve_knowledge(
-        query,
-        top_k=top_k,
-        topic=topic,
-        country=country,
-        document_type=document_type,
-        document_year=document_year,
+    query,
+    top_k=top_k,
+    topic=topic,
+    country=country,
+    document_type=document_type,
+    document_year=document_year,
+    query_embedding=query_embedding,
     )
 
     # ------------------------------------------------------------------

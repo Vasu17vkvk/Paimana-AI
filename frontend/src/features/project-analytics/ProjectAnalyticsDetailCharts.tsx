@@ -16,10 +16,10 @@ type HistoryRecord = {
 };
 
 interface ProjectAnalyticsDetailChartsProps {
-    history: HistoryRecord[];
-    flashHistory?: HistoryRecord[];
-    progressTrajectory?: HistoryRecord[];
-    riskTrajectory?: HistoryRecord[];
+    history?: HistoryRecord[] | null;
+    flashHistory?: HistoryRecord[] | null;
+    progressTrajectory?: HistoryRecord[] | null;
+    riskTrajectory?: HistoryRecord[] | null;
 }
 
 type RangeKey = "6M" | "12M" | "24M" | "ALL";
@@ -34,7 +34,11 @@ const RANGE_OPTIONS: RangeKey[] = [
 function toNumber(
     value: string | number | null | undefined,
 ): number | null {
-    if (value === null || value === undefined || value === "") {
+    if (
+        value === null ||
+        value === undefined ||
+        value === ""
+    ) {
         return null;
     }
 
@@ -43,24 +47,37 @@ function toNumber(
             ? value
             : Number(value);
 
-    return Number.isFinite(parsed) ? parsed : null;
+    return Number.isFinite(parsed)
+        ? parsed
+        : null;
 }
 
-function formatDate(value: unknown): string {
+function formatDate(
+    value: unknown,
+): string {
     if (!value) {
         return "-";
     }
 
-    const date = new Date(String(value));
+    const date = new Date(
+        String(value),
+    );
 
-    if (Number.isNaN(date.getTime())) {
+    if (
+        Number.isNaN(
+            date.getTime(),
+        )
+    ) {
         return String(value);
     }
 
-    return date.toLocaleDateString("en-IN", {
-        month: "short",
-        year: "numeric",
-    });
+    return date.toLocaleDateString(
+        "en-IN",
+        {
+            month: "short",
+            year: "numeric",
+        },
+    );
 }
 
 function formatNumber(
@@ -75,10 +92,15 @@ function formatNumber(
         return "-";
     }
 
-    return value.toLocaleString("en-IN", {
-        maximumFractionDigits: digits,
-        minimumFractionDigits: digits,
-    });
+    return value.toLocaleString(
+        "en-IN",
+        {
+            maximumFractionDigits:
+                digits,
+            minimumFractionDigits:
+                digits,
+        },
+    );
 }
 
 function filterByRange<T>(
@@ -148,10 +170,18 @@ function EmptyChartState({
 }
 
 function tooltipValue(
-    value: number | string | undefined,
+    value:
+        | number
+        | string
+        | undefined,
 ): string {
-    if (typeof value === "number") {
-        return formatNumber(value, 2);
+    if (
+        typeof value === "number"
+    ) {
+        return formatNumber(
+            value,
+            2,
+        );
     }
 
     return value ?? "-";
@@ -159,267 +189,369 @@ function tooltipValue(
 
 export default function ProjectAnalyticsDetailCharts({
     history,
-    flashHistory = [],
-    progressTrajectory = [],
-    riskTrajectory = [],
+    flashHistory,
+    progressTrajectory,
+    riskTrajectory,
 }: ProjectAnalyticsDetailChartsProps) {
     const [range, setRange] =
         useState<RangeKey>("ALL");
 
     /*
-     * --------------------------------------------------------
-     * Schedule trajectory
-     * --------------------------------------------------------
+     * ========================================================
+     * NULL-SAFE ARRAY NORMALIZATION
+     * ========================================================
+     *
+     * API responses may return null for optional history arrays.
+     * Normalize them at the component boundary so every chart
+     * below always operates on a real array.
      */
 
-    const scheduleData = useMemo(() => {
-        const source = history.length
+    const safeHistory =
+        Array.isArray(history)
             ? history
-            : flashHistory;
+            : [];
 
-        const mapped = source
-            .map((row) => {
-                const date =
-                    row.snapshot_month ??
-                    row.snapshot_date;
-
-                return {
-                    date,
-                    label: formatDate(date),
-                    delay_days: toNumber(
-                        row.delay_days,
-                    ),
-                    schedule_change_days: toNumber(
-                        row.schedule_change_days,
-                    ),
-                };
-            })
-            .filter(
-                (row) =>
-                    row.date !== null &&
-                    (row.delay_days !== null ||
-                        row.schedule_change_days !== null),
-            );
-
-        return filterByRange(
-            mapped,
-            range,
-        );
-    }, [
-        history,
-        flashHistory,
-        range,
-    ]);
-
-    /*
-     * --------------------------------------------------------
-     * Cost / expenditure trajectory
-     * --------------------------------------------------------
-     */
-
-    const costData = useMemo(() => {
-        const source = flashHistory.length
+    const safeFlashHistory =
+        Array.isArray(
+            flashHistory,
+        )
             ? flashHistory
-            : history;
+            : [];
 
-        const mapped = source
-            .map((row) => {
-                const date =
-                    row.snapshot_month ??
-                    row.snapshot_date;
+    const safeProgressTrajectory =
+        Array.isArray(
+            progressTrajectory,
+        )
+            ? progressTrajectory
+            : [];
 
-                return {
-                    date,
-                    label: formatDate(date),
-
-                    expenditure: toNumber(
-                        row.cumulative_expenditure ??
-                        row.expenditure_cr,
-                    ),
-
-                    revised_cost: toNumber(
-                        row.revised_cost ??
-                        row.revised_cost_cr,
-                    ),
-
-                    original_cost: toNumber(
-                        row.original_cost,
-                    ),
-                };
-            })
-            .filter(
-                (row) =>
-                    row.date !== null &&
-                    (row.expenditure !== null ||
-                        row.revised_cost !== null ||
-                        row.original_cost !== null),
-            );
-
-        return filterByRange(
-            mapped,
-            range,
-        );
-    }, [
-        history,
-        flashHistory,
-        range,
-    ]);
+    const safeRiskTrajectory =
+        Array.isArray(
+            riskTrajectory,
+        )
+            ? riskTrajectory
+            : [];
 
     /*
-     * --------------------------------------------------------
-     * Physical progress trajectory
-     * --------------------------------------------------------
+     * ========================================================
+     * SCHEDULE TRAJECTORY
+     * ========================================================
      */
 
-    const progressData = useMemo(() => {
-        /*
-         * progressTrajectory contains the preferred analytical
-         * trajectory, but flashHistory may contain newer snapshots.
-         *
-         * Merge both sources by date so the chart always includes
-         * the latest available physical progress.
-         */
+    const scheduleData =
+        useMemo(() => {
+            const source =
+                safeHistory.length > 0
+                    ? safeHistory
+                    : safeFlashHistory;
 
-        const merged = new Map<
-            string,
-            {
-                date: string | null;
-                label: string;
-                progress: number | null;
-                progress_change: number | null;
-            }
-        >();
+            const mapped = source
+                .map((row) => {
+                    const date =
+                        row.snapshot_month ??
+                        row.snapshot_date;
 
-        const addRow = (row: HistoryRecord) => {
-            const rawDate =
-                row.snapshot_date ??
-                row.snapshot_month;
-
-            if (!rawDate) {
-                return;
-            }
-
-            const date = String(rawDate);
-
-            const existing = merged.get(date);
-
-            const progress =
-                toNumber(row.physical_progress_pct);
-
-            const progressChange =
-                toNumber(
-                    row.progress_change_pct ??
-                    row.physical_progress_change_pct,
+                    return {
+                        date,
+                        label:
+                            formatDate(
+                                date,
+                            ),
+                        delay_days:
+                            toNumber(
+                                row.delay_days,
+                            ),
+                        schedule_change_days:
+                            toNumber(
+                                row.schedule_change_days,
+                            ),
+                    };
+                })
+                .filter(
+                    (row) =>
+                        row.date !==
+                        null &&
+                        row.date !==
+                        undefined &&
+                        (
+                            row.delay_days !==
+                            null ||
+                            row.schedule_change_days !==
+                            null
+                        ),
                 );
 
-            merged.set(date, {
-                date,
-                label: formatDate(date),
-
-                /*
-                 * Prefer an explicitly provided progress value.
-                 * Otherwise keep the existing value.
-                 */
-                progress:
-                    progress ??
-                    existing?.progress ??
-                    null,
-
-                progress_change:
-                    progressChange ??
-                    existing?.progress_change ??
-                    null,
-            });
-        };
-
-        /*
-         * Add analytical trajectory first.
-         */
-        progressTrajectory.forEach(addRow);
-
-        /*
-         * Add FLASH afterward so newer FLASH snapshots
-         * can fill missing/latest dates.
-         */
-        flashHistory.forEach(addRow);
-
-        const mapped = Array.from(
-            merged.values(),
-        ).sort((a, b) =>
-            String(a.date).localeCompare(
-                String(b.date),
-            ),
-        );
-
-        return filterByRange(
-            mapped,
+            return filterByRange(
+                mapped,
+                range,
+            );
+        }, [
+            safeHistory,
+            safeFlashHistory,
             range,
-        );
-    }, [
-        progressTrajectory,
-        flashHistory,
-        range,
-    ]);
+        ]);
 
-    const riskData = useMemo(() => {
-        const mapped = riskTrajectory
-            .map((row) => {
-                const date =
+    /*
+     * ========================================================
+     * COST / EXPENDITURE TRAJECTORY
+     * ========================================================
+     */
+
+    const costData =
+        useMemo(() => {
+            const source =
+                safeFlashHistory.length >
+                    0
+                    ? safeFlashHistory
+                    : safeHistory;
+
+            const mapped = source
+                .map((row) => {
+                    const date =
+                        row.snapshot_month ??
+                        row.snapshot_date;
+
+                    return {
+                        date,
+                        label:
+                            formatDate(
+                                date,
+                            ),
+                        expenditure:
+                            toNumber(
+                                row.cumulative_expenditure ??
+                                row.expenditure_cr,
+                            ),
+                        revised_cost:
+                            toNumber(
+                                row.revised_cost ??
+                                row.revised_cost_cr,
+                            ),
+                        original_cost:
+                            toNumber(
+                                row.original_cost,
+                            ),
+                    };
+                })
+                .filter(
+                    (row) =>
+                        row.date !==
+                        null &&
+                        row.date !==
+                        undefined &&
+                        (
+                            row.expenditure !==
+                            null ||
+                            row.revised_cost !==
+                            null ||
+                            row.original_cost !==
+                            null
+                        ),
+                );
+
+            return filterByRange(
+                mapped,
+                range,
+            );
+        }, [
+            safeHistory,
+            safeFlashHistory,
+            range,
+        ]);
+
+    /*
+     * ========================================================
+     * PHYSICAL PROGRESS TRAJECTORY
+     * ========================================================
+     */
+
+    const progressData =
+        useMemo(() => {
+            const merged =
+                new Map<
+                    string,
+                    {
+                        date:
+                        string |
+                        null;
+                        label: string;
+                        progress:
+                        number |
+                        null;
+                        progress_change:
+                        number |
+                        null;
+                    }
+                >();
+
+            const addRow = (
+                row: HistoryRecord,
+            ) => {
+                const rawDate =
                     row.snapshot_date ??
                     row.snapshot_month;
 
-                return {
+                if (!rawDate) {
+                    return;
+                }
+
+                const date =
+                    String(rawDate);
+
+                const existing =
+                    merged.get(
+                        date,
+                    );
+
+                const progress =
+                    toNumber(
+                        row.physical_progress_pct,
+                    );
+
+                const progressChange =
+                    toNumber(
+                        row.progress_change_pct ??
+                        row.physical_progress_change_pct,
+                    );
+
+                merged.set(
                     date,
-                    label: formatDate(date),
+                    {
+                        date,
+                        label:
+                            formatDate(
+                                date,
+                            ),
+                        progress:
+                            progress ??
+                            existing?.progress ??
+                            null,
+                        progress_change:
+                            progressChange ??
+                            existing?.progress_change ??
+                            null,
+                    },
+                );
+            };
 
-                    overall_risk:
-                        toNumber(
-                            row.overall_risk,
-                        ),
-
-                    cost_risk:
-                        toNumber(
-                            row.cost_risk,
-                        ),
-
-                    future_delay:
-                        toNumber(
-                            row.future_delay,
-                        ),
-
-                    progress_stall:
-                        toNumber(
-                            row.progress_stall,
-                        ),
-
-                    risk_level:
-                        row.risk_level ?? null,
-                };
-            })
-            .filter(
-                (row) =>
-                    row.date !== null &&
-                    (
-                        row.overall_risk !== null ||
-                        row.cost_risk !== null ||
-                        row.future_delay !== null ||
-                        row.progress_stall !== null
-                    ),
+            /*
+             * Analytical trajectory first.
+             */
+            safeProgressTrajectory.forEach(
+                addRow,
             );
 
-        return filterByRange(
-            mapped,
+            /*
+             * FLASH afterward so newer FLASH
+             * snapshots can fill missing dates.
+             */
+            safeFlashHistory.forEach(
+                addRow,
+            );
+
+            const mapped =
+                Array.from(
+                    merged.values(),
+                ).sort(
+                    (a, b) =>
+                        String(
+                            a.date,
+                        ).localeCompare(
+                            String(
+                                b.date,
+                            ),
+                        ),
+                );
+
+            return filterByRange(
+                mapped,
+                range,
+            );
+        }, [
+            safeProgressTrajectory,
+            safeFlashHistory,
             range,
-        );
-    }, [
-        riskTrajectory,
-        range,
-    ]);
+        ]);
 
     /*
-     * --------------------------------------------------------
-     * Summary metrics
-     * --------------------------------------------------------
+     * ========================================================
+     * RISK TRAJECTORY
+     * ========================================================
+     */
+
+    const riskData =
+        useMemo(() => {
+            const mapped =
+                safeRiskTrajectory
+                    .map((row) => {
+                        const date =
+                            row.snapshot_date ??
+                            row.snapshot_month;
+
+                        return {
+                            date,
+
+                            label:
+                                formatDate(
+                                    date,
+                                ),
+
+                            overall_risk:
+                                toNumber(
+                                    row.overall_risk,
+                                ),
+
+                            cost_risk:
+                                toNumber(
+                                    row.cost_risk,
+                                ),
+
+                            future_delay:
+                                toNumber(
+                                    row.future_delay,
+                                ),
+
+                            progress_stall:
+                                toNumber(
+                                    row.progress_stall,
+                                ),
+
+                            risk_level:
+                                row.risk_level ??
+                                null,
+                        };
+                    })
+                    .filter(
+                        (row) =>
+                            row.date !==
+                            null &&
+                            row.date !==
+                            undefined &&
+                            (
+                                row.overall_risk !==
+                                null ||
+                                row.cost_risk !==
+                                null ||
+                                row.future_delay !==
+                                null ||
+                                row.progress_stall !==
+                                null
+                            ),
+                    );
+
+            return filterByRange(
+                mapped,
+                range,
+            );
+        }, [
+            safeRiskTrajectory,
+            range,
+        ]);
+
+    /*
+     * ========================================================
+     * SUMMARY METRICS
+     * ========================================================
      */
 
     const latestProgress =
@@ -451,24 +583,25 @@ export default function ProjectAnalyticsDetailCharts({
             : null;
 
     /*
-     * --------------------------------------------------------
-     * Render
-     * --------------------------------------------------------
+     * ========================================================
+     * RENDER
+     * ========================================================
      */
 
     return (
         <section className="mt-6 space-y-5">
+
             {/* Header */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+
                     <div>
                         <h2 className="text-lg font-semibold text-slate-900">
                             Project Performance Analysis
                         </h2>
 
                         <p className="mt-1 text-sm text-slate-500">
-                            Historical schedule, cost and physical
-                            progress trends for the selected project.
+                            Historical schedule, cost and physical progress trends for the selected project.
                         </p>
                     </div>
 
@@ -477,11 +610,14 @@ export default function ProjectAnalyticsDetailCharts({
                         {RANGE_OPTIONS.map(
                             (option) => {
                                 const active =
-                                    range === option;
+                                    range ===
+                                    option;
 
                                 return (
                                     <button
-                                        key={option}
+                                        key={
+                                            option
+                                        }
                                         type="button"
                                         onClick={() =>
                                             setRange(
@@ -497,7 +633,9 @@ export default function ProjectAnalyticsDetailCharts({
                                             " ",
                                         )}
                                     >
-                                        {option}
+                                        {
+                                            option
+                                        }
                                     </button>
                                 );
                             },
@@ -508,6 +646,7 @@ export default function ProjectAnalyticsDetailCharts({
 
             {/* Summary strip */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
                         Latest Progress
@@ -577,6 +716,7 @@ export default function ProjectAnalyticsDetailCharts({
 
             {/* Charts */}
             <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+
                 {/* Schedule */}
                 <ChartCard
                     title="Schedule Trajectory"
@@ -592,7 +732,9 @@ export default function ProjectAnalyticsDetailCharts({
                             height="100%"
                         >
                             <LineChart
-                                data={scheduleData}
+                                data={
+                                    scheduleData
+                                }
                                 margin={{
                                     top: 10,
                                     right: 20,
@@ -609,7 +751,9 @@ export default function ProjectAnalyticsDetailCharts({
                                     tick={{
                                         fontSize: 11,
                                     }}
-                                    minTickGap={24}
+                                    minTickGap={
+                                        24
+                                    }
                                 />
 
                                 <YAxis
@@ -686,7 +830,9 @@ export default function ProjectAnalyticsDetailCharts({
                             height="100%"
                         >
                             <LineChart
-                                data={costData}
+                                data={
+                                    costData
+                                }
                                 margin={{
                                     top: 10,
                                     right: 20,
@@ -703,7 +849,9 @@ export default function ProjectAnalyticsDetailCharts({
                                     tick={{
                                         fontSize: 11,
                                     }}
-                                    minTickGap={24}
+                                    minTickGap={
+                                        24
+                                    }
                                 />
 
                                 <YAxis
@@ -803,7 +951,9 @@ export default function ProjectAnalyticsDetailCharts({
                                 height="100%"
                             >
                                 <LineChart
-                                    data={progressData}
+                                    data={
+                                        progressData
+                                    }
                                     margin={{
                                         top: 10,
                                         right: 20,
@@ -820,10 +970,11 @@ export default function ProjectAnalyticsDetailCharts({
                                         tick={{
                                             fontSize: 11,
                                         }}
-                                        minTickGap={24}
+                                        minTickGap={
+                                            24
+                                        }
                                     />
 
-                                    {/* Physical progress */}
                                     <YAxis
                                         yAxisId="progress"
                                         domain={[
@@ -834,12 +985,13 @@ export default function ProjectAnalyticsDetailCharts({
                                             fontSize: 11,
                                         }}
                                         width={45}
-                                        tickFormatter={(value) =>
+                                        tickFormatter={(
+                                            value,
+                                        ) =>
                                             `${value}%`
                                         }
                                     />
 
-                                    {/* Monthly progress change */}
                                     <YAxis
                                         yAxisId="change"
                                         orientation="right"
@@ -847,13 +999,17 @@ export default function ProjectAnalyticsDetailCharts({
                                             fontSize: 11,
                                         }}
                                         width={45}
-                                        tickFormatter={(value) =>
+                                        tickFormatter={(
+                                            value,
+                                        ) =>
                                             `${value}%`
                                         }
                                     />
 
                                     <Tooltip
-                                        labelFormatter={(label) =>
+                                        labelFormatter={(
+                                            label,
+                                        ) =>
                                             `Snapshot: ${label}`
                                         }
                                         formatter={(
@@ -861,11 +1017,17 @@ export default function ProjectAnalyticsDetailCharts({
                                             name,
                                         ) => {
                                             const numericValue =
-                                                typeof value === "number"
+                                                typeof value ===
+                                                    "number"
                                                     ? value
-                                                    : Number(value);
+                                                    : Number(
+                                                        value,
+                                                    );
 
-                                            if (name === "Physical Progress") {
+                                            if (
+                                                name ===
+                                                "Physical Progress"
+                                            ) {
                                                 return [
                                                     `${formatNumber(
                                                         numericValue,
@@ -887,7 +1049,6 @@ export default function ProjectAnalyticsDetailCharts({
 
                                     <Legend />
 
-                                    {/* Main project progress */}
                                     <Area
                                         yAxisId="progress"
                                         type="monotone"
@@ -904,7 +1065,6 @@ export default function ProjectAnalyticsDetailCharts({
                                         connectNulls
                                     />
 
-                                    {/* Secondary monthly movement */}
                                     <Line
                                         yAxisId="change"
                                         type="monotone"
@@ -926,6 +1086,7 @@ export default function ProjectAnalyticsDetailCharts({
                     </ChartCard>
 
                     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+
                         {/* Overall Risk */}
                         <ChartCard
                             title="Overall Risk Trajectory"
@@ -941,7 +1102,9 @@ export default function ProjectAnalyticsDetailCharts({
                                     height="100%"
                                 >
                                     <LineChart
-                                        data={riskData}
+                                        data={
+                                            riskData
+                                        }
                                         margin={{
                                             top: 10,
                                             right: 20,
@@ -958,31 +1121,44 @@ export default function ProjectAnalyticsDetailCharts({
                                             tick={{
                                                 fontSize: 11,
                                             }}
-                                            minTickGap={24}
+                                            minTickGap={
+                                                24
+                                            }
                                         />
 
                                         <YAxis
-                                            domain={[0, 100]}
+                                            domain={[
+                                                0,
+                                                100,
+                                            ]}
                                             tick={{
                                                 fontSize: 11,
                                             }}
                                             width={50}
-                                            tickFormatter={(value) =>
+                                            tickFormatter={(
+                                                value,
+                                            ) =>
                                                 `${value}`
                                             }
                                         />
 
                                         <Tooltip
-                                            labelFormatter={(label) =>
+                                            labelFormatter={(
+                                                label,
+                                            ) =>
                                                 `Snapshot: ${label}`
                                             }
-                                            formatter={(value) => [
-                                                `${formatNumber(
-                                                    Number(value),
-                                                    2,
-                                                )}`,
-                                                "Overall Risk",
-                                            ]}
+                                            formatter={(
+                                                value,
+                                            ) => [
+                                                    `${formatNumber(
+                                                        Number(
+                                                            value,
+                                                        ),
+                                                        2,
+                                                    )}`,
+                                                    "Overall Risk",
+                                                ]}
                                         />
 
                                         <Line
@@ -1018,7 +1194,9 @@ export default function ProjectAnalyticsDetailCharts({
                                     height="100%"
                                 >
                                     <LineChart
-                                        data={riskData}
+                                        data={
+                                            riskData
+                                        }
                                         margin={{
                                             top: 10,
                                             right: 20,
@@ -1035,22 +1213,31 @@ export default function ProjectAnalyticsDetailCharts({
                                             tick={{
                                                 fontSize: 11,
                                             }}
-                                            minTickGap={24}
+                                            minTickGap={
+                                                24
+                                            }
                                         />
 
                                         <YAxis
-                                            domain={[0, 100]}
+                                            domain={[
+                                                0,
+                                                100,
+                                            ]}
                                             tick={{
                                                 fontSize: 11,
                                             }}
                                             width={50}
-                                            tickFormatter={(value) =>
+                                            tickFormatter={(
+                                                value,
+                                            ) =>
                                                 `${value}%`
                                             }
                                         />
 
                                         <Tooltip
-                                            labelFormatter={(label) =>
+                                            labelFormatter={(
+                                                label,
+                                            ) =>
                                                 `Snapshot: ${label}`
                                             }
                                             formatter={(
@@ -1058,10 +1245,14 @@ export default function ProjectAnalyticsDetailCharts({
                                                 name,
                                             ) => [
                                                     `${formatNumber(
-                                                        Number(value),
+                                                        Number(
+                                                            value,
+                                                        ),
                                                         2,
                                                     )}%`,
-                                                    String(name),
+                                                    String(
+                                                        name,
+                                                    ),
                                                 ]}
                                         />
 
