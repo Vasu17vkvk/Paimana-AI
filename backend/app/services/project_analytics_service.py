@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
+
 from pathlib import Path
 from typing import Any, Optional
 
-import joblib
+
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.extensions import db
 
@@ -33,43 +33,18 @@ STATE_SUMMARY_PATH = (
     DATA_DIR / "08_RAJYA_SABHA_STATE_SUMMARY_CLEANED.csv"
 )
 
-FEATURE_CONTRACT_FILE = (
-    MODELS_DIR / "feature_contract.json"
-)
-
-FUTURE_DELAY_MODEL_FILE = (
-    MODELS_DIR / "future_delay_model.joblib"
-)
-
-FUTURE_DELAY_CALIBRATOR_FILE = (
-    MODELS_DIR / "future_delay_calibrator.joblib"
-)
-
-FUTURE_STALL_MODEL_FILE = (
-    MODELS_DIR
-    / "future_progress_stall_model.joblib"
-)
-
-FUTURE_STALL_CALIBRATOR_FILE = (
-    MODELS_DIR
-    / "future_progress_stall_calibrator.joblib"
-)
-
-COST_MODEL_FILE = (
-    MODELS_DIR / "cost_overrun_model.joblib"
-)
 
 
 # ============================================================
 # CACHE
 # ============================================================
 
-_master_cache: Optional[pd.DataFrame] = None
-_history_cache: Optional[pd.DataFrame] = None
-_flash_cache: Optional[pd.DataFrame] = None
-_ml_ready_cache: Optional[pd.DataFrame] = None
 
-_models_cache: Optional[dict[str, Any]] = None
+
+
+
+
+
 
 
 # ============================================================
@@ -266,12 +241,14 @@ def _normalize_project_code_column(
 def load_master() -> pd.DataFrame:
     """
     Load project_master from PostgreSQL.
+
+    This function intentionally does NOT cache the complete
+    project_master DataFrame in process memory.
+
+    The previous implementation kept a full copy of the table
+    alive for the lifetime of the Flask worker, which increased
+    baseline Render RAM usage.
     """
-
-    global _master_cache
-
-    if _master_cache is not None:
-        return _master_cache.copy()
 
     df = _load_postgres_table(
         "project_master"
@@ -297,24 +274,58 @@ def load_master() -> pd.DataFrame:
         df
     )
 
-    _master_cache = df.copy()
-
     return df
 
 
-def load_history() -> pd.DataFrame:
+def load_history(
+    project_code: str,
+) -> pd.DataFrame:
     """
-    Load PAIMANA monthly history from PostgreSQL.
+    Load monthly history for ONE project only.
+
+    The previous implementation loaded the complete
+    paimana_monthly_history table and kept it cached in memory.
+
+    PostgreSQL now performs the project filtering and sorting,
+    so only the requested project's history enters Python.
     """
 
-    global _history_cache
-
-    if _history_cache is not None:
-        return _history_cache.copy()
-
-    df = _load_postgres_table(
-        "paimana_monthly_history"
+    code = _to_project_code(
+        project_code
     )
+
+    if not code:
+        return pd.DataFrame()
+
+    query = text(
+        """
+        SELECT *
+        FROM "paimana_monthly_history"
+
+        WHERE CAST(
+            project_code AS TEXT
+        ) = :project_code
+
+        ORDER BY snapshot_month ASC
+        """
+    )
+
+    with db.engine.connect() as connection:
+        df = pd.read_sql(
+            query,
+            connection,
+            params={
+                "project_code": code,
+            },
+        )
+
+    if df.empty:
+        return df
+
+    df = df.loc[
+        :,
+        ~df.columns.duplicated(),
+    ].copy()
 
     if "snapshot_month" in df.columns:
         df["snapshot_month"] = pd.to_datetime(
@@ -326,59 +337,60 @@ def load_history() -> pd.DataFrame:
         df
     )
 
-    _history_cache = df.copy()
-
     return df
 
 
-def load_flash() -> pd.DataFrame:
+
+
+
+def _load_project_ml_history(
+    project_code: str,
+) -> pd.DataFrame:
     """
-    Load FLASH history from PostgreSQL.
+    Load ML-ready snapshots for ONE project only.
+
+    PostgreSQL performs the project filtering and sorting, so
+    the complete paimana_ml_ready table never enters Python.
     """
 
-    global _flash_cache
-
-    if _flash_cache is not None:
-        return _flash_cache.copy()
-
-    df = _load_postgres_table(
-        "flash_modern_history"
+    code = _to_project_code(
+        project_code
     )
 
-    if "snapshot_month" in df.columns:
-        df["snapshot_month"] = pd.to_datetime(
-            df["snapshot_month"],
-            errors="coerce",
+    query = text(
+        """
+        SELECT *
+        FROM "paimana_ml_ready"
+        WHERE CAST(
+            project_code AS TEXT
+        ) = :project_code
+
+        ORDER BY
+            snapshot_year ASC,
+            snapshot_month_num ASC
+        """
+    )
+
+    with db.engine.connect() as connection:
+        df = pd.read_sql(
+            query,
+            connection,
+            params={
+                "project_code": code,
+            },
         )
 
-    df = _normalize_project_code_column(
-        df
-    )
+    if df.empty:
+        return df
 
-    _flash_cache = df.copy()
-
-    return df
-
-
-def load_ml_ready() -> pd.DataFrame:
-    """
-    Load ML-ready project snapshots from PostgreSQL.
-    """
-
-    global _ml_ready_cache
-
-    if _ml_ready_cache is not None:
-        return _ml_ready_cache.copy()
-
-    df = _load_postgres_table(
-        "paimana_ml_ready"
-    )
+    df = df.loc[
+        :,
+        ~df.columns.duplicated(),
+    ].copy()
 
     df = _normalize_project_code_column(
         df
     )
-
-    _ml_ready_cache = df.copy()
 
     return df
 
@@ -387,74 +399,7 @@ def load_ml_ready() -> pd.DataFrame:
 # MODEL LOADING
 # ============================================================
 
-def load_models() -> dict[str, Any]:
-    """
-    Load all Project Analytics models once and cache them.
-    """
 
-    global _models_cache
-
-    if _models_cache is not None:
-        return _models_cache
-
-    required_files = [
-        FEATURE_CONTRACT_FILE,
-        FUTURE_DELAY_MODEL_FILE,
-        FUTURE_DELAY_CALIBRATOR_FILE,
-        FUTURE_STALL_MODEL_FILE,
-        FUTURE_STALL_CALIBRATOR_FILE,
-        COST_MODEL_FILE,
-    ]
-
-    missing = [
-        str(path)
-        for path in required_files
-        if not path.exists()
-    ]
-
-    if missing:
-        raise FileNotFoundError(
-            "Required Project Analytics model files are missing: "
-            + ", ".join(missing)
-        )
-
-    contract = json.loads(
-        FEATURE_CONTRACT_FILE.read_text(
-            encoding="utf-8"
-        )
-    )
-
-    if "features" not in contract:
-        raise ValueError(
-            "feature_contract.json is missing 'features'."
-        )
-
-    if "cost_features" not in contract:
-        raise ValueError(
-            "feature_contract.json is missing "
-            "'cost_features'."
-        )
-
-    _models_cache = {
-        "contract": contract,
-        "delay_model": joblib.load(
-            FUTURE_DELAY_MODEL_FILE
-        ),
-        "delay_calibrator": joblib.load(
-            FUTURE_DELAY_CALIBRATOR_FILE
-        ),
-        "stall_model": joblib.load(
-            FUTURE_STALL_MODEL_FILE
-        ),
-        "stall_calibrator": joblib.load(
-            FUTURE_STALL_CALIBRATOR_FILE
-        ),
-        "cost_model": joblib.load(
-            COST_MODEL_FILE
-        ),
-    }
-
-    return _models_cache
 
 
 # ============================================================
@@ -466,36 +411,18 @@ def latest_ml_row(
 ) -> Optional[pd.Series]:
     """
     Return the latest ML-ready snapshot for one project.
+
+    Only this project's rows are loaded from PostgreSQL.
     """
 
-    df = load_ml_ready()
-
-    code = _to_project_code(
+    df = _load_project_ml_history(
         project_code
     )
 
-    rows = df[
-        df["project_code"] == code
-    ].copy()
-
-    if rows.empty:
+    if df.empty:
         return None
 
-    sort_columns = [
-        column
-        for column in [
-            "snapshot_year",
-            "snapshot_month_num",
-        ]
-        if column in rows.columns
-    ]
-
-    if sort_columns:
-        rows = rows.sort_values(
-            sort_columns
-        )
-
-    return rows.iloc[-1]
+    return df.iloc[-1]
 
 
 def project_history(
@@ -505,47 +432,70 @@ def project_history(
     Return PAIMANA monthly history for one project.
     """
 
-    df = load_history()
-
-    code = _to_project_code(
+    return load_history(
         project_code
     )
-
-    rows = df[
-        df["project_code"] == code
-    ].copy()
-
-    if "snapshot_month" in rows.columns:
-        rows = rows.sort_values(
-            "snapshot_month"
-        )
-
-    return rows
 
 
 def project_flash_history(
     project_code: str,
 ) -> pd.DataFrame:
     """
-    Return FLASH history for one project.
-    """
+    Return FLASH history for ONE project only.
 
-    df = load_flash()
+    PostgreSQL performs the project filtering and sorting,
+    so the complete flash_modern_history table is never
+    loaded into Python memory.
+    """
 
     code = _to_project_code(
         project_code
     )
 
-    rows = df[
-        df["project_code"] == code
-    ].copy()
+    if not code:
+        return pd.DataFrame()
 
-    if "snapshot_month" in rows.columns:
-        rows = rows.sort_values(
-            "snapshot_month"
+    query = text(
+        """
+        SELECT *
+        FROM "flash_modern_history"
+
+        WHERE CAST(
+            project_code AS TEXT
+        ) = :project_code
+
+        ORDER BY snapshot_month ASC
+        """
+    )
+
+    with db.engine.connect() as connection:
+        df = pd.read_sql(
+            query,
+            connection,
+            params={
+                "project_code": code,
+            },
         )
 
-    return rows
+    if df.empty:
+        return df
+
+    df = df.loc[
+        :,
+        ~df.columns.duplicated(),
+    ].copy()
+
+    if "snapshot_month" in df.columns:
+        df["snapshot_month"] = pd.to_datetime(
+            df["snapshot_month"],
+            errors="coerce",
+        )
+
+    df = _normalize_project_code_column(
+        df
+    )
+
+    return df
 
 
 # ============================================================
@@ -667,7 +617,9 @@ def model_score_from_features(
         "risk_level": result["risk_level"],
     }
 
-def project_risk_trajectory(project_code: str) -> list[dict[str, Any]]:
+def project_risk_trajectory(
+    project_code: str,
+) -> list[dict[str, Any]]:
     """
     Return historical ML risk predictions for one project.
 
@@ -677,91 +629,148 @@ def project_risk_trajectory(project_code: str) -> list[dict[str, Any]]:
     Prediction:
         Canonical PAIMANA ML engine
 
-    This keeps Project Analytics aligned with the same
-    engine used by Risk / Cost / Delay services.
+    Uses the same feature normalization path as the
+    single-project ML risk calculation.
     """
 
-    df = load_ml_ready()
+    code = _to_project_code(
+        project_code
+    )
 
-    rows = df[
-        df["project_code"]
-        .astype(str)
-        .eq(str(project_code))
-    ].copy()
+    if not code:
+        return []
+
+    rows = _load_project_ml_history(
+        code
+    )
 
     if rows.empty:
         return []
 
-    rows = rows.sort_values(
-        ["snapshot_year", "snapshot_month_num"]
-    )
+    required_sort_columns = [
+        column
+        for column in [
+            "snapshot_year",
+            "snapshot_month_num",
+        ]
+        if column in rows.columns
+    ]
 
-    trajectory: list[dict[str, Any]] = []
+    if required_sort_columns:
+        rows = rows.sort_values(
+            required_sort_columns
+        )
+
+    trajectory: list[
+        dict[str, Any]
+    ] = []
 
     for _, row in rows.iterrows():
+
         try:
-            prediction = engine.predict_row(
-                row,
-                str(project_code),
+            prediction = (
+                model_score_from_features(
+                    row
+                )
             )
-        except Exception:
+
+        except Exception as exc:
+
+            print(
+                "PROJECT RISK TRAJECTORY ERROR:",
+                code,
+                repr(exc),
+            )
+
             continue
 
-        year = row.get("snapshot_year")
-        month = row.get("snapshot_month_num")
+        year = row.get(
+            "snapshot_year"
+        )
+
+        month = row.get(
+            "snapshot_month_num"
+        )
 
         snapshot_date = None
 
-        if pd.notna(year) and pd.notna(month):
+        if (
+            pd.notna(year)
+            and pd.notna(month)
+        ):
             try:
                 snapshot_date = (
                     f"{int(year):04d}-"
                     f"{int(month):02d}-01"
                 )
-            except (TypeError, ValueError):
+            except (
+                TypeError,
+                ValueError,
+            ):
                 snapshot_date = None
 
         trajectory.append(
             {
-                "snapshot_date": snapshot_date,
+                "snapshot_date":
+                    snapshot_date,
+
                 "snapshot_year": (
                     int(year)
                     if pd.notna(year)
                     else None
                 ),
+
                 "snapshot_month": (
                     int(month)
                     if pd.notna(month)
                     else None
                 ),
-                "overall_risk": float(
-                    prediction["overall_risk_score"]
-                ),
-                "cost_risk": float(
-                    prediction["cost_risk_score"]
-                ),
-                "future_delay": float(
-                    prediction["future_delay_probability"]
-                    * 100.0
-                ),
-                "progress_stall": float(
+
+                "overall_risk":
+                    float(
+                        prediction[
+                            "overall_risk"
+                        ]
+                    ),
+
+                "cost_risk":
+                    float(
+                        prediction[
+                            "cost_risk"
+                        ]
+                    ),
+
+                "future_delay":
+                    float(
+                        prediction[
+                            "delay_probability"
+                        ]
+                        * 100.0
+                    ),
+
+                "progress_stall":
+                    float(
+                        prediction[
+                            "stall_probability"
+                        ]
+                        * 100.0
+                    ),
+
+                "predicted_cost_overrun_pct":
+                    float(
+                        prediction[
+                            "predicted_cost_overrun"
+                        ]
+                    ),
+
+                "risk_level":
                     prediction[
-                        "future_progress_stall_probability"
-                    ]
-                    * 100.0
-                ),
-                "predicted_cost_overrun_pct": float(
-                    prediction[
-                        "predicted_cost_overrun_pct"
-                    ]
-                ),
-                "risk_level": prediction[
-                    "risk_level"
-                ],
+                        "risk_level"
+                    ],
             }
         )
 
-    return trajectory    
+    return trajectory
 
 
 def model_scores_from_features_batch(
@@ -769,22 +778,40 @@ def model_scores_from_features_batch(
     batch_size: int = 256,
 ) -> pd.DataFrame:
     """
-    Run Project Analytics ML scoring in memory-safe batches.
+    Compatibility wrapper around the canonical PAIMANA ML engine.
 
-    Uses the same trained models, calibrators, cost-risk scaling,
-    overall-risk formula, and risk thresholds as the canonical engine,
-    but performs inference vectorized across batches instead of
-    calling engine.predict_row() once per row.
+    Project Analytics previously loaded a second copy of all ML
+    artifacts and duplicated the complete batch-prediction logic.
+
+    The canonical engine in app.ml now owns:
+        - feature contract
+        - delay model
+        - delay calibration
+        - stall model
+        - stall calibration
+        - cost model
+        - cost-risk scaling
+        - overall-risk formula
+        - risk thresholds
+        - early-warning logic
+
+    This wrapper keeps the existing Project Analytics API intact
+    while ensuring only one model instance exists in the process.
     """
 
     empty_columns = [
         "project_code",
+        "snapshot_year",
+        "snapshot_month",
         "predicted_cost_overrun_pct",
         "future_delay_probability",
         "future_progress_stall_probability",
         "cost_risk_score",
         "overall_risk_score",
         "risk_level",
+        "early_warning_active",
+        "early_warning_priority",
+        "early_warning_reasons",
     ]
 
     if rows is None or rows.empty:
@@ -792,211 +819,9 @@ def model_scores_from_features_batch(
             columns=empty_columns
         )
 
-    models = load_models()
-    contract = models["contract"]
-
-    features = contract["features"]
-    cost_features = contract["cost_features"]
-
-    # --------------------------------------------------------
-    # Build complete numeric feature matrix once
-    # --------------------------------------------------------
-
-    X = _build_feature_frame(
+    return engine.predict_batch(
         rows,
-        features,
-    )
-
-    X_cost = X[
-        cost_features
-    ].copy()
-
-    results: list[pd.DataFrame] = []
-
-    # --------------------------------------------------------
-    # Memory-safe batch inference
-    # --------------------------------------------------------
-
-    for start in range(
-        0,
-        len(X),
-        batch_size,
-    ):
-        end = min(
-            start + batch_size,
-            len(X),
-        )
-
-        X_batch = X.iloc[
-            start:end
-        ]
-
-        X_cost_batch = X_cost.iloc[
-            start:end
-        ]
-
-        # ====================================================
-        # Future delay
-        # ====================================================
-
-        raw_delay = (
-            models["delay_model"]
-            .predict_proba(
-                X_batch[features]
-            )[:, 1]
-            .reshape(-1, 1)
-        )
-
-        delay_probability = (
-            models["delay_calibrator"]
-            .predict_proba(
-                raw_delay
-            )[:, 1]
-        )
-
-        # ====================================================
-        # Progress stall
-        # ====================================================
-
-        raw_stall = (
-            models["stall_model"]
-            .predict_proba(
-                X_batch[features]
-            )[:, 1]
-            .reshape(-1, 1)
-        )
-
-        stall_probability = (
-            models["stall_calibrator"]
-            .predict_proba(
-                raw_stall
-            )[:, 1]
-        )
-
-        # ====================================================
-        # Cost overrun
-        # ====================================================
-
-        predicted_cost = np.maximum(
-            0.0,
-            models["cost_model"].predict(
-                X_cost_batch[
-                    cost_features
-                ]
-            ),
-        )
-
-        # ====================================================
-        # Cost risk
-        # ====================================================
-
-        reference = _safe_float(
-            contract.get(
-                "cost_risk_reference_percentile",
-                1.0,
-            ),
-            1.0,
-        )
-
-        if reference <= 0:
-            reference = 1.0
-
-        cost_risk = np.clip(
-            (
-                predicted_cost
-                / reference
-                * 100.0
-            ),
-            0.0,
-            100.0,
-        )
-
-        # ====================================================
-        # Overall risk
-        # ====================================================
-
-        overall_risk = np.clip(
-            (
-                0.30 * cost_risk
-                + 0.35
-                * delay_probability
-                * 100.0
-                + 0.35
-                * stall_probability
-                * 100.0
-            ),
-            0.0,
-            100.0,
-        )
-
-        # ====================================================
-        # Risk level
-        # ====================================================
-
-        risk_level = np.select(
-            [
-                overall_risk >= 85.0,
-                overall_risk >= 70.0,
-                overall_risk >= 40.0,
-            ],
-            [
-                "CRITICAL",
-                "HIGH",
-                "MEDIUM",
-            ],
-            default="LOW",
-        )
-
-        # ====================================================
-        # Batch result
-        # ====================================================
-
-        batch_result = pd.DataFrame(
-            {
-                "project_code": (
-                    rows.iloc[
-                        start:end
-                    ]["project_code"]
-                    .astype(str)
-                    .values
-                ),
-
-                "predicted_cost_overrun_pct":
-                    predicted_cost,
-
-                "future_delay_probability":
-                    delay_probability,
-
-                "future_progress_stall_probability":
-                    stall_probability,
-
-                "cost_risk_score":
-                    cost_risk,
-
-                "overall_risk_score":
-                    overall_risk,
-
-                "risk_level":
-                    risk_level,
-            }
-        )
-
-        results.append(
-            batch_result
-        )
-
-    # --------------------------------------------------------
-    # Combine all batches
-    # --------------------------------------------------------
-
-    if not results:
-        return pd.DataFrame(
-            columns=empty_columns
-        )
-
-    return pd.concat(
-        results,
-        ignore_index=True,
+        batch_size=batch_size,
     )
 
 
@@ -1006,84 +831,100 @@ def model_scores_from_features_batch(
 
 def get_filter_options() -> dict[str, list[str]]:
     """
-    Return current filter options from PostgreSQL.
+    Return current filter options directly from PostgreSQL.
+
+    This avoids loading the complete project_master table
+    just to populate filter dropdowns.
     """
 
-    portfolio = load_master()
+    def get_distinct_values(
+        column: str,
+    ) -> list[str]:
 
-    sectors = sorted(
-        portfolio["sector"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .replace(
-            "",
-            np.nan,
+        query = text(
+            f"""
+            SELECT DISTINCT
+                "{column}"
+            FROM "project_master"
+
+            WHERE "{column}" IS NOT NULL
+
+              AND TRIM(
+                    CAST(
+                        "{column}"
+                        AS TEXT
+                    )
+                  ) <> ''
+
+            ORDER BY
+                "{column}"
+            """
         )
-        .dropna()
-        .unique()
-        .tolist()
-    )
 
-    ministries = sorted(
-        portfolio["ministry"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .replace(
-            "",
-            np.nan,
-        )
-        .dropna()
-        .unique()
-        .tolist()
-    )
+        with db.engine.connect() as connection:
 
-    states: list[str] = []
-
-    if "flash_state" in portfolio.columns:
-        states = sorted(
-            portfolio["flash_state"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .replace(
-                "",
-                np.nan,
+            values = (
+                connection.execute(
+                    query
+                )
+                .scalars()
+                .all()
             )
-            .dropna()
-            .unique()
-            .tolist()
-        )
 
-    statuses: list[str] = []
+        cleaned: list[str] = []
 
-    if "schedule_status" in portfolio.columns:
-        statuses = sorted(
-            portfolio["schedule_status"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .replace(
-                "",
-                np.nan,
+        for value in values:
+
+            if value is None:
+                continue
+
+            value = str(
+                value
+            ).strip()
+
+            if not value:
+                continue
+
+            if value.lower() in {
+                "nan",
+                "none",
+                "null",
+            }:
+                continue
+
+            cleaned.append(
+                value
             )
-            .dropna()
-            .unique()
-            .tolist()
-        )
+
+        return cleaned
 
     return {
-        "sectors": sectors,
-        "ministries": ministries,
-        "states": states,
+        "sectors":
+            get_distinct_values(
+                "sector"
+            ),
+
+        "ministries":
+            get_distinct_values(
+                "ministry"
+            ),
+
+        "states":
+            get_distinct_values(
+                "flash_state"
+            ),
+
         "risk_levels": [
             "LOW",
             "MEDIUM",
             "HIGH",
             "CRITICAL",
         ],
-        "schedule_statuses": statuses,
+
+        "schedule_statuses":
+            get_distinct_values(
+                "schedule_status"
+            ),
     }
 
 
@@ -1123,6 +964,205 @@ def _normalize_filter_values(
     # Remove duplicates while preserving order
     return list(dict.fromkeys(normalized))
 
+def _attach_risk_scores(
+    projects: pd.DataFrame,
+    *,
+    batch_size: int = 256,
+) -> pd.DataFrame:
+    """
+    Attach canonical ML risk scores to the supplied projects.
+
+    Only the latest ML snapshot for the selected project codes
+    is loaded from PostgreSQL.
+
+    This keeps risk filtering compatible with the existing
+    Project Analytics API without loading the complete
+    paimana_ml_ready table.
+    """
+
+    result = projects.copy()
+
+    if result.empty:
+        result["overall_risk_score"] = pd.Series(
+            dtype=float,
+            index=result.index,
+        )
+
+        result["risk_level"] = pd.Series(
+            dtype=object,
+            index=result.index,
+        )
+
+        return result
+
+    if "project_code" not in result.columns:
+        result["overall_risk_score"] = np.nan
+        result["risk_level"] = None
+        return result
+
+    result["project_code"] = (
+        result["project_code"]
+        .apply(_to_project_code)
+    )
+
+    project_codes = [
+        code
+        for code in result[
+            "project_code"
+        ].astype(str).unique()
+        if code
+    ]
+
+    if not project_codes:
+        result["overall_risk_score"] = np.nan
+        result["risk_level"] = None
+        return result
+
+    query = (
+        text(
+            """
+            SELECT DISTINCT ON (
+                CAST(project_code AS TEXT)
+            ) *
+
+            FROM "paimana_ml_ready"
+
+            WHERE project_code IS NOT NULL
+
+              AND CAST(
+                    project_code AS TEXT
+                  ) IN :project_codes
+
+            ORDER BY
+                CAST(project_code AS TEXT),
+                CAST(snapshot_year AS INTEGER) DESC,
+                CAST(snapshot_month_num AS INTEGER) DESC
+            """
+        )
+        .bindparams(
+            bindparam(
+                "project_codes",
+                expanding=True,
+            )
+        )
+    )
+
+    with db.engine.connect() as connection:
+
+        ml_rows = pd.read_sql(
+            query,
+            connection,
+            params={
+                "project_codes": project_codes,
+            },
+        )
+
+    # Default columns even when no ML data exists.
+    result["overall_risk_score"] = np.nan
+    result["risk_level"] = None
+
+    if ml_rows.empty:
+        return result
+
+    ml_rows = ml_rows.loc[
+        :,
+        ~ml_rows.columns.duplicated(),
+    ].copy()
+
+    ml_rows["project_code"] = (
+        ml_rows["project_code"]
+        .apply(_to_project_code)
+    )
+
+    scores = model_scores_from_features_batch(
+        ml_rows,
+        batch_size=batch_size,
+    )
+
+    if scores.empty:
+        return result
+
+    scores = scores.loc[
+        :,
+        ~scores.columns.duplicated(),
+    ].copy()
+
+    if "project_code" not in scores.columns:
+        return result
+
+    scores["project_code"] = (
+        scores["project_code"]
+        .apply(_to_project_code)
+    )
+
+    score_columns = [
+        "project_code",
+        "overall_risk_score",
+        "risk_level",
+    ]
+
+    available_columns = [
+        column
+        for column in score_columns
+        if column in scores.columns
+    ]
+
+    if len(available_columns) <= 1:
+        return result
+
+    scores = (
+        scores[
+            available_columns
+        ]
+        .drop_duplicates(
+            "project_code",
+            keep="last",
+        )
+        .copy()
+    )
+
+    result = result.merge(
+        scores,
+        on="project_code",
+        how="left",
+        suffixes=(
+            "",
+            "_ml",
+        ),
+    )
+
+    if "overall_risk_score_ml" in result.columns:
+        result["overall_risk_score"] = (
+            pd.to_numeric(
+                result[
+                    "overall_risk_score_ml"
+                ],
+                errors="coerce",
+            )
+        )
+
+        result.drop(
+            columns=[
+                "overall_risk_score_ml"
+            ],
+            inplace=True,
+        )
+
+    if "risk_level_ml" in result.columns:
+        result["risk_level"] = (
+            result[
+                "risk_level_ml"
+            ]
+        )
+
+        result.drop(
+            columns=[
+                "risk_level_ml"
+            ],
+            inplace=True,
+        )
+
+    return result
 
 def filter_projects(
     *,
@@ -1134,348 +1174,266 @@ def filter_projects(
     search: Optional[str] = None,
 ) -> pd.DataFrame:
     """
-    Filter the current PostgreSQL project portfolio.
+    Filter projects directly in PostgreSQL.
 
-    Supports:
-    - multi-select sector
-    - multi-select ministry
-    - multi-select state
-    - multi-select risk level
-    - multi-select schedule status
-    - project code/name search
+    Database-side filters:
+        - sector
+        - ministry
+        - state
+        - schedule status
+        - project code/name search
+
+    Risk-level filtering remains in Python because the risk
+    level is currently produced by the ML engine.
+
+    This is intentionally an incremental optimization:
+    PostgreSQL reduces the project set first, and only then
+    do we perform any ML scoring that is actually necessary.
     """
-
-    portfolio = load_master().copy()
 
     # --------------------------------------------------------
     # Normalize filters
     # --------------------------------------------------------
 
-    sector_values = _normalize_filter_values(sector)
-    ministry_values = _normalize_filter_values(ministry)
-    state_values = _normalize_filter_values(state)
-    risk_values = _normalize_filter_values(risk_level)
-    schedule_values = _normalize_filter_values(schedule_status)
+    sector_values = _normalize_filter_values(
+        sector
+    )
+
+    ministry_values = _normalize_filter_values(
+        ministry
+    )
+
+    state_values = _normalize_filter_values(
+        state
+    )
+
+    risk_values = _normalize_filter_values(
+        risk_level
+    )
+
+    schedule_values = _normalize_filter_values(
+        schedule_status
+    )
 
     # --------------------------------------------------------
-    # Sector
+    # Build PostgreSQL query
+    # --------------------------------------------------------
+
+    query_parts = [
+        'SELECT *',
+        'FROM "project_master"',
+        'WHERE project_code IS NOT NULL',
+    ]
+
+    params: dict[str, Any] = {}
+
+    # --------------------------------------------------------
+    # SECTOR
     # --------------------------------------------------------
 
     if sector_values:
-        portfolio = portfolio[
-            portfolio["sector"]
-            .astype(str)
-            .isin(sector_values)
-        ]
+        query_parts.append(
+            'AND "sector" IN :sector_values'
+        )
+
+        params[
+            "sector_values"
+        ] = sector_values
 
     # --------------------------------------------------------
-    # Ministry
+    # MINISTRY
     # --------------------------------------------------------
 
     if ministry_values:
-        portfolio = portfolio[
-            portfolio["ministry"]
-            .astype(str)
-            .isin(ministry_values)
-        ]
+        query_parts.append(
+            'AND "ministry" IN :ministry_values'
+        )
+
+        params[
+            "ministry_values"
+        ] = ministry_values
 
     # --------------------------------------------------------
-    # State
+    # STATE
     # --------------------------------------------------------
 
-    if (
-        state_values
-        and "flash_state" in portfolio.columns
-    ):
-        portfolio = portfolio[
-            portfolio["flash_state"]
-            .astype(str)
-            .isin(state_values)
-        ]
+    if state_values:
+        query_parts.append(
+            'AND "flash_state" IN :state_values'
+        )
+
+        params[
+            "state_values"
+        ] = state_values
 
     # --------------------------------------------------------
-    # Risk level
+    # SCHEDULE STATUS
+    # --------------------------------------------------------
+
+    if schedule_values:
+        query_parts.append(
+            'AND "schedule_status" IN :schedule_values'
+        )
+
+        params[
+            "schedule_values"
+        ] = schedule_values
+
+    # --------------------------------------------------------
+    # SEARCH
+    #
+    # Use PostgreSQL ILIKE instead of loading the whole table
+    # and doing pandas .str.contains().
+    # --------------------------------------------------------
+
+    if search:
+
+        search_value = str(
+            search
+        ).strip()
+
+        if search_value:
+
+            query_parts.append(
+                """
+                AND (
+                    CAST(
+                        project_code
+                        AS TEXT
+                    ) ILIKE :search_pattern
+
+                    OR COALESCE(
+                        project_name,
+                        ''
+                    ) ILIKE :search_pattern
+                )
+                """
+            )
+
+            params[
+                "search_pattern"
+            ] = (
+                f"%{search_value}%"
+            )
+
+    query_parts.append(
+        """
+        ORDER BY
+            project_name,
+            project_code
+        """
+    )
+
+    query = text(
+        "\n".join(
+            query_parts
+        )
+    )
+
+    # --------------------------------------------------------
+    # Tell SQLAlchemy that these parameters are lists.
+    # --------------------------------------------------------
+
+    if sector_values:
+        query = query.bindparams(
+            bindparam(
+                "sector_values",
+                expanding=True,
+            )
+        )
+
+    if ministry_values:
+        query = query.bindparams(
+            bindparam(
+                "ministry_values",
+                expanding=True,
+            )
+        )
+
+    if state_values:
+        query = query.bindparams(
+            bindparam(
+                "state_values",
+                expanding=True,
+            )
+        )
+
+    if schedule_values:
+        query = query.bindparams(
+            bindparam(
+                "schedule_values",
+                expanding=True,
+            )
+        )
+
+    # --------------------------------------------------------
+    # Execute query
+    # --------------------------------------------------------
+
+    with db.engine.connect() as connection:
+
+        portfolio = pd.read_sql(
+            query,
+            connection,
+            params=params,
+        )
+
+    if portfolio.empty:
+        return portfolio
+
+    # --------------------------------------------------------
+    # Cleanup
+    # --------------------------------------------------------
+
+    portfolio = portfolio.loc[
+        :,
+        ~portfolio.columns.duplicated(),
+    ].copy()
+
+    portfolio = _normalize_project_code_column(
+        portfolio
+    )
+
+    # --------------------------------------------------------
+    # RISK FILTER
+    #
+    # This remains ML-based for now.
+    #
+    # IMPORTANT:
+    # We only score the projects that survived the SQL
+    # filters above.
     # --------------------------------------------------------
 
     if risk_values:
 
         risk_values_upper = {
-            str(value).strip().upper()
+            str(value)
+            .strip()
+            .upper()
             for value in risk_values
         }
 
+        portfolio = _attach_risk_scores(
+            portfolio
+        )
+
         if (
             "risk_level"
-            not in portfolio.columns
+            in portfolio.columns
         ):
-            portfolio = _attach_risk_scores(
-                portfolio
-            )
-
-        portfolio = portfolio[
-            portfolio["risk_level"]
-            .astype(str)
-            .str.upper()
-            .isin(risk_values_upper)
-        ]
-
-    # --------------------------------------------------------
-    # Schedule status
-    # --------------------------------------------------------
-
-    if (
-        schedule_values
-        and "schedule_status"
-        in portfolio.columns
-    ):
-        portfolio = portfolio[
-            portfolio["schedule_status"]
-            .astype(str)
-            .isin(schedule_values)
-        ]
-
-    # --------------------------------------------------------
-    # Search
-    # --------------------------------------------------------
-
-    if search:
-        search_value = str(
-            search
-        ).strip().lower()
-
-        if search_value:
-
-            code_match = (
-                portfolio[
-                    "project_code"
-                ]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    search_value,
-                    na=False,
-                    regex=False,
-                )
-            )
-
-            name_match = (
-                portfolio[
-                    "project_name"
-                ]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    search_value,
-                    na=False,
-                    regex=False,
-                )
-            )
 
             portfolio = portfolio[
-                code_match
-                | name_match
+                portfolio[
+                    "risk_level"
+                ]
+                .astype(str)
+                .str.upper()
+                .isin(
+                    risk_values_upper
+                )
             ]
 
     return portfolio
-
-
-# ============================================================
-# RISK ATTACHMENT
-# ============================================================
-
-def _attach_risk_scores(
-    portfolio: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Attach model-based risk scores using batched inference.
-    """
-
-    result = portfolio.copy()
-
-    # --------------------------------------------------------
-    # Default risk columns
-    # --------------------------------------------------------
-
-    result[
-        "predicted_cost_overrun_pct"
-    ] = np.nan
-
-    result[
-        "future_delay_probability"
-    ] = np.nan
-
-    result[
-        "future_progress_stall_probability"
-    ] = np.nan
-
-    result[
-        "cost_risk_score"
-    ] = np.nan
-
-    result[
-        "overall_risk_score"
-    ] = np.nan
-
-    result[
-        "risk_level"
-    ] = None
-
-    # --------------------------------------------------------
-    # ML data
-    # --------------------------------------------------------
-
-    ml = load_ml_ready()
-
-    if ml.empty:
-        return result
-
-    # --------------------------------------------------------
-    # Latest snapshot
-    # --------------------------------------------------------
-
-    sort_columns = [
-        column
-        for column in [
-            "snapshot_year",
-            "snapshot_month_num",
-        ]
-        if column in ml.columns
-    ]
-
-    if sort_columns:
-        latest_rows = (
-            ml
-            .sort_values(
-                sort_columns
-            )
-            .drop_duplicates(
-                "project_code",
-                keep="last",
-            )
-        )
-
-    else:
-        latest_rows = (
-            ml
-            .drop_duplicates(
-                "project_code",
-                keep="last",
-            )
-        )
-
-    # --------------------------------------------------------
-    # Only selected projects
-    # --------------------------------------------------------
-
-    selected_codes = set(
-        result[
-            "project_code"
-        ]
-        .astype(str)
-    )
-
-    latest_rows = latest_rows[
-        latest_rows[
-            "project_code"
-        ]
-        .astype(str)
-        .isin(
-            selected_codes
-        )
-    ].copy()
-
-    if latest_rows.empty:
-        return result
-
-    # --------------------------------------------------------
-    # Batch scoring
-    # --------------------------------------------------------
-
-    scores = (
-        model_scores_from_features_batch(
-            latest_rows,
-            batch_size=256,
-        )
-    )
-
-    if scores.empty:
-        return result
-
-    # --------------------------------------------------------
-    # Normalize codes
-    # --------------------------------------------------------
-
-    result[
-        "project_code"
-    ] = (
-        result["project_code"]
-        .apply(
-            _to_project_code
-        )
-    )
-
-    scores[
-        "project_code"
-    ] = (
-        scores["project_code"]
-        .apply(
-            _to_project_code
-        )
-    )
-
-    scores = scores.drop_duplicates(
-        "project_code",
-        keep="last",
-    )
-
-    # --------------------------------------------------------
-    # Merge
-    # --------------------------------------------------------
-
-    result = result.merge(
-        scores,
-        on="project_code",
-        how="left",
-        suffixes=(
-            "",
-            "_risk",
-        ),
-    )
-
-    # --------------------------------------------------------
-    # Promote calculated columns
-    # --------------------------------------------------------
-
-    risk_columns = [
-        "predicted_cost_overrun_pct",
-        "future_delay_probability",
-        "future_progress_stall_probability",
-        "cost_risk_score",
-        "overall_risk_score",
-        "risk_level",
-    ]
-
-    for column in risk_columns:
-        risk_column = (
-            f"{column}_risk"
-        )
-
-        if (
-            risk_column
-            in result.columns
-        ):
-            result[column] = (
-                result[risk_column]
-            )
-
-            result.drop(
-                columns=[
-                    risk_column
-                ],
-                inplace=True,
-            )
-
-    return result
 
 
 # ============================================================
@@ -1563,6 +1521,52 @@ def get_matching_projects(
         ),
     }
 
+def _load_project_master_row(
+    project_code: str,
+) -> Optional[pd.Series]:
+    """
+    Load the master record for ONE project only.
+
+    This avoids loading the complete project_master table
+    when the detail endpoint only needs a single project.
+    """
+
+    code = _to_project_code(
+        project_code
+    )
+
+    if not code:
+        return None
+
+    query = text(
+        """
+        SELECT *
+        FROM "project_master"
+
+        WHERE CAST(
+            project_code AS TEXT
+        ) = :project_code
+
+        LIMIT 1
+        """
+    )
+
+    with db.engine.connect() as connection:
+        row = (
+            connection.execute(
+                query,
+                {
+                    "project_code": code,
+                },
+            )
+            .mappings()
+            .first()
+        )
+
+    if row is None:
+        return None
+
+    return pd.Series(row)
 
 # ============================================================
 # PROJECT DETAIL
@@ -1579,19 +1583,14 @@ def get_project_detail(
         project_code
     )
 
-    master = load_master()
+    row = _load_project_master_row(
+        code
+    )
 
-    row_df = master[
-        master["project_code"]
-        == code
-    ].copy()
-
-    if row_df.empty:
+    if row is None:
         raise ValueError(
             f"Project {code} was not found."
         )
-
-    row = row_df.iloc[0]
 
     history = project_history(
         code
@@ -2024,12 +2023,9 @@ def get_project_detail(
 
     if ml_row is not None:
 
-        ml_project = load_ml_ready()
-
-        ml_project = ml_project[
-            ml_project["project_code"]
-            == code
-        ].copy()
+        ml_project = _load_project_ml_history(
+            code
+        )
 
         if not ml_project.empty:
 
