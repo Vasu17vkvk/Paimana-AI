@@ -4,16 +4,13 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.extensions import db
 
 from app.services.project_analytics_service import (
-    load_ml_ready,
     model_scores_from_features_batch,
 )
-
-
 
 
 # ============================================================
@@ -21,8 +18,14 @@ from app.services.project_analytics_service import (
 # ============================================================
 
 def _to_project_code(value: Any) -> str:
-    if value is None or pd.isna(value):
+    if value is None:
         return ""
+
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
 
     try:
         number = float(value)
@@ -37,8 +40,14 @@ def _to_project_code(value: Any) -> str:
 
 
 def _clean_string(value: Any) -> str:
-    if value is None or pd.isna(value):
+    if value is None:
         return ""
+
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
 
     return str(value).strip()
 
@@ -47,7 +56,13 @@ def _safe_number(
     value: Any,
     default: float = 0.0,
 ) -> float:
-    if value is None or pd.isna(value):
+    if value is None:
+        return default
+
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
         return default
 
     try:
@@ -87,50 +102,204 @@ def _risk_level_from_score(
     return "Low"
 
 
-def _load_table(
-    table_name: str,
-) -> pd.DataFrame:
-
-    query = text(
-        f'''
-        SELECT *
-        FROM "{table_name}"
-        '''
-    )
-
-    with db.engine.connect() as connection:
-        df = pd.read_sql(
-            query,
-            connection,
-        )
-
-    if df.empty:
-        raise ValueError(
-            f"PostgreSQL table '{table_name}' is empty."
-        )
-
-    return df.loc[
-        :,
-        ~df.columns.duplicated(),
-    ].copy()
-
-
 # ============================================================
 # LOAD MASTER DATA
 # ============================================================
 
-def _load_dashboard_data() -> pd.DataFrame:
-    master = _load_table(
-        "project_master"
-    )
+def _load_dashboard_data(
+    *,
+    period: str | None = None,
+    ministry: str | None = None,
+    sector: str | None = None,
+    state: str | None = None,
+    search: str | None = None,
+) -> pd.DataFrame:
+    """
+    Load only the columns required by the dashboard.
 
-    if "project_code" not in master.columns:
-        raise ValueError(
-            "project_master is missing project_code."
+    Filtering is pushed into PostgreSQL instead of loading
+    the complete project_master table and filtering in Pandas.
+    """
+
+    columns = [
+        "project_code",
+        "project_name",
+        "ministry",
+        "sector",
+        "flash_state",
+        "original_cost_cr",
+        "revised_cost_cr",
+        "revised_cost_analytical_cr",
+        "expenditure_cr",
+        "delay_days",
+        "delay_months",
+        "is_delayed",
+        "has_cost_overrun",
+        "flash_latest_physical_progress",
+        "schedule_status",
+        "is_accelerated",
+        "revised_end_date",
+    ]
+
+    query_parts = [
+        "SELECT",
+        ",\n            ".join(
+            f'pm."{column}"'
+            for column in columns
+        ),
+        'FROM "project_master" pm',
+        "WHERE pm.project_code IS NOT NULL",
+    ]
+
+    params: dict[str, Any] = {}
+
+    # --------------------------------------------------------
+    # MINISTRY FILTER
+    # --------------------------------------------------------
+
+    if ministry and ministry != "All Ministries":
+        query_parts.append(
+            'AND pm."ministry" = :ministry'
         )
 
-    master["project_code"] = (
-        master["project_code"]
+        params["ministry"] = ministry
+
+    # --------------------------------------------------------
+    # SECTOR FILTER
+    # --------------------------------------------------------
+
+    if sector and sector != "All Sectors":
+        query_parts.append(
+            'AND pm."sector" = :sector'
+        )
+
+        params["sector"] = sector
+
+    # --------------------------------------------------------
+    # STATE FILTER
+    # --------------------------------------------------------
+
+    if state and state != "All States":
+        query_parts.append(
+            'AND pm."flash_state" = :state'
+        )
+
+        params["state"] = state
+
+    # --------------------------------------------------------
+    # SEARCH
+    # --------------------------------------------------------
+
+    if search:
+
+        search_value = str(
+            search
+        ).strip()
+
+        if search_value:
+
+            query_parts.append(
+                """
+                AND (
+                    CAST(pm.project_code AS TEXT)
+                        ILIKE :search_pattern
+
+                    OR COALESCE(
+                        pm.project_name,
+                        ''
+                    ) ILIKE :search_pattern
+
+                    OR COALESCE(
+                        pm.ministry,
+                        ''
+                    ) ILIKE :search_pattern
+
+                    OR COALESCE(
+                        pm.sector,
+                        ''
+                    ) ILIKE :search_pattern
+                )
+                """
+            )
+
+            params["search_pattern"] = (
+                f"%{search_value}%"
+            )
+
+    # --------------------------------------------------------
+    # PERIOD
+    #
+    # Preserve the old behavior:
+    # a project appears for a selected month only if it has
+    # a monthly-history snapshot for that month.
+    # --------------------------------------------------------
+
+    target_month = _period_to_month(
+        period
+    )
+
+    if target_month is not None:
+
+        query_parts.append(
+            """
+            AND EXISTS (
+                SELECT 1
+                FROM "paimana_monthly_history" mh
+
+                WHERE CAST(
+                    mh.project_code
+                    AS TEXT
+                )
+                =
+                CAST(
+                    pm.project_code
+                    AS TEXT
+                )
+
+                AND mh.snapshot_month IS NOT NULL
+
+                AND date_trunc(
+                    'month',
+                    CAST(mh.snapshot_month AS DATE)
+                )
+                =
+                :target_month
+            )
+            """
+        )
+
+        params["target_month"] = (
+            target_month.to_pydatetime()
+        )
+
+    query_parts.append(
+        "ORDER BY pm.project_code"
+    )
+
+    query = text(
+        "\n".join(
+            query_parts
+        )
+    )
+
+    with db.engine.connect() as connection:
+
+        frame = pd.read_sql(
+            query,
+            connection,
+            params=params,
+        )
+
+    if frame.empty:
+        return frame
+
+    frame = frame.loc[
+        :,
+        ~frame.columns.duplicated(),
+    ].copy()
+
+    frame["project_code"] = (
+        frame["project_code"]
         .apply(_to_project_code)
     )
 
@@ -144,26 +313,19 @@ def _load_dashboard_data() -> pd.DataFrame:
         "is_delayed",
         "has_cost_overrun",
         "flash_latest_physical_progress",
+        "is_accelerated",
     ]
 
     for column in numeric_columns:
-        if column in master.columns:
-            master[column] = pd.to_numeric(
-                master[column],
+
+        if column in frame.columns:
+
+            frame[column] = pd.to_numeric(
+                frame[column],
                 errors="coerce",
             )
 
-    if "flash_state" not in master.columns:
-        master["flash_state"] = ""
-
-    master["flash_state"] = (
-        master["flash_state"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-    )
-
-    return master
+    return frame
 
 
 # ============================================================
@@ -184,84 +346,18 @@ def _period_to_month(
     if not value:
         return None
 
-    try:
-        parsed = pd.to_datetime(
-            value,
-            format="%B %Y",
-            errors="coerce",
-        )
-
-        if pd.notna(parsed):
-            return parsed.to_period(
-                "M"
-            ).to_timestamp()
-
-    except Exception:
-        pass
-
-    return None
-
-
-def _filter_projects_by_period(
-    projects: pd.DataFrame,
-    period: str | None,
-    monthly: pd.DataFrame,
-) -> pd.DataFrame:
-
-    target_month = _period_to_month(
-        period
-    )
-
-    if target_month is None:
-        return projects
-
-    
-
-    if (
-        "project_code" not in monthly.columns
-        or "snapshot_month" not in monthly.columns
-    ):
-        return projects.iloc[0:0].copy()
-
-    monthly["project_code"] = (
-        monthly["project_code"]
-        .apply(_to_project_code)
-    )
-
-    monthly["snapshot_month"] = pd.to_datetime(
-        monthly["snapshot_month"],
+    parsed = pd.to_datetime(
+        value,
+        format="%B %Y",
         errors="coerce",
     )
 
-    monthly = monthly.dropna(
-        subset=[
-            "project_code",
-            "snapshot_month",
-        ]
-    ).copy()
+    if pd.isna(parsed):
+        return None
 
-    monthly["snapshot_period"] = (
-        monthly["snapshot_month"]
-        .dt.to_period("M")
-        .dt.to_timestamp()
-    )
-
-    matching_codes = set(
-        monthly.loc[
-            monthly["snapshot_period"].eq(
-                target_month
-            ),
-            "project_code",
-        ]
-    )
-
-    if not matching_codes:
-        return projects.iloc[0:0].copy()
-
-    return projects[
-        projects["project_code"]
-        .isin(matching_codes)
-    ].copy()
+    return parsed.to_period(
+        "M"
+    ).to_timestamp()
 
 
 # ============================================================
@@ -272,46 +368,161 @@ def _attach_ml_risk_scores(
     projects: pd.DataFrame,
     period: str | None = None,
 ) -> pd.DataFrame:
+    """
+    Attach ML risk scores to dashboard projects.
+
+    Important:
+    the old implementation loaded ALL rows from
+    paimana_ml_ready and only then filtered them.
+
+    This implementation asks PostgreSQL for only the latest
+    eligible snapshot belonging to the projects currently
+    visible in the dashboard.
+    """
 
     result = projects.copy()
 
-    # --------------------------------------------------------
-    # Initialize output columns
-    # --------------------------------------------------------
+    result[
+        "predicted_cost_overrun_pct"
+    ] = np.nan
 
-    result["predicted_cost_overrun_pct"] = np.nan
-    result["future_delay_probability"] = np.nan
-    result["future_progress_stall_probability"] = np.nan
-    result["cost_risk_score"] = np.nan
-    result["overall_risk_score"] = np.nan
-    result["risk_level_ml"] = None
+    result[
+        "future_delay_probability"
+    ] = np.nan
+
+    result[
+        "future_progress_stall_probability"
+    ] = np.nan
+
+    result[
+        "cost_risk_score"
+    ] = np.nan
+
+    result[
+        "overall_risk_score"
+    ] = np.nan
+
+    result[
+        "risk_level_ml"
+    ] = None
 
     if result.empty:
         return result
 
-    # Normalize project codes once
     result["project_code"] = (
         result["project_code"]
         .apply(_to_project_code)
     )
 
-    selected_codes = set(
-        result["project_code"].astype(str)
-    )
+    selected_codes = [
+        code
+        for code
+        in result[
+            "project_code"
+        ].astype(str).unique()
+        if code
+    ]
 
     if not selected_codes:
         return result
 
     # --------------------------------------------------------
-    # Load ML data
+    # Select only the latest ML row for each selected project.
     # --------------------------------------------------------
 
-    ml = load_ml_ready()
+    query_sql = """
+        SELECT DISTINCT ON (
+            CAST(project_code AS TEXT)
+        ) *
+
+        FROM "paimana_ml_ready"
+
+        WHERE project_code IS NOT NULL
+
+          AND CAST(
+              project_code
+              AS TEXT
+          ) IN :project_codes
+    """
+
+    params: dict[str, Any] = {
+        "project_codes": selected_codes,
+    }
+
+    target_month = _period_to_month(
+        period
+    )
+
+    # --------------------------------------------------------
+    # For a selected historical period, use the latest ML
+    # snapshot available on or before that month.
+    # --------------------------------------------------------
+
+    if target_month is not None:
+
+        query_sql += """
+            AND (
+                CAST(
+                    snapshot_year
+                    AS INTEGER
+                ) < :target_year
+
+                OR (
+                    CAST(
+                        snapshot_year
+                        AS INTEGER
+                    ) = :target_year
+
+                    AND CAST(
+                        snapshot_month_num
+                        AS INTEGER
+                    ) <= :target_month_num
+                )
+            )
+        """
+
+        params["target_year"] = int(
+            target_month.year
+        )
+
+        params[
+            "target_month_num"
+        ] = int(
+            target_month.month
+        )
+
+    query_sql += """
+        ORDER BY
+            CAST(project_code AS TEXT),
+            snapshot_year DESC,
+            snapshot_month_num DESC
+    """
+
+    query = (
+        text(query_sql)
+        .bindparams(
+            bindparam(
+                "project_codes",
+                expanding=True,
+            )
+        )
+    )
+
+    with db.engine.connect() as connection:
+
+        ml = pd.read_sql(
+            query,
+            connection,
+            params=params,
+        )
 
     if ml.empty:
         return result
 
-    ml = ml.copy()
+    ml = ml.loc[
+        :,
+        ~ml.columns.duplicated(),
+    ].copy()
 
     ml["project_code"] = (
         ml["project_code"]
@@ -319,100 +530,24 @@ def _attach_ml_risk_scores(
     )
 
     # --------------------------------------------------------
-    # IMPORTANT OPTIMIZATION:
-    # Keep only projects visible in this dashboard request
-    # before snapshot filtering / sorting / deduplication.
-    # --------------------------------------------------------
-
-    ml = ml[
-        ml["project_code"].isin(selected_codes)
-    ].copy()
-
-    if ml.empty:
-        return result
-
-    # --------------------------------------------------------
-    # Build snapshot date
-    # --------------------------------------------------------
-
-    if (
-        "snapshot_year" in ml.columns
-        and "snapshot_month_num" in ml.columns
-    ):
-        ml["snapshot_date"] = pd.to_datetime(
-            ml["snapshot_year"].astype("Int64").astype(str)
-            + "-"
-            + ml["snapshot_month_num"]
-            .astype("Int64")
-            .astype(str)
-            .str.zfill(2)
-            + "-01",
-            errors="coerce",
-        )
-
-    target_month = _period_to_month(period)
-
-    # --------------------------------------------------------
-    # Select ML snapshot
-    # --------------------------------------------------------
-
-    if (
-        target_month is not None
-        and "snapshot_date" in ml.columns
-    ):
-        eligible = ml[
-            ml["snapshot_date"].le(target_month)
-        ].copy()
-
-        if not eligible.empty:
-            ml = eligible
-
-    if ml.empty:
-        return result
-
-    # --------------------------------------------------------
-    # Keep latest snapshot per project
-    # --------------------------------------------------------
-
-    sort_columns = [
-        column
-        for column in [
-            "snapshot_year",
-            "snapshot_month_num",
-        ]
-        if column in ml.columns
-    ]
-
-    if sort_columns:
-        ml = ml.sort_values(
-            sort_columns
-        )
-
-    latest_rows = (
-        ml
-        .drop_duplicates(
-            "project_code",
-            keep="last",
-        )
-        .copy()
-    )
-
-    if latest_rows.empty:
-        return result
-
-    # --------------------------------------------------------
-    # BATCH MODEL SCORING
+    # Keep the existing ML calculation for now.
+    #
+    # We will remove runtime ML scoring later when the
+    # predictions table becomes the primary read model.
     # --------------------------------------------------------
 
     scores = model_scores_from_features_batch(
-        latest_rows,
+        ml,
         batch_size=256,
     )
 
     if scores.empty:
         return result
 
-    scores = scores.copy()
+    scores = scores.loc[
+        :,
+        ~scores.columns.duplicated(),
+    ].copy()
 
     scores["project_code"] = (
         scores["project_code"]
@@ -423,10 +558,6 @@ def _attach_ml_risk_scores(
         "project_code",
         keep="last",
     )
-
-    # --------------------------------------------------------
-    # Select only required scoring columns
-    # --------------------------------------------------------
 
     risk_columns = [
         "project_code",
@@ -454,10 +585,6 @@ def _attach_ml_risk_scores(
         }
     )
 
-    # --------------------------------------------------------
-    # Merge scores back
-    # --------------------------------------------------------
-
     result = result.merge(
         scores,
         on="project_code",
@@ -468,29 +595,29 @@ def _attach_ml_risk_scores(
         ),
     )
 
-    # --------------------------------------------------------
-    # Resolve merged columns
-    # --------------------------------------------------------
-
-    risk_columns_to_apply = [
+    for column in [
         "predicted_cost_overrun_pct",
         "future_delay_probability",
         "future_progress_stall_probability",
         "cost_risk_score",
         "overall_risk_score",
         "risk_level_ml",
-    ]
+    ]:
 
-    for column in risk_columns_to_apply:
-
-        risk_column = f"{column}_risk"
+        risk_column = (
+            f"{column}_risk"
+        )
 
         if risk_column in result.columns:
 
-            result[column] = result[risk_column]
+            result[column] = (
+                result[risk_column]
+            )
 
             result.drop(
-                columns=[risk_column],
+                columns=[
+                    risk_column
+                ],
                 inplace=True,
             )
 
@@ -506,7 +633,9 @@ def _schedule_status(
 ) -> str:
 
     existing = _clean_string(
-        row.get("schedule_status")
+        row.get(
+            "schedule_status"
+        )
     )
 
     if existing:
@@ -538,12 +667,21 @@ def _schedule_status(
         "revised_end_date"
     )
 
-    if (
-        revised_date is None
-        or pd.isna(revised_date)
-        or not _clean_string(
-            revised_date
-        )
+    if revised_date is None:
+        return "No Revised Date"
+
+    try:
+        if pd.isna(revised_date):
+            return "No Revised Date"
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        pass
+
+    if not _clean_string(
+        revised_date
     ):
         return "No Revised Date"
 
@@ -559,7 +697,9 @@ def _cost_status(
 ) -> str:
 
     existing = _clean_string(
-        row.get("cost_status")
+        row.get(
+            "cost_status"
+        )
     )
 
     if existing:
@@ -582,11 +722,18 @@ def _cost_status(
         "revised_cost_cr"
     )
 
-    if (
-        revised_cost is None
-        or pd.isna(revised_cost)
-    ):
+    if revised_cost is None:
         return "Revised Cost Not Reported"
+
+    try:
+        if pd.isna(revised_cost):
+            return "Revised Cost Not Reported"
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        pass
 
     return "No Cost Change"
 
@@ -617,6 +764,7 @@ def _build_project_records(
             risk_level = "Low"
 
         else:
+
             risk_score = round(
                 _safe_number(
                     score_value
@@ -636,26 +784,27 @@ def _build_project_records(
             )
         )
 
-        revised_cost_raw = row.get(
-            "revised_cost_cr"
-        )
-
         revised_cost = _safe_number(
-            revised_cost_raw,
+            row.get(
+                "revised_cost_cr"
+            ),
             0.0,
         )
 
-        # Analytical fallback for missing revised cost.
         if (
             revised_cost <= 0
-            and "revised_cost_analytical_cr"
+            and
+            "revised_cost_analytical_cr"
             in row.index
         ):
-            analytical_cost = _safe_number(
-                row.get(
-                    "revised_cost_analytical_cr"
-                ),
-                0.0,
+
+            analytical_cost = (
+                _safe_number(
+                    row.get(
+                        "revised_cost_analytical_cr"
+                    ),
+                    0.0,
+                )
             )
 
             if analytical_cost > 0:
@@ -663,8 +812,6 @@ def _build_project_records(
                     analytical_cost
                 )
 
-        # If there is genuinely no revised cost,
-        # use original cost for portfolio comparison.
         if revised_cost <= 0:
             revised_cost = (
                 original_cost
@@ -796,73 +943,106 @@ def _build_project_records(
 
 def get_dashboard_filter_options() -> dict[str, Any]:
 
-    master = _load_dashboard_data()
-
-    def unique_values(
+    def distinct_values(
         column: str,
     ) -> list[str]:
 
-        if column not in master.columns:
-            return []
+        query = text(
+            f"""
+            SELECT DISTINCT
+                "{column}" AS value
 
-        values = (
-            master[column]
-            .dropna()
-            .astype(str)
-            .str.strip()
+            FROM "project_master"
+
+            WHERE "{column}" IS NOT NULL
+
+              AND TRIM(
+                    CAST(
+                        "{column}"
+                        AS TEXT
+                    )
+                  ) <> ''
+
+            ORDER BY value
+            """
         )
 
-        return sorted(
-            [
-                value
-                for value in values.unique()
-                if value
-            ]
+        with db.engine.connect() as connection:
+
+            rows = (
+                connection.execute(
+                    query
+                )
+                .scalars()
+                .all()
+            )
+
+        return [
+            str(value).strip()
+            for value in rows
+            if str(value).strip()
+        ]
+
+    # --------------------------------------------------------
+    # Period options are generated directly by PostgreSQL.
+    # --------------------------------------------------------
+
+    period_query = text(
+        """
+        SELECT
+            TO_CHAR(
+                date_trunc(
+                    'month',
+                    CAST(snapshot_month AS DATE)
+                ),
+                'FMMonth YYYY'
+            ) AS label
+
+        FROM "paimana_monthly_history"
+
+        WHERE snapshot_month IS NOT NULL
+
+        GROUP BY date_trunc(
+            'month',
+            CAST(snapshot_month AS DATE)
         )
 
-    monthly = _load_table(
-        "paimana_monthly_history"
+        ORDER BY date_trunc(
+            'month',
+            CAST(snapshot_month AS DATE)
+        ) DESC
+        """
     )
 
-    periods: list[str] = []
+    with db.engine.connect() as connection:
 
-    if "snapshot_month" in monthly.columns:
-
-        dates = pd.to_datetime(
-            monthly["snapshot_month"],
-            errors="coerce",
-        ).dropna()
-
-        periods = sorted(
-            {
-                date.strftime(
-                    "%B %Y"
-                )
-                for date in dates
-            },
-            key=lambda value:
-                pd.to_datetime(
-                    value,
-                    format="%B %Y",
-                ),
-            reverse=True,
+        period_rows = (
+            connection.execute(
+                period_query
+            )
+            .scalars()
+            .all()
         )
 
     return {
-        "periods": periods,
+        "periods": [
+            str(value)
+            for value in period_rows
+            if value
+        ],
 
         "ministries":
-            unique_values(
+            distinct_values(
                 "ministry"
             ),
 
         "sectors":
-            unique_values(
+            distinct_values(
                 "sector"
             ),
 
         "states":
-            unique_values(
+            distinct_values(
                 "flash_state"
             ),
 
@@ -886,6 +1066,188 @@ def get_dashboard_filter_options() -> dict[str, Any]:
 
 
 # ============================================================
+# MONTHLY TREND
+# ============================================================
+
+def _get_monthly_trend(
+    selected_codes: list[str],
+) -> list[dict[str, Any]]:
+
+    if not selected_codes:
+        return []
+
+    query = (
+        text(
+            """
+            SELECT
+                date_trunc(
+                    'month',
+                    CAST(snapshot_month AS DATE)
+                ) AS snapshot_month,
+
+                COUNT(
+                    DISTINCT
+                    CAST(
+                        project_code
+                        AS TEXT
+                    )
+                ) AS projects,
+
+                COUNT(
+                    DISTINCT CASE
+                        WHEN COALESCE(
+                            delay_days,
+                            0
+                        ) > 0
+
+                        THEN CAST(
+                            project_code
+                            AS TEXT
+                        )
+                    END
+                ) AS delayed,
+
+                COUNT(
+                    DISTINCT CASE
+                        WHEN COALESCE(
+                            cost_overrun_pct,
+                            0
+                        ) > 0
+
+                        THEN CAST(
+                            project_code
+                            AS TEXT
+                        )
+                    END
+                ) AS cost_risk
+
+            FROM "paimana_monthly_history"
+
+            WHERE project_code IS NOT NULL
+
+              AND snapshot_month IS NOT NULL
+
+              AND CAST(
+                    project_code
+                    AS TEXT
+                  ) IN :project_codes
+
+            GROUP BY date_trunc(
+                'month',
+                CAST(snapshot_month AS DATE)
+            )
+
+            ORDER BY snapshot_month DESC
+
+            LIMIT 12
+            """
+        )
+        .bindparams(
+            bindparam(
+                "project_codes",
+                expanding=True,
+            )
+        )
+    )
+
+    with db.engine.connect() as connection:
+
+        rows = (
+            connection.execute(
+                query,
+                {
+                    "project_codes":
+                        selected_codes
+                },
+            )
+            .mappings()
+            .all()
+        )
+
+    rows = list(
+        reversed(rows)
+    )
+
+    trend_rows: list[
+        dict[str, Any]
+    ] = []
+
+    for row in rows:
+
+        snapshot_month = (
+            row[
+                "snapshot_month"
+            ]
+        )
+
+        total = int(
+            row[
+                "projects"
+            ]
+            or 0
+        )
+
+        delayed = int(
+            row[
+                "delayed"
+            ]
+            or 0
+        )
+
+        cost_risk = int(
+            row[
+                "cost_risk"
+            ]
+            or 0
+        )
+
+        trend_rows.append(
+            {
+                "month":
+                    snapshot_month.strftime(
+                        "%b"
+                    ),
+
+                "year":
+                    int(
+                        snapshot_month.year
+                    ),
+
+                "label":
+                    snapshot_month.strftime(
+                        "%b %Y"
+                    ),
+
+                "projects":
+                    total,
+
+                "highRisk":
+                    0,
+
+                "delayed":
+                    delayed,
+
+                "delayRate":
+                    round(
+                        (
+                            delayed
+                            / total
+                            * 100
+                        )
+                        if total
+                        else 0,
+                        2,
+                    ),
+
+                "costRisk":
+                    cost_risk,
+            }
+        )
+
+    return trend_rows
+
+
+# ============================================================
 # DASHBOARD
 # ============================================================
 
@@ -900,134 +1262,20 @@ def get_dashboard(
     search: str | None = None,
 ) -> dict[str, Any]:
 
-    projects = _load_dashboard_data()
+    # --------------------------------------------------------
+    # Load already-filtered project data from PostgreSQL.
+    # --------------------------------------------------------
 
-    monthly = _load_table(
-        "paimana_monthly_history"
+    projects = _load_dashboard_data(
+        period=period,
+        ministry=ministry,
+        sector=sector,
+        state=state,
+        search=search,
     )
 
     # --------------------------------------------------------
-    # PERIOD
-    # --------------------------------------------------------
-
-    projects = _filter_projects_by_period(
-        projects,
-        period,
-        monthly,
-    )
-
-    # --------------------------------------------------------
-    # MINISTRY
-    # --------------------------------------------------------
-
-    if (
-        ministry
-        and ministry != "All Ministries"
-    ):
-        projects = projects[
-            projects[
-                "ministry"
-            ]
-            .astype(str)
-            .eq(ministry)
-        ]
-
-    # --------------------------------------------------------
-    # SECTOR
-    # --------------------------------------------------------
-
-    if (
-        sector
-        and sector != "All Sectors"
-    ):
-        projects = projects[
-            projects[
-                "sector"
-            ]
-            .astype(str)
-            .eq(sector)
-        ]
-
-    # --------------------------------------------------------
-    # STATE
-    # --------------------------------------------------------
-
-    if (
-        state
-        and state != "All States"
-    ):
-        projects = projects[
-            projects[
-                "flash_state"
-            ]
-            .astype(str)
-            .eq(state)
-        ]
-
-    # --------------------------------------------------------
-    # SEARCH
-    # --------------------------------------------------------
-
-    if search:
-
-        search_value = str(
-            search
-        ).strip().lower()
-
-        if search_value:
-
-            mask = (
-                projects[
-                    "project_name"
-                ]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    search_value,
-                    na=False,
-                    regex=False,
-                )
-                |
-                projects[
-                    "project_code"
-                ]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    search_value,
-                    na=False,
-                    regex=False,
-                )
-                |
-                projects[
-                    "ministry"
-                ]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    search_value,
-                    na=False,
-                    regex=False,
-                )
-                |
-                projects[
-                    "sector"
-                ]
-                .astype(str)
-                .str.lower()
-                .str.contains(
-                    search_value,
-                    na=False,
-                    regex=False,
-                )
-            )
-
-            projects = projects[
-                mask
-            ]
-
-    # --------------------------------------------------------
-    # ML RISK
+    # Add current ML risk.
     # --------------------------------------------------------
 
     projects = _attach_ml_risk_scores(
@@ -1057,6 +1305,7 @@ def get_dashboard(
         risk
         and risk != "All Risk Levels"
     ):
+
         projects = projects[
             projects[
                 "risk_level_ui"
@@ -1082,7 +1331,7 @@ def get_dashboard(
         ]
 
     # --------------------------------------------------------
-    # BUILD RECORDS
+    # BUILD PROJECT RECORDS
     # --------------------------------------------------------
 
     records = _build_project_records(
@@ -1100,16 +1349,19 @@ def get_dashboard(
     high_risk_projects = sum(
         1
         for item in records
-        if item["riskLevel"]
+        if item[
+            "riskLevel"
+        ]
         in {
             "Critical",
             "High",
         }
     )
 
-    # Use curated master flag,
-    # not revised > original.
-    if "has_cost_overrun" in projects.columns:
+    if (
+        "has_cost_overrun"
+        in projects.columns
+    ):
 
         cost_risk_projects = int(
             pd.to_numeric(
@@ -1128,12 +1380,19 @@ def get_dashboard(
         cost_risk_projects = sum(
             1
             for item in records
-            if item["revisedCost"]
-            > item["originalCost"]
+            if item[
+                "revisedCost"
+            ]
+            >
+            item[
+                "originalCost"
+            ]
         )
 
-    # Use curated delay flag.
-    if "is_delayed" in projects.columns:
+    if (
+        "is_delayed"
+        in projects.columns
+    ):
 
         delayed_projects = int(
             pd.to_numeric(
@@ -1152,7 +1411,9 @@ def get_dashboard(
         delayed_projects = sum(
             1
             for item in records
-            if item["status"]
+            if item[
+                "status"
+            ]
             == "Delayed"
         )
 
@@ -1170,7 +1431,9 @@ def get_dashboard(
 
     for item in records:
 
-        level = item["riskLevel"]
+        level = item[
+            "riskLevel"
+        ]
 
         if level not in risk_distribution:
             level = "Low"
@@ -1181,18 +1444,18 @@ def get_dashboard(
 
     # --------------------------------------------------------
     # EARLY WARNING CENTER
-    #
-    # Active warning = risk >= 70
-    # Immediate warning = risk >= 85
-    # Same thresholds as ML warning engine.
     # --------------------------------------------------------
 
     immediate_warnings = sum(
         1
         for item in records
         if (
-            item["riskScore"] is not None
-            and item["riskScore"] >= 85
+            item["riskScore"]
+            is not None
+
+            and
+            item["riskScore"]
+            >= 85
         )
     )
 
@@ -1200,14 +1463,22 @@ def get_dashboard(
         1
         for item in records
         if (
-            item["riskScore"] is not None
-            and 70 <= item["riskScore"] < 85
+            item["riskScore"]
+            is not None
+
+            and
+            70
+            <=
+            item["riskScore"]
+            <
+            85
         )
     )
 
     active_warnings = (
         immediate_warnings
-        + high_priority_warnings
+        +
+        high_priority_warnings
     )
 
     early_warning_center = {
@@ -1251,185 +1522,25 @@ def get_dashboard(
     )
 
     # --------------------------------------------------------
-        # --------------------------------------------------------
     # MONTHLY TREND
     #
-    # This respects the selected portfolio filters.
+    # Important:
+    # only project codes surviving all dashboard filters
+    # are included.
     # --------------------------------------------------------
 
-    monthly = monthly.copy()
+    selected_codes = [
+        str(code)
+        for code
+        in projects[
+            "project_code"
+        ].astype(str).unique()
+        if str(code).strip()
+    ]
 
-    monthly["project_code"] = (
-        monthly["project_code"]
-        .apply(_to_project_code)
+    trend_rows = _get_monthly_trend(
+        selected_codes
     )
-
-    monthly["snapshot_month"] = pd.to_datetime(
-        monthly["snapshot_month"],
-        errors="coerce",
-    )
-
-    monthly["delay_days"] = pd.to_numeric(
-        monthly.get("delay_days", 0),
-        errors="coerce",
-    ).fillna(0)
-
-    monthly["cost_overrun_pct"] = pd.to_numeric(
-        monthly.get("cost_overrun_pct", 0),
-        errors="coerce",
-    ).fillna(0)
-
-    monthly = monthly.dropna(
-        subset=[
-            "project_code",
-            "snapshot_month",
-        ]
-    )
-
-    # --------------------------------------------------------
-    # Only include currently filtered project codes.
-    # --------------------------------------------------------
-
-    selected_codes = set(
-        projects["project_code"].astype(str)
-    )
-
-    if selected_codes:
-        monthly = monthly[
-            monthly["project_code"].isin(
-                selected_codes
-            )
-        ].copy()
-    else:
-        monthly = monthly.iloc[0:0].copy()
-
-    # --------------------------------------------------------
-    # Fast monthly aggregation
-    #
-    # First reduce to one row per project/month.
-    # Then aggregate the month.
-    # --------------------------------------------------------
-
-    if not monthly.empty:
-
-        project_month = (
-            monthly
-            .groupby(
-                [
-                    "snapshot_month",
-                    "project_code",
-                ],
-                as_index=False,
-            )
-            .agg(
-                delay_flag=(
-                    "delay_days",
-                    lambda values: bool(
-                        values.gt(0).any()
-                    ),
-                ),
-                cost_risk_flag=(
-                    "cost_overrun_pct",
-                    lambda values: bool(
-                        values.gt(0).any()
-                    ),
-                ),
-            )
-        )
-
-        monthly_summary = (
-            project_month
-            .groupby(
-                "snapshot_month",
-                as_index=False,
-            )
-            .agg(
-                projects=(
-                    "project_code",
-                    "nunique",
-                ),
-                delayed=(
-                    "delay_flag",
-                    "sum",
-                ),
-                costRisk=(
-                    "cost_risk_flag",
-                    "sum",
-                ),
-            )
-        )
-
-    else:
-
-        monthly_summary = pd.DataFrame(
-            columns=[
-                "snapshot_month",
-                "projects",
-                "delayed",
-                "costRisk",
-            ]
-        )
-
-    trend_rows: list[
-        dict[str, Any]
-    ] = []
-
-    for row in monthly_summary.itertuples(
-        index=False
-    ):
-
-        snapshot_month = row.snapshot_month
-        total = int(row.projects)
-        delayed = int(row.delayed)
-        cost_risk = int(row.costRisk)
-
-        trend_rows.append(
-            {
-                "month":
-                    snapshot_month.strftime("%b"),
-
-                "year":
-                    int(snapshot_month.year),
-
-                "label":
-                    snapshot_month.strftime("%b %Y"),
-
-                "projects":
-                    total,
-
-                "highRisk":
-                    0,
-
-                "delayed":
-                    delayed,
-
-                "delayRate":
-                    round(
-                        (
-                            delayed
-                            / total
-                            * 100
-                        )
-                        if total
-                        else 0,
-                        2,
-                    ),
-
-                "costRisk":
-                    cost_risk,
-            }
-        )
-
-    trend_rows = sorted(
-        trend_rows,
-        key=lambda item: (
-            item["year"],
-            pd.to_datetime(
-                item["label"],
-                format="%b %Y",
-            ),
-        ),
-    )[-12:]
 
     latest_period = (
         trend_rows[-1]["label"]
