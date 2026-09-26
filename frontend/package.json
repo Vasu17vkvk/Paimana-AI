@@ -25,7 +25,8 @@
         "tailwindcss": "^4.3.3",
         "zustand": "^5.0.8",
         "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-        "jspdf": "^4.0.0"
+        "jspdf": "^4.0.0",
+        "@huggingface/transformers": "^4.3.0"
     },
     "devDependencies": {
         "@types/leaflet": "^1.9.22",
