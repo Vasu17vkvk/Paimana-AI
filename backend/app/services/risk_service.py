@@ -7,25 +7,6 @@ from app.extensions import db
 from app.ml import engine
 
 
-def load_ml_data() -> pd.DataFrame:
-    query = text("""
-        SELECT *
-        FROM "paimana_ml_ready"
-    """)
-
-    with db.engine.connect() as connection:
-        df = pd.read_sql(query, connection)
-
-    if df.empty:
-        raise FileNotFoundError(
-            "ML dataset table 'paimana_ml_ready' is empty"
-        )
-
-    df = df.loc[:, ~df.columns.duplicated()].copy()
-
-    return df
-
-
 def project_exists(project_code: str) -> bool:
     query = text("""
         SELECT 1
@@ -59,19 +40,37 @@ def get_project_risk(project_code: str) -> dict:
             f"Project not found: {project_code}"
         )
 
-    df = load_ml_data()
+    # --------------------------------------------------------
+    # Fetch ONLY the latest ML snapshot for this project.
+    #
+    # Previously this endpoint loaded the entire
+    # paimana_ml_ready table into Pandas and then filtered it.
+    # This query lets PostgreSQL do the filtering and sorting.
+    # --------------------------------------------------------
 
-    rows = df[
-        df["project_code"]
-        .astype(str)
-        .eq(project_code)
-    ]
+    query = text("""
+        SELECT *
+        FROM "paimana_ml_ready"
+        WHERE CAST(project_code AS TEXT) = :project_code
+        ORDER BY
+            snapshot_year DESC,
+            snapshot_month_num DESC
+        LIMIT 1
+    """)
+
+    with db.engine.connect() as connection:
+        row = connection.execute(
+            query,
+            {
+                "project_code": project_code,
+            },
+        ).mappings().first()
 
     # --------------------------------------------------------
     # Project exists, but ML prediction is unavailable.
     # --------------------------------------------------------
 
-    if rows.empty:
+    if row is None:
         return {
             "project_code": project_code,
             "snapshot_year": None,
@@ -92,17 +91,14 @@ def get_project_risk(project_code: str) -> dict:
         }
 
     # --------------------------------------------------------
-    # Latest ML snapshot
+    # The existing ML engine expects a pandas row.
+    # Convert ONLY this single database row to a Series.
+    #
+    # This preserves the existing prediction logic while
+    # avoiding the huge full-table DataFrame allocation.
     # --------------------------------------------------------
 
-    rows = rows.sort_values(
-        [
-            "snapshot_year",
-            "snapshot_month_num",
-        ]
-    )
-
-    latest_row = rows.iloc[-1]
+    latest_row = pd.Series(row)
 
     result = engine.predict_row(
         latest_row,
