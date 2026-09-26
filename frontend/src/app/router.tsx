@@ -19,6 +19,7 @@ const SectorMinistryAnalyticsPage = lazy(() => import("../features/ministry-anal
 const ProjectAnalyticsPage = lazy(() => import("../features/project-analytics/ProjectAnalyticsPage"));
 const GeographicViewPage = lazy(() => import("../features/geographic-view/GeographicViewPage"));
 const ReportsPage = lazy(() => import("../features/reports/ReportsPage"));
+const AIAssistantPage = lazy(() => import("../features/ai-assistant/AIAssistantPage"));
 
 function LazyPage({ children }: { children: React.ReactNode }) {
     return (
@@ -64,7 +65,7 @@ export const router = createBrowserRouter([
             { path: "project-analytics", element: <LazyPage><ProjectAnalyticsPage /></LazyPage> },
             { path: "ministry-analytics", element: <LazyPage><SectorMinistryAnalyticsPage /></LazyPage> },
             { path: "geographic-view", element: <LazyPage><GeographicViewPage /></LazyPage> },
-            { path: "ai-assistant", element: <ModulePlaceholder title="AI Project Assistant" /> },
+            { path: "ai-assistant", element: <LazyPage><AIAssistantPage /></LazyPage> },
             { path: "reports", element: <LazyPage><ReportsPage /></LazyPage> },
         ],
     },
