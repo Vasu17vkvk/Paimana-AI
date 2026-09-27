@@ -39,17 +39,6 @@ function LazyPage({ children }: { children: React.ReactNode }) {
     );
 }
 
-function ModulePlaceholder({ title }: { title: string }) {
-    return (
-        <div className="mx-auto max-w-[1500px]">
-            <div className="rounded-2xl border border-slate-200 bg-white p-8">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400">PAIMANA AI</div>
-                <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
-                <p className="mt-2 text-sm text-slate-500">This module will be connected to the Flask API in the next stage.</p>
-            </div>
-        </div>
-    );
-}
 
 export const router = createBrowserRouter([
     {
